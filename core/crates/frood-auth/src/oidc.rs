@@ -49,17 +49,33 @@ pub(crate) struct OidcProvider<'a> {
 }
 
 impl Auth {
-    pub(crate) async fn provider_metadata(&self, provider: &OidcProvider<'_>) -> Result<ProviderMetadata> {
-        if let Some(meta) = self.inner.oidc_cache.lock().expect("cache lock").get(provider.id) {
+    pub(crate) async fn provider_metadata(
+        &self,
+        provider: &OidcProvider<'_>,
+    ) -> Result<ProviderMetadata> {
+        if let Some(meta) = self
+            .inner
+            .oidc_cache
+            .lock()
+            .expect("cache lock")
+            .get(provider.id)
+        {
             return Ok(meta.clone());
         }
         let issuer = provider.issuer.trim_end_matches('/');
         let url = format!("{issuer}/.well-known/openid-configuration");
         let meta: ProviderMetadata = self.get_json(&url).await?;
         if meta.issuer.trim_end_matches('/') != issuer {
-            return Err(AuthError::Upstream(format!("{url} names issuer {:?}, expected {issuer:?}", meta.issuer)));
+            return Err(AuthError::Upstream(format!(
+                "{url} names issuer {:?}, expected {issuer:?}",
+                meta.issuer
+            )));
         }
-        self.inner.oidc_cache.lock().expect("cache lock").insert(provider.id.to_owned(), meta.clone());
+        self.inner
+            .oidc_cache
+            .lock()
+            .expect("cache lock")
+            .insert(provider.id.to_owned(), meta.clone());
         Ok(meta)
     }
 
@@ -113,26 +129,56 @@ impl Auth {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(AuthError::Upstream(format!("token endpoint answered {status}: {}", body.chars().take(300).collect::<String>())));
+            return Err(AuthError::Upstream(format!(
+                "token endpoint answered {status}: {}",
+                body.chars().take(300).collect::<String>()
+            )));
         }
-        let tokens: TokenResponse = response.json().await.map_err(|e| AuthError::Upstream(format!("bad token response: {e}")))?;
-        let id_token = tokens.id_token.ok_or_else(|| AuthError::Upstream("token response has no id_token".into()))?;
-        self.verify_id_token(&meta, provider, &id_token, nonce).await
+        let tokens: TokenResponse = response
+            .json()
+            .await
+            .map_err(|e| AuthError::Upstream(format!("bad token response: {e}")))?;
+        let id_token = tokens
+            .id_token
+            .ok_or_else(|| AuthError::Upstream("token response has no id_token".into()))?;
+        self.verify_id_token(&meta, provider, &id_token, nonce)
+            .await
     }
 
-    async fn verify_id_token(&self, meta: &ProviderMetadata, provider: &OidcProvider<'_>, id_token: &str, nonce: &str) -> Result<Identity> {
-        let header = jsonwebtoken::decode_header(id_token).map_err(|e| AuthError::Upstream(format!("bad ID token: {e}")))?;
-        let allowed = [Algorithm::RS256, Algorithm::RS384, Algorithm::RS512, Algorithm::PS256, Algorithm::ES256, Algorithm::ES384, Algorithm::EdDSA];
+    async fn verify_id_token(
+        &self,
+        meta: &ProviderMetadata,
+        provider: &OidcProvider<'_>,
+        id_token: &str,
+        nonce: &str,
+    ) -> Result<Identity> {
+        let header = jsonwebtoken::decode_header(id_token)
+            .map_err(|e| AuthError::Upstream(format!("bad ID token: {e}")))?;
+        let allowed = [
+            Algorithm::RS256,
+            Algorithm::RS384,
+            Algorithm::RS512,
+            Algorithm::PS256,
+            Algorithm::ES256,
+            Algorithm::ES384,
+            Algorithm::EdDSA,
+        ];
         if !allowed.contains(&header.alg) {
-            return Err(AuthError::Upstream(format!("ID token algorithm {:?} is not accepted", header.alg)));
+            return Err(AuthError::Upstream(format!(
+                "ID token algorithm {:?} is not accepted",
+                header.alg
+            )));
         }
         let jwks: JwkSet = self.get_json(&meta.jwks_uri).await?;
         let jwk = match &header.kid {
             Some(kid) => jwks.find(kid),
             None => jwks.keys.first(),
         }
-        .ok_or_else(|| AuthError::Upstream("no matching signing key in the provider's JWKS".into()))?;
-        let key = DecodingKey::from_jwk(jwk).map_err(|e| AuthError::Upstream(format!("unusable signing key: {e}")))?;
+        .ok_or_else(|| {
+            AuthError::Upstream("no matching signing key in the provider's JWKS".into())
+        })?;
+        let key = DecodingKey::from_jwk(jwk)
+            .map_err(|e| AuthError::Upstream(format!("unusable signing key: {e}")))?;
 
         let mut validation = Validation::new(header.alg);
         validation.set_audience(&[provider.client_id]);
@@ -152,14 +198,19 @@ impl Auth {
             Some(_) => false,
         };
         if !verified {
-            return Err(AuthError::Upstream("the provider says this email is not verified".into()));
+            return Err(AuthError::Upstream(
+                "the provider says this email is not verified".into(),
+            ));
         }
         // Microsoft Entra may put the address only in preferred_username.
         let email = claims
             .email
             .or(claims.preferred_username.filter(|u| u.contains('@')))
             .ok_or_else(|| AuthError::Upstream("ID token has no email".into()))?;
-        Ok(Identity { email: email.to_lowercase(), name: claims.name })
+        Ok(Identity {
+            email: email.to_lowercase(),
+            name: claims.name,
+        })
     }
 
     async fn get_json<T: serde::de::DeserializeOwned>(&self, url: &str) -> Result<T> {
@@ -171,8 +222,14 @@ impl Auth {
             .await
             .map_err(|e| AuthError::Upstream(format!("GET {url} failed: {e}")))?;
         if !response.status().is_success() {
-            return Err(AuthError::Upstream(format!("GET {url} answered {}", response.status())));
+            return Err(AuthError::Upstream(format!(
+                "GET {url} answered {}",
+                response.status()
+            )));
         }
-        response.json().await.map_err(|e| AuthError::Upstream(format!("GET {url}: bad JSON: {e}")))
+        response
+            .json()
+            .await
+            .map_err(|e| AuthError::Upstream(format!("GET {url}: bad JSON: {e}")))
     }
 }

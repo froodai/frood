@@ -210,7 +210,9 @@ impl Provider {
 
     pub fn label(&self) -> &str {
         match self {
-            Self::Oidc { label, id, .. } | Self::Dev { label, id } => label.as_deref().unwrap_or(id),
+            Self::Oidc { label, id, .. } | Self::Dev { label, id } => {
+                label.as_deref().unwrap_or(id)
+            }
         }
     }
 }

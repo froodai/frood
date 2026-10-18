@@ -19,7 +19,9 @@ pub(crate) fn hash(secret: &str) -> String {
 /// RFC 7636 S256: `BASE64URL(SHA256(verifier)) == challenge`.
 pub(crate) fn pkce_matches(verifier: &str, challenge: &str) -> bool {
     let valid_verifier = (43..=128).contains(&verifier.len())
-        && verifier.bytes().all(|b| b.is_ascii_alphanumeric() || b"-._~".contains(&b));
+        && verifier
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"-._~".contains(&b));
     valid_verifier && URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes())) == challenge
 }
 
@@ -44,8 +46,14 @@ mod tests {
     fn pkce_follows_rfc_7636_example() {
         // Appendix B of RFC 7636.
         let verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
-        assert!(pkce_matches(verifier, "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"));
-        assert!(!pkce_matches(verifier, "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cX"));
+        assert!(pkce_matches(
+            verifier,
+            "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+        ));
+        assert!(!pkce_matches(
+            verifier,
+            "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cX"
+        ));
         assert!(!pkce_matches("short", &pkce_challenge("short")));
     }
 }

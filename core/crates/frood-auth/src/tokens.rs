@@ -31,13 +31,27 @@ pub struct PersonalToken {
 impl Auth {
     /// Resolves `Authorization: Bearer …` to a principal, checking expiry, revocation and the
     /// token's audience.
-    pub async fn authenticate(&self, authorization: Option<&str>, resource: Resource) -> Result<Principal> {
+    pub async fn authenticate(
+        &self,
+        authorization: Option<&str>,
+        resource: Resource,
+    ) -> Result<Principal> {
         let token = authorization
-            .and_then(|value| value.strip_prefix("Bearer ").or_else(|| value.strip_prefix("bearer ")))
+            .and_then(|value| {
+                value
+                    .strip_prefix("Bearer ")
+                    .or_else(|| value.strip_prefix("bearer "))
+            })
             .map(str::trim)
             .filter(|t| !t.is_empty())
-            .ok_or_else(|| AuthError::Unauthorized { invalid: false, message: "a bearer token is required".into() })?;
-        let invalid = |message: &str| AuthError::Unauthorized { invalid: true, message: message.to_owned() };
+            .ok_or_else(|| AuthError::Unauthorized {
+                invalid: false,
+                message: "a bearer token is required".into(),
+            })?;
+        let invalid = |message: &str| AuthError::Unauthorized {
+            invalid: true,
+            message: message.to_owned(),
+        };
 
         let row = sqlx::query(
             "SELECT t.id, t.kind, t.user_id, t.client_id, t.scopes, t.resource, \
@@ -95,7 +109,10 @@ impl Auth {
         let settings = self.settings();
         let access = new_secret("frood_at_");
         let refresh = new_secret("frood_rt_");
-        for (secret, kind, ttl) in [(&access, "access", settings.access_ttl), (&refresh, "refresh", settings.refresh_ttl)] {
+        for (secret, kind, ttl) in [
+            (&access, "access", settings.access_ttl),
+            (&refresh, "refresh", settings.refresh_ttl),
+        ] {
             sqlx::query(
                 "INSERT INTO tokens (id, token_hash, kind, user_id, client_id, scopes, resource, family, expires_at) \
                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now() + make_interval(secs => $9))",
@@ -136,26 +153,46 @@ impl Auth {
 
         let family: Uuid = row.try_get("family")?;
         if row.try_get::<bool, _>("revoked")? {
-            sqlx::query("UPDATE tokens SET revoked_at = now() WHERE family = $1 AND revoked_at IS NULL")
-                .bind(family)
-                .execute(&mut *tx)
-                .await?;
+            sqlx::query(
+                "UPDATE tokens SET revoked_at = now() WHERE family = $1 AND revoked_at IS NULL",
+            )
+            .bind(family)
+            .execute(&mut *tx)
+            .await?;
             tx.commit().await?;
             tracing::warn!(%family, "rotated refresh token reused; family revoked");
-            return Err(AuthError::Invalid("invalid_grant: refresh token was already used".into()));
+            return Err(AuthError::Invalid(
+                "invalid_grant: refresh token was already used".into(),
+            ));
         }
         if row.try_get::<bool, _>("expired")? {
-            return Err(AuthError::Invalid("invalid_grant: refresh token expired".into()));
+            return Err(AuthError::Invalid(
+                "invalid_grant: refresh token expired".into(),
+            ));
         }
         if row.try_get::<Option<String>, _>("client_id")?.as_deref() != Some(client_id) {
-            return Err(AuthError::Invalid("invalid_grant: refresh token belongs to another client".into()));
+            return Err(AuthError::Invalid(
+                "invalid_grant: refresh token belongs to another client".into(),
+            ));
         }
         let id: Uuid = row.try_get("id")?;
-        sqlx::query("UPDATE tokens SET revoked_at = now() WHERE id = $1").bind(id).execute(&mut *tx).await?;
+        sqlx::query("UPDATE tokens SET revoked_at = now() WHERE id = $1")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
         let user_id: Uuid = row.try_get("user_id")?;
         let scopes: Vec<String> = row.try_get("scopes")?;
         let resource: Option<String> = row.try_get("resource")?;
-        let pair = self.issue_pair(&mut tx, user_id, client_id, &scopes, resource.as_deref(), family).await?;
+        let pair = self
+            .issue_pair(
+                &mut tx,
+                user_id,
+                client_id,
+                &scopes,
+                resource.as_deref(),
+                family,
+            )
+            .await?;
         tx.commit().await?;
         Ok(pair)
     }
@@ -174,7 +211,9 @@ impl Auth {
             }
         }
         if scopes.is_empty() {
-            return Err(AuthError::Invalid("a personal token needs at least one scope".into()));
+            return Err(AuthError::Invalid(
+                "a personal token needs at least one scope".into(),
+            ));
         }
         let id = Uuid::now_v7();
         let secret = new_secret("frood_pat_");

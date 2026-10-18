@@ -11,7 +11,9 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
 
 pub use interpolate::Secrets;
-pub use model::{Auth, Config, Deploy, Installation, Policies, Provider, Server, ServerPlacement, Storage};
+pub use model::{
+    Auth, Config, Deploy, Installation, Policies, Provider, Server, ServerPlacement, Storage,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
@@ -164,11 +166,17 @@ fn validate_auth(config: &Config, problems: &mut Vec<String>) {
     let auth = &config.auth;
     let mut ids = BTreeSet::new();
     let loopback_only = config.server.public_url.is_none()
-        && config.server.listen.parse::<SocketAddr>().is_ok_and(|a| a.ip().is_loopback());
+        && config
+            .server
+            .listen
+            .parse::<SocketAddr>()
+            .is_ok_and(|a| a.ip().is_loopback());
     for provider in &auth.providers {
         let id = provider.id();
         if !is_valid_name(id) {
-            problems.push(format!("auth provider id {id:?} must be lowercase letters, digits or dashes"));
+            problems.push(format!(
+                "auth provider id {id:?} must be lowercase letters, digits or dashes"
+            ));
         }
         if !ids.insert(id.to_owned()) {
             problems.push(format!("auth provider id {id:?} is used twice"));
@@ -190,12 +198,16 @@ fn validate_auth(config: &Config, problems: &mut Vec<String>) {
     }
     for domain in &auth.allow_domains {
         if domain.is_empty() || domain.contains('@') || domain.starts_with('.') {
-            problems.push(format!("auth.allow_domains entry {domain:?} must be a bare domain like company.com"));
+            problems.push(format!(
+                "auth.allow_domains entry {domain:?} must be a bare domain like company.com"
+            ));
         }
     }
     for email in &auth.allow {
         if !email.contains('@') {
-            problems.push(format!("auth.allow entry {email:?} is not an email address"));
+            problems.push(format!(
+                "auth.allow entry {email:?} is not an email address"
+            ));
         }
     }
     if auth.access_token_minutes == 0 || auth.refresh_token_days == 0 {
@@ -204,7 +216,9 @@ fn validate_auth(config: &Config, problems: &mut Vec<String>) {
 }
 
 fn is_loopback_http(url: &str) -> bool {
-    ["http://127.0.0.1", "http://localhost", "http://[::1]"].iter().any(|prefix| url.starts_with(prefix))
+    ["http://127.0.0.1", "http://localhost", "http://[::1]"]
+        .iter()
+        .any(|prefix| url.starts_with(prefix))
 }
 
 fn is_valid_name(name: &str) -> bool {

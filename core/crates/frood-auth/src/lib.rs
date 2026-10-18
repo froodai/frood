@@ -12,6 +12,7 @@ mod pages;
 mod secret;
 mod tokens;
 mod users;
+mod web;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -23,7 +24,7 @@ use uuid::Uuid;
 
 pub use clients::ClientInfo;
 pub use tokens::{PersonalToken, TokenPair};
-// TODO(M2): `mod web` with the /oauth/* and /.well-known/* handlers is not written yet.
+pub use web::routes;
 
 /// Scopes a token can carry (docs/12 §3.3). They are rights of the token, not roles.
 pub mod scope {
@@ -73,9 +74,32 @@ impl Principal {
     }
 
     /// Ledger actor string of this principal.
+    ///
+    /// A personal token acts as the person (`user:<id>`). A token issued to an OAuth client
+    /// (Claude, ChatGPT, …) acts as that client on the person's behalf
+    /// (`agent:<client>@<user id>`), so policies that trust the person's own facts do not
+    /// silently accept what an AI wrote, and the audit shows which client did it.
     pub fn actor(&self) -> String {
-        format!("user:{}", self.user_id)
+        match &self.client_id {
+            None => format!("user:{}", self.user_id),
+            Some(client) => format!("agent:{}@{}", client_label(client), self.user_id),
+        }
     }
+}
+
+/// Short, stable name of a client for audit: the host of a metadata-document client id,
+/// otherwise the registered id.
+fn client_label(client_id: &str) -> String {
+    let label = url::Url::parse(client_id)
+        .ok()
+        .filter(|url| url.scheme() == "https")
+        .and_then(|url| url.host_str().map(str::to_owned))
+        .unwrap_or_else(|| client_id.to_owned());
+    label
+        .chars()
+        .filter(|c| !c.is_whitespace() && *c != '@')
+        .take(120)
+        .collect()
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -115,7 +139,11 @@ impl AuthSettings {
         let issuer = match &config.server.public_url {
             Some(url) => url.trim_end_matches('/').to_owned(),
             None => {
-                let mut addr: SocketAddr = config.server.listen.parse().unwrap_or_else(|_| ([127, 0, 0, 1], 8080).into());
+                let mut addr: SocketAddr = config
+                    .server
+                    .listen
+                    .parse()
+                    .unwrap_or_else(|_| ([127, 0, 0, 1], 8080).into());
                 if addr.ip().is_unspecified() {
                     addr.set_ip([127, 0, 0, 1].into());
                 }
@@ -126,7 +154,12 @@ impl AuthSettings {
             issuer,
             installation: config.installation.name.clone(),
             allow: config.auth.allow.iter().map(|e| e.to_lowercase()).collect(),
-            allow_domains: config.auth.allow_domains.iter().map(|d| d.to_lowercase()).collect(),
+            allow_domains: config
+                .auth
+                .allow_domains
+                .iter()
+                .map(|d| d.to_lowercase())
+                .collect(),
             providers: config.auth.providers.clone(),
             access_ttl: Duration::from_secs(u64::from(config.auth.access_token_minutes) * 60),
             refresh_ttl: Duration::from_secs(u64::from(config.auth.refresh_token_days) * 86_400),
@@ -190,5 +223,34 @@ impl Auth {
 
     fn pool(&self) -> &PgPool {
         &self.inner.pool
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn principal(client_id: Option<&str>) -> Principal {
+        Principal {
+            user_id: Uuid::nil(),
+            email: "a@example.com".into(),
+            scopes: vec![],
+            client_id: client_id.map(str::to_owned),
+            token_id: Uuid::nil(),
+        }
+    }
+
+    #[test]
+    fn actor_names_the_client_for_oauth_tokens() {
+        let nil = Uuid::nil();
+        assert_eq!(principal(None).actor(), format!("user:{nil}"));
+        assert_eq!(
+            principal(Some("https://claude.ai/oauth/mcp-oauth-client-metadata")).actor(),
+            format!("agent:claude.ai@{nil}")
+        );
+        assert_eq!(
+            principal(Some("frood_client_x")).actor(),
+            format!("agent:frood_client_x@{nil}")
+        );
     }
 }
