@@ -11,6 +11,7 @@ pub mod model;
 mod policy;
 mod query;
 mod rows;
+mod search;
 
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -22,6 +23,7 @@ use error::{invalid, is_unique_violation};
 use journal::Event;
 use model::*;
 pub use policy::PolicyConfig;
+pub use search::{SearchHit, SearchQuery};
 
 /// Largest file a capture may carry.
 pub const MAX_BLOB_BYTES: usize = 25 * 1024 * 1024;
@@ -736,6 +738,33 @@ impl Ledger {
         limit: i64,
     ) -> Result<Vec<Proposal>> {
         query::proposals(&self.pool, state, after, limit).await
+    }
+
+    /// Hybrid search over current knowledge (words, and meaning when an embedding is given).
+    pub async fn search(&self, query: &SearchQuery) -> Result<Vec<SearchHit>> {
+        search::search(&self.pool, query).await
+    }
+
+    /// Current versions without an embedding from `model`: (assertion, version, text).
+    pub async fn missing_embeddings(
+        &self,
+        model: &str,
+        limit: i64,
+    ) -> Result<Vec<(Uuid, i32, String)>> {
+        search::missing_embeddings(&self.pool, model, limit).await
+    }
+
+    pub async fn store_embeddings(
+        &self,
+        model: &str,
+        items: &[((Uuid, i32), Vec<f32>)],
+    ) -> Result<()> {
+        search::store_embeddings(&self.pool, model, items).await
+    }
+
+    /// Entities a text names, by name, alias or a similar name.
+    pub async fn entities_in(&self, text: &str, limit: i64) -> Result<Vec<Entity>> {
+        search::entities_in(&self.pool, text, limit).await
     }
 
     pub async fn journal(&self, after: i64, limit: i64) -> Result<Vec<JournalEvent>> {
