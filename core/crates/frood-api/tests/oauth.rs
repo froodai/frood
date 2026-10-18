@@ -365,6 +365,15 @@ async fn mcp_client_signs_in_and_uses_tools() {
         .json();
     assert_eq!(metadata["resource"], format!("{ISSUER}/mcp"));
     assert_eq!(metadata["authorization_servers"], json!([ISSUER]));
+    assert_eq!(
+        metadata["scopes_supported"],
+        json!([
+            "knowledge:read",
+            "knowledge:capture",
+            "knowledge:propose",
+            "knowledge:decide"
+        ])
+    );
     let server = get_with(&app, "/.well-known/oauth-authorization-server", None)
         .await
         .json();

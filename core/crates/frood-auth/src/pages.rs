@@ -96,7 +96,8 @@ pub(crate) struct Consent<'a> {
 }
 
 pub(crate) fn consent(consent: &Consent<'_>) -> Html<String> {
-    // Deciding on someone's behalf is never pre-ticked (docs/12 §3.3).
+    // Only the everyday permissions are pre-ticked; deciding on someone's behalf, the journal
+    // and admin take a deliberate tick (docs/12 §3.3), whatever the client asked for.
     let offered: Vec<&str> = scope::ALL
         .into_iter()
         .filter(|s| *s != scope::ADMIN || consent.requested.iter().any(|r| r == scope::ADMIN))
@@ -104,7 +105,8 @@ pub(crate) fn consent(consent: &Consent<'_>) -> Html<String> {
     let checkboxes: String = offered
         .iter()
         .map(|s| {
-            let checked = consent.requested.iter().any(|r| r == s) && *s != scope::DECIDE;
+            let checked =
+                consent.requested.iter().any(|r| r == s) && scope::CLIENT_DEFAULT.contains(s);
             format!(
                 "<label><input type=\"checkbox\" name=\"scope\" value=\"{s}\"{}> <span><code>{s}</code><br>\
                  <span class=\"muted\">{}</span></span></label>",
@@ -166,5 +168,29 @@ mod tests {
         assert!(html.contains("value=\"knowledge:read\" checked"));
         assert!(html.contains("value=\"knowledge:decide\">"));
         assert!(!html.contains("value=\"admin\""));
+    }
+
+    #[test]
+    fn consent_preticks_only_everyday_permissions() {
+        // What Claude Code asks for: everything the resource metadata lists.
+        let requested: Vec<String> = scope::ALL.iter().map(|s| (*s).to_owned()).collect();
+        let html = consent(&Consent {
+            installation: "personal",
+            client: "Claude Code",
+            client_id: "https://claude.ai/oauth/claude-code-client-metadata",
+            email: "a@b.c",
+            requested: &requested,
+            tx: "tx_1",
+        })
+        .0;
+        for s in scope::CLIENT_DEFAULT {
+            assert!(html.contains(&format!("value=\"{s}\" checked")), "{s}");
+        }
+        for s in [scope::DECIDE, scope::JOURNAL, scope::ADMIN] {
+            assert!(
+                html.contains(&format!("value=\"{s}\">")),
+                "{s} is offered unticked"
+            );
+        }
     }
 }
