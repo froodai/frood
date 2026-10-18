@@ -7,7 +7,7 @@ module's service token in both directions. Apache-2.0.
 
 | Module | Gives | Needs |
 |---|---|---|
-| [stt-openai](stt-openai) | `media.transcribe@1` through OpenAI (`gpt-transcribe` by default); converts OGG/Opus voice messages with ffmpeg | `OPENAI_API_KEY` |
+| [stt-openai](stt-openai) | `media.transcribe@1` through OpenAI or a server with the same API (model named in `config.model`); converts OGG/Opus voice messages with ffmpeg | `OPENAI_API_KEY` |
 | [telegram](telegram) | Quick capture from a Telegram bot: text, voice, files; `/link <code>` links your account | `TELEGRAM_BOT_TOKEN` |
 
 In `frood.yaml`:
@@ -17,6 +17,7 @@ modules:
   stt:
     build: ../modules/stt-openai        # or image: ghcr.io/froodai/stt-openai:<version>
     secrets: [OPENAI_API_KEY]
+    config: { model: gpt-4o-mini-transcribe }
   telegram:
     build: ../modules/telegram
     secrets: [TELEGRAM_BOT_TOKEN]

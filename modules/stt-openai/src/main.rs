@@ -1,7 +1,8 @@
 //! Frood module `stt-openai`: `media.transcribe@1` over OpenAI's speech-to-text API.
 //!
 //! Environment (written by `frood apply`): `FROOD_TOKEN` (the core presents it when calling),
-//! `FROOD_MODULE_CONFIG` (`{"model": …, "base_url": …}`), `OPENAI_API_KEY`, `PORT` (8080).
+//! `FROOD_MODULE_CONFIG` (`{"model": …, "base_url": …}`; `model` is required), `OPENAI_API_KEY`,
+//! `PORT` (8080).
 
 use std::sync::Arc;
 
@@ -16,7 +17,6 @@ use serde_json::{Value, json};
 use tokio::io::AsyncWriteExt;
 
 const MANIFEST: &str = include_str!("../frood-module.yaml");
-const DEFAULT_MODEL: &str = "gpt-transcribe";
 const OPENAI_URL: &str = "https://api.openai.com";
 /// Upload formats OpenAI documents, by content type.
 const ACCEPTED: [(&str, &str); 9] = [
@@ -250,7 +250,11 @@ fn app_from_env() -> Result<App, String> {
             .unwrap_or_else(|| OPENAI_URL.to_owned())
             .trim_end_matches('/')
             .to_owned(),
-        model: settings.model.unwrap_or_else(|| DEFAULT_MODEL.to_owned()),
+        // No default model (D4): the installation names it in `config.model`.
+        model: settings
+            .model
+            .filter(|m| !m.trim().is_empty())
+            .ok_or("config.model is required, e.g. { model: gpt-4o-mini-transcribe }")?,
         http: reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(300))
             .build()
@@ -341,7 +345,7 @@ mod tests {
             token: "core".into(),
             key: "k".into(),
             base_url: url.into(),
-            model: DEFAULT_MODEL.into(),
+            model: "gpt-transcribe".into(),
             http: reqwest::Client::new(),
         })
     }

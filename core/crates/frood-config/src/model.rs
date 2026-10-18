@@ -326,7 +326,7 @@ pub struct Job {
     /// Events that start the job.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on: Option<Vec<Trigger>>,
-    /// Inputs: `account`, `model`, `module`, `instructions`, …
+    /// Inputs: `account`, `model` (always named; there is no default), `module`, `instructions`, …
     #[serde(
         default,
         rename = "with",
@@ -361,9 +361,8 @@ pub struct Search {
 pub struct Embeddings {
     /// Account from `accounts` that computes them.
     pub account: String,
-    /// Model; the provider's default multilingual model when omitted.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
+    /// Model, always named: Frood has no default model (D4). E.g. `text-embedding-3-small`.
+    pub model: String,
 }
 
 /// Reserved sections and the milestone that starts using each of them.

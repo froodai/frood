@@ -1,6 +1,6 @@
 name: stt-openai
 version: 0.0.1
-description: Speech to text through OpenAI (gpt-transcribe by default); converts formats OpenAI does not take, such as Telegram's OGG/Opus voice messages.
+description: Speech to text through OpenAI or any server with the same API; converts formats OpenAI does not take, such as Telegram's OGG/Opus voice messages.
 license: Apache-2.0
 provides:
   - media.transcribe@1
@@ -8,8 +8,9 @@ frood_api: []
 config:
   type: object
   properties:
-    model: { type: string, description: "Transcription model, default gpt-transcribe" }
+    model: { type: string, description: "Transcription model, e.g. gpt-4o-mini-transcribe or gpt-transcribe" }
     base_url: { type: string, description: "Another endpoint with the same API" }
+  required: [model]
 permissions:
   egress: [api.openai.com]
   secrets: [OPENAI_API_KEY]

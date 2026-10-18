@@ -2,7 +2,7 @@
 //! embeddings, for queries and for new knowledge, through the LLM gateway.
 
 use frood_ledger::{Ledger, LedgerError, SearchHit, SearchQuery};
-use frood_llm::{DEFAULT_EMBEDDING_MODEL, Gateway, LlmError};
+use frood_llm::{Gateway, LlmError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SearchError {
@@ -29,10 +29,7 @@ impl Searcher {
     pub fn new(ledger: Ledger, gateway: Gateway, search: &frood_config::Search) -> Self {
         let embeddings = search.embeddings.as_ref().map(|e| EmbeddingSettings {
             account: e.account.clone(),
-            model: e
-                .model
-                .clone()
-                .unwrap_or_else(|| DEFAULT_EMBEDDING_MODEL.to_owned()),
+            model: e.model.clone(),
         });
         Self {
             ledger,
@@ -56,7 +53,7 @@ impl Searcher {
                 .gateway
                 .embed(
                     &settings.account,
-                    Some(&settings.model),
+                    &settings.model,
                     std::slice::from_ref(&query.text),
                 )
                 .await
@@ -85,7 +82,7 @@ impl Searcher {
         let texts: Vec<String> = missing.iter().map(|(_, _, text)| text.clone()).collect();
         let out = self
             .gateway
-            .embed(&settings.account, Some(&settings.model), &texts)
+            .embed(&settings.account, &settings.model, &texts)
             .await?;
         let items: Vec<_> = missing
             .iter()

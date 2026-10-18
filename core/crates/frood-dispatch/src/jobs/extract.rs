@@ -321,8 +321,11 @@ pub(crate) async fn run(ctx: &Ctx, spec: &JobSpec, run: &Run) -> Result<Value, J
                 })
                 .collect();
             let entities = ctx.ledger.entities_in(&text, ENTITIES).await?;
+            let model = spec
+                .with_str("model")
+                .ok_or_else(|| JobError::permanent("no model named in the job"))?;
             let request = CompleteRequest {
-                model: spec.with_str("model").map(str::to_owned),
+                model: model.to_owned(),
                 system: spec
                     .with_str("instructions")
                     .unwrap_or(INSTRUCTIONS)

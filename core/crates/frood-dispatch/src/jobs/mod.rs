@@ -121,19 +121,24 @@ pub fn resolve(config: &Config, caps: &Capabilities<'_>) -> (Vec<JobSpec>, Vec<S
             }
         }
         match job.task {
-            Task::Extract => match job.with_str("account").or(caps.default_account) {
-                Some(account) => {
-                    let account = account.to_owned();
-                    job.with.insert("account".into(), json!(account));
-                }
-                None => {
+            Task::Extract => {
+                let Some(account) = job.with_str("account").or(caps.default_account) else {
                     warnings.push(
                         "job extract is off: add an account (accounts: …) so it can call a model"
                             .to_owned(),
                     );
                     continue;
+                };
+                let account = account.to_owned();
+                job.with.insert("account".into(), json!(account));
+                // No default model (D4): the installation names it.
+                if job.with_str("model").is_none() {
+                    warnings.push(
+                        "job extract is off: name its model in jobs.extract.with.model".to_owned(),
+                    );
+                    continue;
                 }
-            },
+            }
             Task::Embed if !caps.embeddings => continue,
             Task::Transcribe if caps.modules == 0 => {
                 warnings.push(
@@ -250,6 +255,16 @@ mod tests {
             modules: 0,
         };
         let (jobs, warnings) = resolve(&config(""), &caps);
+        assert!(jobs.is_empty(), "no model named, so no extraction");
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.contains("jobs.extract.with.model"))
+        );
+        let (jobs, warnings) = resolve(
+            &config("jobs:\n  extract: { with: { model: claude-haiku-5-5 } }\n"),
+            &caps,
+        );
         assert_eq!(names(&jobs), ["extract"]);
         assert_eq!(jobs[0].with_str("account"), Some("claude"));
         assert!(warnings.iter().any(|w| w.contains("transcribe is off")));
@@ -290,7 +305,7 @@ mod tests {
             embeddings: true,
             modules: 1,
         };
-        let (jobs, _) = resolve(&config(""), &caps);
+        let (jobs, _) = resolve(&config("jobs:\n  extract: { with: { model: m } }\n"), &caps);
         let extract = jobs.iter().find(|j| j.name == "extract").unwrap();
         assert!(extract.matches("source.captured", &json!({ "has_text": true })));
         assert!(!extract.matches(
