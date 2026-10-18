@@ -25,6 +25,7 @@ use uuid::Uuid;
 
 pub use channels::LinkCode;
 pub use clients::ClientInfo;
+pub use tokens::RunToken;
 pub use tokens::{PersonalToken, TokenPair};
 pub use web::routes;
 
@@ -41,6 +42,8 @@ pub mod scope {
     /// Modules only: link channel accounts and act for the linked people. Never granted to a
     /// person's token.
     pub const CHANNELS_ACT: &str = "channels:act";
+    /// What an agent's run token may ever hold (W4′): never decide, never admin.
+    pub const AGENT_ALLOWED: [&str; 4] = [READ, CAPTURE, PROPOSE, JOURNAL];
     /// What an AI client gets unless the person ticks more on the consent page.
     pub const CLIENT_DEFAULT: [&str; 3] = [READ, CAPTURE, PROPOSE];
 
@@ -71,10 +74,20 @@ pub struct User {
     pub email: String,
 }
 
+/// The run an agent's token belongs to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunRef {
+    pub id: Uuid,
+    pub job: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct Principal {
-    /// The person; `None` for a module's service token.
+    /// The person; `None` for a module's service token. For a run token, the person the run
+    /// acts for, if any.
     pub user: Option<User>,
+    /// For a run token: the agent's run.
+    pub run: Option<RunRef>,
     /// The module a service token belongs to.
     pub module: Option<String>,
     pub scopes: Vec<String>,
@@ -87,7 +100,11 @@ impl Principal {
         self.scopes.iter().any(|s| s == scope)
     }
 
+    /// The person behind the token. A run token acts for a person but is not that person.
     pub fn user_id(&self) -> Option<Uuid> {
+        if self.run.is_some() {
+            return None;
+        }
         self.user.as_ref().map(|u| u.id)
     }
 
@@ -108,7 +125,15 @@ impl Principal {
     /// tokens and act as `agent:<job>` on the person's behalf, which policies treat as an
     /// agent's proposal.
     /// A module's service token acts as the module (`integration:<module>`).
+    /// A run token acts as the agent's job, for the person the run belongs to
+    /// (`agent:<job>/for/<user id>`).
     pub fn actor(&self) -> String {
+        if let Some(run) = &self.run {
+            return match &self.user {
+                Some(user) => format!("agent:{}/for/{}", run.job, user.id),
+                None => format!("agent:{}", run.job),
+            };
+        }
         match (&self.user, &self.module, &self.client_id) {
             (Some(user), _, None) => format!("user:{}", user.id),
             (Some(user), _, Some(client)) => {
@@ -269,6 +294,7 @@ mod tests {
                 id: Uuid::nil(),
                 email: "a@example.com".into(),
             }),
+            run: None,
             module: None,
             scopes: vec![],
             client_id: client_id.map(str::to_owned),
@@ -277,9 +303,24 @@ mod tests {
     }
 
     #[test]
+    fn run_tokens_act_as_their_job() {
+        let nil = Uuid::nil();
+        let mut agent = principal(None);
+        agent.run = Some(RunRef {
+            id: nil,
+            job: "daily-sweep".into(),
+        });
+        assert_eq!(agent.actor(), format!("agent:daily-sweep/for/{nil}"));
+        assert_eq!(agent.user_id(), None, "a run is not the person");
+        agent.user = None;
+        assert_eq!(agent.actor(), "agent:daily-sweep");
+    }
+
+    #[test]
     fn modules_act_as_themselves_or_for_linked_people() {
         let mut module = Principal {
             user: None,
+            run: None,
             module: Some("telegram".into()),
             scopes: vec![scope::CAPTURE.into()],
             client_id: None,

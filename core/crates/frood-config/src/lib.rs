@@ -12,8 +12,8 @@ use sha2::{Digest, Sha256};
 
 pub use interpolate::Secrets;
 pub use model::{
-    Account, Auth, Config, Deploy, Embeddings, Installation, Job, ModelProvider, Module, Policies,
-    Provider, Search, Server, ServerPlacement, Storage, Trigger,
+    Account, AskUser, Auth, Budget, Config, Deploy, Embeddings, Installation, Job, ModelProvider,
+    Module, OnExpire, Policies, Provider, Search, Server, ServerPlacement, Storage, Trigger,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -307,9 +307,41 @@ fn validate_work(config: &Config, problems: &mut Vec<String>) {
             }
         }
         for trigger in job.on.iter().flatten() {
-            if trigger.event.trim().is_empty() {
-                problems.push(format!("job {name}: a trigger has no event"));
+            validate_trigger(name, trigger, problems);
+        }
+        if let Some(account) = &job.account
+            && !config.accounts.contains_key(account)
+        {
+            problems.push(format!("job {name}: account {account} is not in accounts"));
+        }
+        if let Some(runtime) = &job.runtime
+            && !config.modules.contains_key(runtime)
+        {
+            problems.push(format!("job {name}: runtime {runtime} is not in modules"));
+        }
+        for permission in job.permissions.iter().flatten() {
+            if ![
+                "knowledge:read",
+                "knowledge:capture",
+                "knowledge:propose",
+                "journal:read",
+            ]
+            .contains(&permission.as_str())
+            {
+                problems.push(format!(
+                    "job {name}: agents may hold knowledge:read, capture, propose and journal:read, not {permission}"
+                ));
             }
+        }
+        if let Some(expire) = job
+            .ask_user
+            .as_ref()
+            .and_then(|a| a.expire_after.as_deref())
+            && humantime::parse_duration(expire).is_err()
+        {
+            problems.push(format!(
+                "job {name}: ask_user.expire_after {expire:?} is not a duration like 3d or 12h"
+            ));
         }
     }
     if let Some(embeddings) = &config.search.embeddings {
@@ -324,6 +356,36 @@ fn validate_work(config: &Config, problems: &mut Vec<String>) {
             ),
             Some(_) => {}
         }
+    }
+}
+
+fn validate_trigger(job: &str, trigger: &Trigger, problems: &mut Vec<String>) {
+    match (&trigger.event, &trigger.schedule) {
+        (Some(event), None) if !event.trim().is_empty() => {}
+        (None, Some(schedule)) => {
+            if schedule.parse::<croner::Cron>().is_err() {
+                problems.push(format!(
+                    "job {job}: schedule {schedule:?} is not a cron expression like \"0 3 * * *\""
+                ));
+            }
+        }
+        _ => problems.push(format!(
+            "job {job}: a trigger needs either an event or a schedule"
+        )),
+    }
+    if let Some(zone) = &trigger.timezone
+        && zone.parse::<chrono_tz::Tz>().is_err()
+    {
+        problems.push(format!(
+            "job {job}: timezone {zone:?} is not an IANA zone like Europe/Amsterdam"
+        ));
+    }
+    if let Some(each) = &trigger.for_each
+        && each != "source"
+    {
+        problems.push(format!(
+            "job {job}: for_each can only be `source`, not {each:?}"
+        ));
     }
 }
 
@@ -500,6 +562,60 @@ search:
         assert_eq!(config.jobs["extract"].with["model"], "claude-sonnet-5-5");
         assert_eq!(config.jobs["embed"].enabled, Some(false));
         assert_eq!(config.search.embeddings.unwrap().account, "openai");
+    }
+
+    #[test]
+    fn agent_jobs_parse_and_are_checked() {
+        let agent = "
+jobs:
+  daily-sweep:
+    uses: agents.execute
+    on:
+      - { schedule: '0 3 * * *', timezone: Europe/Amsterdam, for_each: source }
+    instructions: ./agents/daily-sweep.md
+    tools: [frood, 'source:${source}']
+    runtime: stt
+    agent: claude-code
+    model: claude-haiku-5-5
+    account: anthropic
+    permissions: [knowledge:read, knowledge:propose]
+    on_behalf_of: alice@example.com
+    ask_user: { allowed: true, expire_after: 3d, on_expire: skip }
+    budget: { max_usd: 0.5, max_minutes: 15 }
+";
+        let raw = format!("{}{WORK}", template_for(ServerPlacement::Host))
+            .replace("\njobs:\n", &format!("{agent}"))
+            .replace("  extract: { with", "  extract: { with");
+        let loaded = parse(&raw, &secrets()).unwrap();
+        let job = &loaded.config.jobs["daily-sweep"];
+        assert_eq!(
+            job.on.as_ref().unwrap()[0].schedule.as_deref(),
+            Some("0 3 * * *")
+        );
+        assert_eq!(job.ask_user.as_ref().unwrap().on_expire, OnExpire::Skip);
+        assert_eq!(job.budget.as_ref().unwrap().max_minutes, Some(15));
+
+        let bad = raw
+            .replace("'0 3 * * *'", "'every night'")
+            .replace("Europe/Amsterdam", "Mars/Base")
+            .replace("knowledge:propose]", "knowledge:decide]")
+            .replace("expire_after: 3d", "expire_after: soon");
+        match parse(&bad, &secrets()) {
+            Err(ConfigError::Invalid(problems)) => {
+                for needle in [
+                    "cron expression",
+                    "IANA zone",
+                    "not knowledge:decide",
+                    "duration like",
+                ] {
+                    assert!(
+                        problems.iter().any(|p| p.contains(needle)),
+                        "{needle}: {problems:?}"
+                    );
+                }
+            }
+            other => panic!("expected Invalid, got {other:?}"),
+        }
     }
 
     #[test]
