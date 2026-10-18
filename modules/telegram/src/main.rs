@@ -35,6 +35,7 @@ struct Texts {
     unlinked: &'static str,
     link_usage: &'static str,
     saving: &'static str,
+    saved: &'static str,
     known: &'static str,
     remembered: &'static str,
     waiting: &'static str,
@@ -53,6 +54,7 @@ const EN: Texts = Texts {
     unlinked: "Unlinked. I will not save your messages until you link again.",
     link_usage: "Send /link followed by the code, e.g. /link K7M2QX9P",
     saving: "Saved, processing…",
+    saved: "Saved.",
     known: "Already saved earlier.",
     remembered: "Remembered:",
     waiting: "Waiting for your decision:",
@@ -71,6 +73,7 @@ const RU: Texts = Texts {
     unlinked: "Связь удалена. Сообщения не сохраняю, пока не свяжете снова.",
     link_usage: "Пришлите /link и код, например /link K7M2QX9P",
     saving: "Сохранено, обрабатываю…",
+    saved: "Сохранено.",
     known: "Это уже сохранено раньше.",
     remembered: "Запомнил:",
     waiting: "Ждёт вашего решения:",
@@ -402,6 +405,11 @@ impl Bot {
                 _ => Value::Null,
             };
             match status["state"].as_str() {
+                // Nothing to process: no job is set up for this kind of message.
+                Some("idle") => {
+                    self.edit(chat, reply, t.saved).await;
+                    return;
+                }
                 Some("done") => {
                     self.edit(chat, reply, &summary(&status, t)).await;
                     return;
