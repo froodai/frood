@@ -10,6 +10,7 @@ license.workspace = true
 chrono.workspace = true
 frood-auth.workspace = true
 frood-ledger.workspace = true
+frood-search.workspace = true
 http.workspace = true
 rmcp.workspace = true
 schemars.workspace = true

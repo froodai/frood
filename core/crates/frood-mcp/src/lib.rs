@@ -9,7 +9,8 @@ use std::sync::Arc;
 use chrono::{DateTime, NaiveDate, Utc};
 use frood_auth::{Principal, scope};
 use frood_ledger::model::*;
-use frood_ledger::{Ledger, LedgerError};
+use frood_ledger::{Ledger, LedgerError, SearchQuery};
+use frood_search::{SearchError, Searcher};
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::tool::{Extension, ToolCallContext};
 use rmcp::handler::server::wrapper::Parameters;
@@ -52,6 +53,7 @@ const TOOL_SCOPES: [(&str, &str); 10] = [
 /// rebinding: the hosts this installation is reached by.
 pub fn service(
     ledger: Ledger,
+    searcher: Searcher,
     allowed_hosts: Vec<String>,
 ) -> StreamableHttpService<FroodMcp, NeverSessionManager> {
     let config = StreamableHttpServerConfig::default()
@@ -60,7 +62,7 @@ pub fn service(
         .with_sse_keep_alive(None)
         .with_allowed_hosts(allowed_hosts);
     StreamableHttpService::new(
-        move || Ok(FroodMcp::new(ledger.clone())),
+        move || Ok(FroodMcp::new(ledger.clone(), searcher.clone())),
         Arc::new(NeverSessionManager::default()),
         config,
     )
@@ -69,6 +71,7 @@ pub fn service(
 #[derive(Clone)]
 pub struct FroodMcp {
     ledger: Ledger,
+    searcher: Searcher,
     tool_router: ToolRouter<Self>,
 }
 
@@ -97,6 +100,13 @@ fn ledger_error(err: LedgerError) -> String {
             "internal error; see server logs".to_owned()
         }
         other => other.to_string(),
+    }
+}
+
+fn search_error(err: SearchError) -> String {
+    match err {
+        SearchError::Ledger(e) => ledger_error(e),
+        SearchError::Llm(e) => e.to_string(),
     }
 }
 
@@ -251,20 +261,22 @@ fn operations(values: Vec<serde_json::Map<String, Value>>) -> Result<Vec<Operati
 
 #[tool_router]
 impl FroodMcp {
-    pub fn new(ledger: Ledger) -> Self {
+    pub fn new(ledger: Ledger, searcher: Searcher) -> Self {
         Self {
             ledger,
+            searcher,
             tool_router: Self::tool_router(),
         }
     }
 
     #[tool(
-        description = "Search knowledge by words. Returns current assertions with their ids, kinds, subjects, validity and evidence.",
+        description = "Search knowledge by words and meaning, across languages. Returns current assertions with their ids, kinds, subjects, slots, validity, evidence and a relevance score.",
         annotations(read_only_hint = true)
     )]
     async fn search_knowledge(&self, Parameters(p): Parameters<SearchParams>) -> ToolResult {
-        let filter = AssertionFilter {
-            text: Some(p.query),
+        let query = SearchQuery {
+            text: p.query,
+            embedding: None,
             kind: p.kind,
             entity: p
                 .entity
@@ -273,15 +285,9 @@ impl FroodMcp {
                 .transpose()?,
             status: status(p.status.as_deref())?,
             valid_at: parse_opt_time(p.valid_at.as_deref())?,
-            limit: Some(limit(p.limit, 20)),
-            ..Default::default()
+            limit: limit(p.limit, 20),
         };
-        render(
-            self.ledger
-                .assertions(&filter)
-                .await
-                .map_err(ledger_error)?,
-        )
+        render(self.searcher.search(query).await.map_err(search_error)?)
     }
 
     #[tool(

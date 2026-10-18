@@ -39,7 +39,7 @@ impl Secrets {
         }
     }
 
-    fn get(&self, name: &str) -> Option<String> {
+    pub fn get(&self, name: &str) -> Option<String> {
         self.file
             .get(name)
             .cloned()

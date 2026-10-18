@@ -740,6 +740,24 @@ impl Ledger {
         query::proposals(&self.pool, state, after, limit).await
     }
 
+    /// Proposals that cite evidence from a source, oldest first.
+    pub async fn proposals_citing_source(&self, source_id: Uuid) -> Result<Vec<Proposal>> {
+        let ids: Vec<Uuid> = sqlx::query_scalar(
+            "SELECT p.id FROM proposals p WHERE p.evidence && \
+             (SELECT coalesce(array_agg(e.id), '{}') FROM evidence e WHERE e.source_id = $1) \
+             ORDER BY p.created_at",
+        )
+        .bind(source_id)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut conn = self.pool.acquire().await?;
+        let mut proposals = Vec::with_capacity(ids.len());
+        for id in ids {
+            proposals.push(query::proposal(&mut conn, id).await?);
+        }
+        Ok(proposals)
+    }
+
     /// Hybrid search over current knowledge (words, and meaning when an embedding is given).
     pub async fn search(&self, query: &SearchQuery) -> Result<Vec<SearchHit>> {
         search::search(&self.pool, query).await

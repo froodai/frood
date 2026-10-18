@@ -13,6 +13,7 @@ repository = "https://github.com/froodai/frood"
 frood-api = { path = "crates/frood-api" }
 frood-auth = { path = "crates/frood-auth" }
 frood-config = { path = "crates/frood-config" }
+frood-dispatch = { path = "crates/frood-dispatch" }
 frood-ledger = { path = "crates/frood-ledger" }
 frood-llm = { path = "crates/frood-llm" }
 frood-mcp = { path = "crates/frood-mcp" }
