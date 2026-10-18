@@ -75,14 +75,16 @@ impl Principal {
 
     /// Ledger actor string of this principal.
     ///
-    /// A personal token acts as the person (`user:<id>`). A token issued to an OAuth client
-    /// (Claude, ChatGPT, …) acts as that client on the person's behalf
-    /// (`agent:<client>@<user id>`), so policies that trust the person's own facts do not
-    /// silently accept what an AI wrote, and the audit shows which client did it.
+    /// Both personal tokens and tokens of OAuth clients act as the person: an OAuth client
+    /// (Claude, ChatGPT, Claude Code) is driven by the person sitting in front of it, so what
+    /// it writes on their word is theirs (`user:<id>`). The client is kept for the audit:
+    /// `user:<id>/via/<client>`. Agents that run on their own (scheduled jobs, M4) get run
+    /// tokens and act as `agent:<job>` on the person's behalf, which policies treat as an
+    /// agent's proposal.
     pub fn actor(&self) -> String {
         match &self.client_id {
             None => format!("user:{}", self.user_id),
-            Some(client) => format!("agent:{}@{}", client_label(client), self.user_id),
+            Some(client) => format!("user:{}/via/{}", self.user_id, client_label(client)),
         }
     }
 }
@@ -97,7 +99,7 @@ fn client_label(client_id: &str) -> String {
         .unwrap_or_else(|| client_id.to_owned());
     label
         .chars()
-        .filter(|c| !c.is_whitespace() && *c != '@')
+        .filter(|c| !c.is_whitespace() && *c != '/')
         .take(120)
         .collect()
 }
@@ -241,16 +243,16 @@ mod tests {
     }
 
     #[test]
-    fn actor_names_the_client_for_oauth_tokens() {
+    fn oauth_clients_act_as_the_person_and_are_named_for_audit() {
         let nil = Uuid::nil();
         assert_eq!(principal(None).actor(), format!("user:{nil}"));
         assert_eq!(
             principal(Some("https://claude.ai/oauth/mcp-oauth-client-metadata")).actor(),
-            format!("agent:claude.ai@{nil}")
+            format!("user:{nil}/via/claude.ai")
         );
         assert_eq!(
             principal(Some("frood_client_x")).actor(),
-            format!("agent:frood_client_x@{nil}")
+            format!("user:{nil}/via/frood_client_x")
         );
     }
 }

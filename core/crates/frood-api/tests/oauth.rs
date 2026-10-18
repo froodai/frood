@@ -494,14 +494,31 @@ async fn mcp_client_signs_in_and_uses_tools() {
     .await;
     assert_ne!(proposal["isError"], true, "{}", tool_text(&proposal));
     let proposal: Value = serde_json::from_str(&tool_text(&proposal)).unwrap();
-    // Written by an AI client on the person's behalf: not the person's own fact, so it waits.
-    assert_eq!(proposal["state"], "open");
+    // The person told their client to remember it: their own new fact, accepted by policy,
+    // with the client kept for the audit.
+    assert_eq!(proposal["state"], "accepted");
+    let author = proposal["author"].as_str().unwrap();
     assert!(
-        proposal["author"]
-            .as_str()
-            .unwrap()
-            .starts_with(&format!("agent:{client_id}@"))
+        author.starts_with("user:") && author.ends_with(&format!("/via/{client_id}")),
+        "{author}"
     );
+
+    // A change is not covered by the own-facts policy: it waits for a verdict.
+    let proposal = call_tool(
+        &app,
+        &access,
+        "propose_change",
+        json!({
+            "rationale": "maybe the date moved again",
+            "source_text": "Olya: Nov 28 might slip",
+            "risk": "change",
+            "operations": [{ "op": "create", "assertion": { "kind": "status", "text": "Release 2.4 date at risk", "modality": "mentioned" } }],
+        }),
+    )
+    .await;
+    assert_ne!(proposal["isError"], true, "{}", tool_text(&proposal));
+    let proposal: Value = serde_json::from_str(&tool_text(&proposal)).unwrap();
+    assert_eq!(proposal["state"], "open");
 
     let inbox = call_tool(&app, &access, "list_inbox", json!({})).await;
     assert!(tool_text(&inbox).contains(proposal["id"].as_str().unwrap()));
