@@ -23,8 +23,9 @@ pub fn routes() -> Router<AppState> {
 async fn me(caller: Caller<Signed>) -> Json<Value> {
     let principal = &caller.principal;
     Json(json!({
-        "user_id": principal.user_id,
-        "email": principal.email,
+        "user_id": principal.user_id(),
+        "email": principal.user.as_ref().map(|u| &u.email),
+        "module": principal.module,
         "actor": principal.actor(),
         "scopes": principal.scopes,
         "client_id": principal.client_id,
@@ -37,7 +38,7 @@ async fn list_tokens(
 ) -> Result<Json<Vec<PersonalToken>>, ApiError> {
     state
         .auth
-        .personal_tokens(caller.principal.user_id)
+        .personal_tokens(caller.user_id()?)
         .await
         .map(Json)
         .map_err(|err| auth_error(&state.auth, Resource::Api, err))
@@ -59,7 +60,7 @@ async fn create_token(
     let (id, token) = state
         .auth
         .create_personal_token(
-            caller.principal.user_id,
+            caller.user_id()?,
             &input.label,
             &input.scopes,
             input.expires_in_days,
@@ -79,7 +80,7 @@ async fn revoke_token(
 ) -> Result<StatusCode, ApiError> {
     state
         .auth
-        .revoke_token(caller.principal.user_id, id)
+        .revoke_token(caller.user_id()?, id)
         .await
         .map_err(|err| auth_error(&state.auth, Resource::Api, err))?;
     Ok(StatusCode::NO_CONTENT)

@@ -3,6 +3,8 @@
 
 mod account;
 mod auth;
+mod capture;
+mod channels;
 mod error;
 mod ledger;
 
@@ -40,6 +42,8 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/version", get(version))
         .merge(ledger::routes())
         .merge(account::routes())
+        .merge(capture::routes())
+        .merge(channels::routes())
         .with_state(state)
         .merge(mcp)
         .merge(oauth)

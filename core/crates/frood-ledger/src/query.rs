@@ -5,8 +5,8 @@ use uuid::Uuid;
 
 use crate::error::{LedgerError, Result, invalid, parse_text};
 use crate::model::{
-    AssertionFilter, AssertionVersion, AssertionView, Entity, EntityView, Flag, Link, Proposal,
-    ProposalState, SlotOp, Source, Timestamp,
+    AssertionFilter, AssertionVersion, AssertionView, BlobInfo, Entity, EntityView, Flag, Link,
+    Proposal, ProposalState, SlotOp, Source, Timestamp,
 };
 use crate::rows::{self, version_columns};
 
@@ -14,8 +14,9 @@ const MAX_LIMIT: i64 = 200;
 
 pub(crate) async fn source(pool: &PgPool, id: Uuid) -> Result<Source> {
     let row = sqlx::query(
-        "SELECT id, kind, origin, uri, title, content, content_sha256, said_at, captured_by, captured_at, metadata \
-         FROM sources WHERE id = $1",
+        "SELECT s.id, s.kind, s.origin, s.uri, s.title, s.content, s.content_sha256, s.said_at, s.captured_by, \
+         s.captured_at, s.metadata, b.id AS blob_id, b.content_type, b.filename, b.size_bytes \
+         FROM sources s LEFT JOIN blobs b ON b.id = s.blob_id WHERE s.id = $1",
     )
     .bind(id)
     .fetch_optional(pool)
@@ -40,6 +41,15 @@ pub(crate) async fn source(pool: &PgPool, id: Uuid) -> Result<Source> {
         captured_by: row.try_get("captured_by")?,
         captured_at: row.try_get("captured_at")?,
         metadata: row.try_get("metadata")?,
+        file: match row.try_get::<Option<Uuid>, _>("blob_id")? {
+            Some(id) => Some(BlobInfo {
+                id,
+                content_type: row.try_get("content_type")?,
+                filename: row.try_get("filename")?,
+                size_bytes: row.try_get("size_bytes")?,
+            }),
+            None => None,
+        },
         evidence,
     })
 }

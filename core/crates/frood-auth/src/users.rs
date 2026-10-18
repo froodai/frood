@@ -40,6 +40,14 @@ impl Auth {
         .await?)
     }
 
+    pub async fn user_email(&self, user_id: Uuid) -> Result<String> {
+        sqlx::query_scalar("SELECT email FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_optional(self.pool())
+            .await?
+            .ok_or_else(|| AuthError::NotFound(format!("user {user_id}")))
+    }
+
     /// Finds a user by email, creating it when `create` is set (for administrative tools).
     pub async fn user_id_by_email(&self, email: &str, create: bool) -> Result<Uuid> {
         let email = email.trim().to_lowercase();

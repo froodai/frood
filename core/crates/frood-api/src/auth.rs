@@ -39,6 +39,8 @@ permissions! {
     Decide => Some(scope::DECIDE);
     Journal => Some(scope::JOURNAL);
     Admin => Some(scope::ADMIN);
+    /// Channel modules: link accounts, act for linked people.
+    ChannelsAct => Some(scope::CHANNELS_ACT);
 }
 
 /// The authenticated caller of a `/v1` route, holding the permission `P`.
@@ -50,6 +52,17 @@ pub struct Caller<P> {
 impl<P> Caller<P> {
     pub fn actor(&self) -> Actor {
         Actor::parse(&self.principal.actor()).expect("principal actors are well-formed")
+    }
+
+    /// The person behind the token; module service tokens have none.
+    pub fn user_id(&self) -> Result<uuid::Uuid, ApiError> {
+        self.principal.user_id().ok_or_else(|| {
+            ApiError::new(
+                StatusCode::FORBIDDEN,
+                "person-required",
+                "this needs a person's token, not a module's",
+            )
+        })
     }
 }
 

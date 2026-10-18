@@ -190,11 +190,42 @@ pub struct NewSource {
     pub uri: Option<String>,
     #[serde(default)]
     pub title: Option<String>,
+    /// The text. May be empty when a file comes with the capture (a voice message).
+    #[serde(default)]
     pub content: String,
     #[serde(default)]
     pub said_at: Option<Timestamp>,
     #[serde(default)]
     pub metadata: serde_json::Value,
+}
+
+/// A file that comes with a capture: a voice message, a recording, a document.
+#[derive(Debug, Clone)]
+pub struct NewBlob {
+    pub content_type: String,
+    pub filename: Option<String>,
+    pub data: Vec<u8>,
+}
+
+impl NewBlob {
+    /// Audio or video that needs transcribing.
+    pub fn is_media(&self) -> bool {
+        is_media_type(&self.content_type)
+    }
+}
+
+pub fn is_media_type(content_type: &str) -> bool {
+    let t = content_type.to_ascii_lowercase();
+    t.starts_with("audio/") || t.starts_with("video/") || t == "application/ogg"
+}
+
+/// A stored file, without its bytes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlobInfo {
+    pub id: Uuid,
+    pub content_type: String,
+    pub filename: Option<String>,
+    pub size_bytes: i32,
 }
 
 fn default_origin() -> String {
@@ -214,6 +245,8 @@ pub struct Source {
     pub captured_by: String,
     pub captured_at: Timestamp,
     pub metadata: serde_json::Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<BlobInfo>,
     pub evidence: Vec<Evidence>,
 }
 

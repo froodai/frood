@@ -6,6 +6,7 @@
 //! Connect provider (or, on loopback only, a development form). Personal tokens serve scripts
 //! and bots. Every secret is stored as a hash.
 
+mod channels;
 mod clients;
 mod oidc;
 mod pages;
@@ -22,6 +23,7 @@ use std::time::Duration;
 use sqlx::PgPool;
 use uuid::Uuid;
 
+pub use channels::LinkCode;
 pub use clients::ClientInfo;
 pub use tokens::{PersonalToken, TokenPair};
 pub use web::routes;
@@ -36,6 +38,9 @@ pub mod scope {
     pub const ADMIN: &str = "admin";
 
     pub const ALL: [&str; 6] = [READ, CAPTURE, PROPOSE, DECIDE, JOURNAL, ADMIN];
+    /// Modules only: link channel accounts and act for the linked people. Never granted to a
+    /// person's token.
+    pub const CHANNELS_ACT: &str = "channels:act";
     /// What an AI client gets unless the person ticks more on the consent page.
     pub const CLIENT_DEFAULT: [&str; 3] = [READ, CAPTURE, PROPOSE];
 
@@ -59,10 +64,19 @@ pub enum Resource {
     Mcp,
 }
 
+/// A person who holds a token.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct User {
+    pub id: Uuid,
+    pub email: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct Principal {
-    pub user_id: Uuid,
-    pub email: String,
+    /// The person; `None` for a module's service token.
+    pub user: Option<User>,
+    /// The module a service token belongs to.
+    pub module: Option<String>,
     pub scopes: Vec<String>,
     pub client_id: Option<String>,
     pub token_id: Uuid,
@@ -73,6 +87,18 @@ impl Principal {
         self.scopes.iter().any(|s| s == scope)
     }
 
+    pub fn user_id(&self) -> Option<Uuid> {
+        self.user.as_ref().map(|u| u.id)
+    }
+
+    /// Actor of a channel module acting for the person whose channel account it serves:
+    /// the person's action, through the module (`user:<id>/via/<module>`).
+    pub fn acting_for(&self, user_id: Uuid) -> Option<String> {
+        let module = self.module.as_deref()?;
+        self.has(scope::CHANNELS_ACT)
+            .then(|| format!("user:{user_id}/via/{module}"))
+    }
+
     /// Ledger actor string of this principal.
     ///
     /// Both personal tokens and tokens of OAuth clients act as the person: an OAuth client
@@ -81,10 +107,15 @@ impl Principal {
     /// `user:<id>/via/<client>`. Agents that run on their own (scheduled jobs, M4) get run
     /// tokens and act as `agent:<job>` on the person's behalf, which policies treat as an
     /// agent's proposal.
+    /// A module's service token acts as the module (`integration:<module>`).
     pub fn actor(&self) -> String {
-        match &self.client_id {
-            None => format!("user:{}", self.user_id),
-            Some(client) => format!("user:{}/via/{}", self.user_id, client_label(client)),
+        match (&self.user, &self.module, &self.client_id) {
+            (Some(user), _, None) => format!("user:{}", user.id),
+            (Some(user), _, Some(client)) => {
+                format!("user:{}/via/{}", user.id, client_label(client))
+            }
+            (None, Some(module), _) => format!("integration:{module}"),
+            (None, None, _) => "system:unknown".to_owned(),
         }
     }
 }
@@ -234,12 +265,35 @@ mod tests {
 
     fn principal(client_id: Option<&str>) -> Principal {
         Principal {
-            user_id: Uuid::nil(),
-            email: "a@example.com".into(),
+            user: Some(User {
+                id: Uuid::nil(),
+                email: "a@example.com".into(),
+            }),
+            module: None,
             scopes: vec![],
             client_id: client_id.map(str::to_owned),
             token_id: Uuid::nil(),
         }
+    }
+
+    #[test]
+    fn modules_act_as_themselves_or_for_linked_people() {
+        let mut module = Principal {
+            user: None,
+            module: Some("telegram".into()),
+            scopes: vec![scope::CAPTURE.into()],
+            client_id: None,
+            token_id: Uuid::nil(),
+        };
+        assert_eq!(module.actor(), "integration:telegram");
+        let nil = Uuid::nil();
+        assert_eq!(module.acting_for(nil), None);
+        module.scopes.push(scope::CHANNELS_ACT.into());
+        assert_eq!(
+            module.acting_for(nil),
+            Some(format!("user:{nil}/via/telegram"))
+        );
+        assert_eq!(principal(None).acting_for(nil), None);
     }
 
     #[test]

@@ -54,9 +54,9 @@ impl Auth {
         };
 
         let row = sqlx::query(
-            "SELECT t.id, t.kind, t.user_id, t.client_id, t.scopes, t.resource, \
+            "SELECT t.id, t.kind, t.user_id, t.module, t.client_id, t.scopes, t.resource, \
              (t.expires_at IS NOT NULL AND t.expires_at <= now()) AS expired, t.revoked_at IS NOT NULL AS revoked, u.email \
-             FROM tokens t JOIN users u ON u.id = t.user_id WHERE t.token_hash = $1",
+             FROM tokens t LEFT JOIN users u ON u.id = t.user_id WHERE t.token_hash = $1",
         )
         .bind(hash(token))
         .fetch_optional(self.pool())
@@ -87,9 +87,16 @@ impl Auth {
             .bind(id)
             .execute(self.pool())
             .await?;
+        let user = match (
+            row.try_get::<Option<Uuid>, _>("user_id")?,
+            row.try_get::<Option<String>, _>("email")?,
+        ) {
+            (Some(id), Some(email)) => Some(crate::User { id, email }),
+            _ => None,
+        };
         Ok(Principal {
-            user_id: row.try_get("user_id")?,
-            email: row.try_get("email")?,
+            user,
+            module: row.try_get("module")?,
             scopes: row.try_get("scopes")?,
             client_id: row.try_get("client_id")?,
             token_id: id,
@@ -267,6 +274,39 @@ impl Auth {
         if done.rows_affected() == 0 {
             return Err(AuthError::NotFound(format!("token {token_id}")));
         }
+        Ok(())
+    }
+
+    /// Registers the service token a module was given at deploy time (only its hash is
+    /// stored) with the scopes its manifest asks for; earlier tokens of the module stop working.
+    pub async fn register_service_token(
+        &self,
+        module: &str,
+        secret: &str,
+        scopes: &[String],
+    ) -> Result<()> {
+        let mut tx = self.pool().begin().await?;
+        sqlx::query(
+            "UPDATE tokens SET revoked_at = now() WHERE kind = 'service' AND module = $1 \
+             AND revoked_at IS NULL AND token_hash <> $2",
+        )
+        .bind(module)
+        .bind(hash(secret))
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "INSERT INTO tokens (id, token_hash, kind, module, scopes, label) \
+             VALUES ($1, $2, 'service', $3, $4, $5) \
+             ON CONFLICT (token_hash) DO UPDATE SET scopes = EXCLUDED.scopes, revoked_at = NULL",
+        )
+        .bind(Uuid::now_v7())
+        .bind(hash(secret))
+        .bind(module)
+        .bind(scopes)
+        .bind(format!("module {module}"))
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
         Ok(())
     }
 
