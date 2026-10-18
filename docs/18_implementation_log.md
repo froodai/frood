@@ -46,6 +46,9 @@
 | `brew install postgresql@18` (keg-only, не в PATH, служба не запущена) | Docker Desktop не создаёт контейнеры; нужен Postgres для тестов | `brew uninstall postgresql@18` |
 | Контейнер `frood-testdb` (postgres:18, порт 127.0.0.1:55433, trust) | Интеграционные тесты | `docker rm -f frood-testdb` |
 | `git init` в корне проекта; `user.name` / `user.email` автора в локальном конфиге репозитория | Коммиты от имени автора | — |
+| Приватный репозиторий `froodai/frood`, remote `origin` | Ответ автора QR1 | — |
+| Локальный Frood в `~/frood-local` (Docker Compose-проект `frood-local`: Postgres на 127.0.0.1:54320, сервер на 127.0.0.1:8080, вход `dev` для адреса автора) | Ответ автора QR2: попробовать с Claude Code | `docker compose -p frood-local down -v`, удалить `~/frood-local` |
+| MCP-сервер `frood` в пользовательском конфиге Claude Code (`~/.claude.json`) | То же | `claude mcp remove frood -s user` |
 
 ### Docker Desktop
 
