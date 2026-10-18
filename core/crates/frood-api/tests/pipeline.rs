@@ -279,7 +279,7 @@ async fn voice_and_notes_become_knowledge() {
         get_json(&format!("/v1/sources/{source}/status"), &pat),
     )
     .await;
-    assert_eq!(pending["state"], "idle", "nothing ran yet: {pending}");
+    assert_eq!(pending["state"], "queued", "not dispatched yet: {pending}");
     dispatch.drain().await.unwrap();
 
     let (_, status_now) = call(
@@ -361,6 +361,18 @@ async fn voice_and_notes_become_knowledge() {
     assert_eq!(status, StatusCode::ACCEPTED, "{captured}");
     assert_eq!(captured["file"]["content_type"], "audio/ogg");
     let voice_source = captured["source_id"].as_str().unwrap().to_owned();
+    // Only the transcription: its event is not dispatched yet, so the source is not done.
+    dispatch.dispatch_pending().await.unwrap();
+    dispatch.work_one().await.unwrap();
+    let (_, midway) = call(
+        &app,
+        get_json(&format!("/v1/sources/{voice_source}/status"), &pat),
+    )
+    .await;
+    assert_eq!(
+        midway["state"], "queued",
+        "extraction is still to come: {midway}"
+    );
     dispatch.drain().await.unwrap();
 
     let (_, source_now) = call(&app, get_json(&format!("/v1/sources/{voice_source}"), &pat)).await;
