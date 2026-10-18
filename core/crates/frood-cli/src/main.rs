@@ -3,6 +3,7 @@
 mod compose;
 mod init;
 mod lifecycle;
+mod modules;
 mod serve;
 mod token;
 

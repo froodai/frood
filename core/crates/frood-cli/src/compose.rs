@@ -25,7 +25,12 @@ pub fn listen_port(loaded: &Loaded) -> u16 {
 
 /// `config_path` and `secrets_path` must be absolute: Compose resolves paths against the
 /// compose file, which lives elsewhere.
-pub fn render(loaded: &Loaded, config_path: &Path, secrets_path: &Path) -> String {
+pub fn render(
+    loaded: &Loaded,
+    config_path: &Path,
+    secrets_path: &Path,
+    deploy_dir: &Path,
+) -> String {
     let deploy = &loaded.config.deploy;
     let secrets = quote(&secrets_path.display().to_string());
     let mut out = format!(
@@ -95,6 +100,35 @@ pub fn render(loaded: &Loaded, config_path: &Path, secrets_path: &Path) -> Strin
         ));
     }
 
+    for (name, module) in crate::modules::containers(loaded) {
+        let source = match (&module.build, &module.image) {
+            (Some(build), _) => {
+                let path = loaded.base_dir.join(build);
+                let path = path.canonicalize().unwrap_or(path);
+                format!("    build: {}\n", quote(&path.display().to_string()))
+            }
+            (None, Some(image)) => format!("    image: {}\n", quote(image)),
+            (None, None) => continue,
+        };
+        let env = crate::modules::env_file(deploy_dir, name);
+        out.push_str(&format!(
+            "  {service}:\n\
+             {source}\
+             \x20   restart: unless-stopped\n\
+             \x20   env_file:\n\
+             \x20     - {env}\n",
+            service = frood_modhost::service_name(name),
+            env = quote(&env.display().to_string()),
+        ));
+        if deploy.server == ServerPlacement::Host {
+            out.push_str(&format!(
+                "    ports:\n      - \"127.0.0.1:{}:{}\"\n    extra_hosts:\n      - \"host.docker.internal:host-gateway\"\n",
+                frood_modhost::host_port(&loaded.config, name),
+                frood_modhost::MODULE_PORT,
+            ));
+        }
+    }
+
     out.push_str("volumes:\n  pgdata:\n");
     out
 }
@@ -127,6 +161,7 @@ mod tests {
             &loaded(ServerPlacement::Host),
             Path::new("/x/frood.yaml"),
             Path::new("/x/.frood/secrets.env"),
+            Path::new("/x/.frood/deploy"),
         );
         assert!(out.contains("name: frood-personal"));
         assert!(out.contains("\"127.0.0.1:55432:5432\""));
@@ -139,11 +174,41 @@ mod tests {
     }
 
     #[test]
+    fn modules_get_services_with_their_own_env_files() {
+        let mut loaded = loaded(ServerPlacement::Container);
+        loaded.config.modules.insert(
+            "stt".into(),
+            frood_config::Module {
+                image: Some("ghcr.io/froodai/stt-openai:0.0.1".into()),
+                build: None,
+                url: None,
+                port: None,
+                secrets: vec!["OPENAI_API_KEY".into()],
+                config: Default::default(),
+            },
+        );
+        let out = render(
+            &loaded,
+            Path::new("/x/frood.yaml"),
+            Path::new("/x/.frood/secrets.env"),
+            Path::new("/x/.frood/deploy"),
+        );
+        assert!(out.contains("  module-stt:\n    image: \"ghcr.io/froodai/stt-openai:0.0.1\""));
+        assert!(out.contains("\"/x/.frood/deploy/module-stt.env\""));
+        let stt = out.split("  module-stt:").nth(1).unwrap();
+        assert!(
+            !stt.contains("secrets.env"),
+            "a module never gets the whole secrets file"
+        );
+    }
+
+    #[test]
     fn container_mode_adds_server_with_health_check() {
         let out = render(
             &loaded(ServerPlacement::Container),
             Path::new("/x/frood.yaml"),
             Path::new("/x/.frood/secrets.env"),
+            Path::new("/x/.frood/deploy"),
         );
         assert!(out.contains("  frood:\n    image: \"ghcr.io/froodai/frood:0.0.1\""));
         assert!(out.contains("\"127.0.0.1:8080:8080\""));
@@ -159,6 +224,7 @@ mod tests {
                 &loaded(server),
                 Path::new("/x/frood.yaml"),
                 Path::new("/x/.frood/secrets.env"),
+                Path::new("/x/.frood/deploy"),
             );
             let parsed: serde_json::Value = serde_yaml_ng::from_str(&out).unwrap();
             assert!(parsed["services"]["postgres"].is_object());

@@ -8,7 +8,7 @@ use anyhow::{Context, bail};
 use frood_config::{Loaded, ServerPlacement};
 use frood_store::RecordOutcome;
 
-use crate::compose;
+use crate::{compose, modules};
 
 /// Resolved locations of the config and its secrets file.
 pub struct Paths {
@@ -36,6 +36,29 @@ impl Paths {
 pub async fn plan(paths: &Paths) -> anyhow::Result<()> {
     let loaded = paths.load()?;
     print_summary(&loaded);
+    let secrets = frood_config::Secrets::from_file(&paths.secrets())?;
+    for (name, module) in &loaded.config.modules {
+        let source = match (&module.url, &module.build, &module.image) {
+            (Some(url), _, _) => format!("runs at {url}"),
+            (None, Some(build), _) => format!("built from {build}"),
+            (None, None, Some(image)) => image.clone(),
+            _ => "?".to_owned(),
+        };
+        let missing: Vec<&str> = module
+            .secrets
+            .iter()
+            .filter(|s| secrets.get(s).is_none())
+            .map(String::as_str)
+            .collect();
+        if missing.is_empty() {
+            println!("module {name}: {source}");
+        } else {
+            println!(
+                "module {name}: {source}; missing in the secrets file: {}",
+                missing.join(", ")
+            );
+        }
+    }
     match frood_store::connect(&loaded.config.storage.url, Duration::from_secs(2)).await {
         Ok(pool) => match frood_store::last_config_revision(&pool).await {
             Ok(Some(last)) if last.sha256 == loaded.sha256 => {
@@ -68,13 +91,17 @@ pub async fn apply(paths: &Paths, render_only: bool) -> anyhow::Result<()> {
             secrets_abs.display()
         );
     }
-    let deploy_dir = loaded.base_dir.join(".frood").join("deploy");
+    let deploy_dir = absolute(&loaded.base_dir.join(".frood").join("deploy"))?;
     std::fs::create_dir_all(&deploy_dir)
         .with_context(|| format!("cannot create {}", deploy_dir.display()))?;
+    for module in modules::ensure_tokens(&loaded, &secrets_abs)? {
+        println!("added a service token for module {module} to the secrets file");
+    }
+    modules::write_env_files(&loaded, &secrets_abs, &deploy_dir)?;
     let compose_path = deploy_dir.join("compose.yaml");
     std::fs::write(
         &compose_path,
-        compose::render(&loaded, &config_abs, &secrets_abs),
+        compose::render(&loaded, &config_abs, &secrets_abs, &deploy_dir),
     )
     .with_context(|| format!("cannot write {}", compose_path.display()))?;
     println!("wrote {}", compose_path.display());
@@ -82,7 +109,9 @@ pub async fn apply(paths: &Paths, render_only: bool) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    docker_compose_up(&compose_path, loaded.config.deploy.build.is_some()).await?;
+    let build = loaded.config.deploy.build.is_some()
+        || modules::containers(&loaded).any(|(_, m)| m.build.is_some());
+    docker_compose_up(&compose_path, build).await?;
 
     let pool = frood_store::connect(&loaded.config.storage.url, Duration::from_secs(60))
         .await
