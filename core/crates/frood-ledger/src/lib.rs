@@ -23,6 +23,9 @@ use journal::Event;
 use model::*;
 pub use policy::PolicyConfig;
 
+/// Largest file a capture may carry.
+pub const MAX_BLOB_BYTES: usize = 25 * 1024 * 1024;
+
 #[derive(Clone)]
 pub struct Ledger {
     pool: PgPool,
@@ -41,22 +44,46 @@ impl Ledger {
     /// Stores a source with one evidence row covering all of it. Capturing the same content
     /// from the same origin again returns the existing source.
     pub async fn capture_source(&self, actor: &Actor, input: NewSource) -> Result<CaptureResult> {
+        self.capture(actor, input, None).await
+    }
+
+    /// Stores a source, with a file when one came with it (`source.captured` tells the
+    /// dispatcher whether there is text to extract or media to transcribe). The same content,
+    /// or the same file, from the same origin is captured once.
+    pub async fn capture(
+        &self,
+        actor: &Actor,
+        input: NewSource,
+        blob: Option<NewBlob>,
+    ) -> Result<CaptureResult> {
         if input.kind.trim().is_empty() {
             return Err(invalid("source kind must not be empty"));
         }
-        if input.content.trim().is_empty() {
+        if input.content.trim().is_empty() && blob.is_none() {
             return Err(invalid("source content must not be empty"));
         }
-        let sha = hex::encode(Sha256::digest(input.content.as_bytes()));
-        let mut tx = self.pool.begin().await?;
+        if let Some(blob) = &blob {
+            if blob.data.is_empty() {
+                return Err(invalid("the file is empty"));
+            }
+            if blob.data.len() > MAX_BLOB_BYTES {
+                return Err(invalid(format!(
+                    "the file is larger than {} MB",
+                    MAX_BLOB_BYTES / 1_048_576
+                )));
+            }
+        }
+        let sha = match &blob {
+            Some(blob) => hex::encode(Sha256::digest(&blob.data)),
+            None => hex::encode(Sha256::digest(input.content.as_bytes())),
+        };
         let existing: Option<Uuid> =
             sqlx::query_scalar("SELECT id FROM sources WHERE origin = $1 AND content_sha256 = $2")
                 .bind(&input.origin)
                 .bind(&sha)
-                .fetch_optional(&mut *tx)
+                .fetch_optional(&self.pool)
                 .await?;
         if let Some(id) = existing {
-            tx.commit().await?;
             return Ok(CaptureResult {
                 source: query::source(&self.pool, id).await?,
                 created: false,
@@ -69,20 +96,42 @@ impl Ledger {
         } else {
             input.metadata
         };
+        let content = (!input.content.trim().is_empty()).then_some(input.content.as_str());
+        let mut tx = self.pool.begin().await?;
+        let blob_id = match &blob {
+            Some(blob) => {
+                let blob_id = Uuid::now_v7();
+                sqlx::query(
+                    "INSERT INTO blobs (id, content_type, filename, size_bytes, sha256, data) \
+                     VALUES ($1, $2, $3, $4, $5, $6)",
+                )
+                .bind(blob_id)
+                .bind(&blob.content_type)
+                .bind(&blob.filename)
+                .bind(i32::try_from(blob.data.len()).unwrap_or(i32::MAX))
+                .bind(&sha)
+                .bind(&blob.data)
+                .execute(&mut *tx)
+                .await?;
+                Some(blob_id)
+            }
+            None => None,
+        };
         let inserted = sqlx::query(
-            "INSERT INTO sources (id, kind, origin, uri, title, content, content_sha256, said_at, captured_by, metadata) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+            "INSERT INTO sources (id, kind, origin, uri, title, content, content_sha256, said_at, captured_by, metadata, blob_id) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
         )
         .bind(id)
         .bind(input.kind.trim())
         .bind(&input.origin)
         .bind(&input.uri)
         .bind(&input.title)
-        .bind(&input.content)
+        .bind(content)
         .bind(&sha)
         .bind(input.said_at)
         .bind(actor.as_str())
         .bind(&metadata)
+        .bind(blob_id)
         .execute(&mut *tx)
         .await;
         if let Err(err) = inserted {
@@ -116,7 +165,15 @@ impl Ledger {
             &[Event::new(
                 "source.captured",
                 format!("source/{id}"),
-                json!({ "source_id": id, "kind": input.kind.trim() }),
+                json!({
+                    "source_id": id,
+                    "kind": input.kind.trim(),
+                    "origin": input.origin,
+                    "captured_by": actor.as_str(),
+                    "has_text": content.is_some(),
+                    "has_media": blob.as_ref().is_some_and(NewBlob::is_media),
+                    "content_type": blob.as_ref().map(|b| b.content_type.as_str()),
+                }),
             )],
         )
         .await?;
@@ -125,6 +182,67 @@ impl Ledger {
             source: query::source(&self.pool, id).await?,
             created: true,
         })
+    }
+
+    /// The file of a source, with its bytes.
+    pub async fn source_file(&self, source_id: Uuid) -> Result<(BlobInfo, Vec<u8>)> {
+        let row = sqlx::query(
+            "SELECT b.id, b.content_type, b.filename, b.size_bytes, b.data FROM sources s \
+             JOIN blobs b ON b.id = s.blob_id WHERE s.id = $1",
+        )
+        .bind(source_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or_else(|| LedgerError::NotFound(format!("file of source {source_id}")))?;
+        use sqlx::Row;
+        Ok((
+            BlobInfo {
+                id: row.try_get("id")?,
+                content_type: row.try_get("content_type")?,
+                filename: row.try_get("filename")?,
+                size_bytes: row.try_get("size_bytes")?,
+            },
+            row.try_get("data")?,
+        ))
+    }
+
+    /// Records the transcript of a source's media as its text and announces
+    /// `source.transcribed`, which starts extraction.
+    pub async fn set_transcript(
+        &self,
+        actor: &Actor,
+        source_id: Uuid,
+        text: &str,
+        transcript: serde_json::Value,
+    ) -> Result<()> {
+        if text.trim().is_empty() {
+            return Err(invalid("the transcript is empty"));
+        }
+        let mut tx = self.pool.begin().await?;
+        let updated = sqlx::query(
+            "UPDATE sources SET content = $2, metadata = metadata || jsonb_build_object('transcript', $3::jsonb) \
+             WHERE id = $1",
+        )
+        .bind(source_id)
+        .bind(text)
+        .bind(&transcript)
+        .execute(&mut *tx)
+        .await?;
+        if updated.rows_affected() == 0 {
+            return Err(LedgerError::NotFound(format!("source {source_id}")));
+        }
+        journal::append(
+            &mut tx,
+            actor.as_str(),
+            &[Event::new(
+                "source.transcribed",
+                format!("source/{source_id}"),
+                json!({ "source_id": source_id, "has_text": true }),
+            )],
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(())
     }
 
     pub async fn add_evidence(&self, input: NewEvidence) -> Result<Evidence> {
