@@ -259,7 +259,7 @@ async fn setup(name: &str, idp: &Idp) -> Option<(Router, Auth)> {
     .expect("config")
     .config;
     let auth = Auth::new(pool.clone(), AuthSettings::from_config(&config));
-    let app = router(frood_api::assemble(&config, pool, |_| None).state);
+    let app = router(frood_api::assemble(&config, std::path::Path::new("."), pool, |_| None).state);
     Some((app, auth))
 }
 
@@ -472,8 +472,11 @@ async fn mcp_client_signs_in_and_uses_tools() {
         .iter()
         .map(|t| t["name"].as_str().unwrap())
         .collect();
-    assert_eq!(names.len(), 9, "{names:?}");
+    assert_eq!(names.len(), 11, "{names:?}");
     assert!(!names.contains(&"submit_verdict"));
+    // A person answers questions; only a run asks them.
+    assert!(names.contains(&"answer_question"));
+    assert!(!names.contains(&"ask_user"));
 
     let captured = call_tool(
         &app,

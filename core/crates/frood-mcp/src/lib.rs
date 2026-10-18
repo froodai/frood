@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use chrono::{DateTime, NaiveDate, Utc};
 use frood_auth::{Principal, scope};
+use frood_dispatch::Dispatch;
 use frood_ledger::model::*;
 use frood_ledger::{Ledger, LedgerError, SearchQuery};
 use frood_search::{SearchError, Searcher};
@@ -35,8 +36,13 @@ source in Frood. To remember something new, call capture_note; to change knowled
 structured way, call propose_change. Proposals wait for a person's verdict unless a policy \
 accepts them.";
 
+/// Tools only an agent's run token gets.
+const RUN: &str = "an agent's run";
+/// Tools only a person gets (not a run token acting for them): answering for oneself.
+const PERSON: &str = "a person's";
+
 /// The scope each tool needs; tools whose scope the token lacks are not listed.
-const TOOL_SCOPES: [(&str, &str); 10] = [
+const TOOL_SCOPES: [(&str, &str); 14] = [
     ("search_knowledge", scope::READ),
     ("list_assertions", scope::READ),
     ("get_context", scope::READ),
@@ -47,6 +53,10 @@ const TOOL_SCOPES: [(&str, &str); 10] = [
     ("capture_note", scope::CAPTURE),
     ("propose_change", scope::PROPOSE),
     ("submit_verdict", scope::DECIDE),
+    ("list_questions", scope::READ),
+    ("answer_question", PERSON),
+    ("ask_user", RUN),
+    ("report_progress", RUN),
 ];
 
 /// The Streamable HTTP service to mount at `/mcp`. `allowed_hosts` guards against DNS
@@ -54,6 +64,7 @@ const TOOL_SCOPES: [(&str, &str); 10] = [
 pub fn service(
     ledger: Ledger,
     searcher: Searcher,
+    dispatch: Dispatch,
     allowed_hosts: Vec<String>,
 ) -> StreamableHttpService<FroodMcp, NeverSessionManager> {
     let config = StreamableHttpServerConfig::default()
@@ -62,7 +73,13 @@ pub fn service(
         .with_sse_keep_alive(None)
         .with_allowed_hosts(allowed_hosts);
     StreamableHttpService::new(
-        move || Ok(FroodMcp::new(ledger.clone(), searcher.clone())),
+        move || {
+            Ok(FroodMcp::new(
+                ledger.clone(),
+                searcher.clone(),
+                dispatch.clone(),
+            ))
+        },
         Arc::new(NeverSessionManager::default()),
         config,
     )
@@ -72,6 +89,7 @@ pub fn service(
 pub struct FroodMcp {
     ledger: Ledger,
     searcher: Searcher,
+    dispatch: Dispatch,
     tool_router: ToolRouter<Self>,
 }
 
@@ -236,6 +254,43 @@ pub struct VerdictParams {
     pub deferred_until: Option<String>,
 }
 
+#[derive(Deserialize, JsonSchema)]
+pub struct AskParams {
+    /// One short question.
+    pub question: String,
+    /// Answers to choose from, if the question has them.
+    pub options: Option<Vec<String>>,
+    /// What the person needs to know to answer: the quote, the link, what you found.
+    pub context: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ProgressParams {
+    /// One line on what was done.
+    pub message: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct QuestionsParams {
+    /// open (default), answered, expired or cancelled.
+    pub status: Option<String>,
+    pub limit: Option<i64>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct AnswerParams {
+    pub question_id: String,
+    pub answer: String,
+}
+
+fn run_of(principal: &Principal) -> Result<Uuid, String> {
+    principal
+        .run
+        .as_ref()
+        .map(|run| run.id)
+        .ok_or_else(|| "only an agent's run can do this".to_owned())
+}
+
 fn status(value: Option<&str>) -> Result<Option<Status>, String> {
     value.map(str::parse).transpose()
 }
@@ -261,10 +316,11 @@ fn operations(values: Vec<serde_json::Map<String, Value>>) -> Result<Vec<Operati
 
 #[tool_router]
 impl FroodMcp {
-    pub fn new(ledger: Ledger, searcher: Searcher) -> Self {
+    pub fn new(ledger: Ledger, searcher: Searcher, dispatch: Dispatch) -> Self {
         Self {
             ledger,
             searcher,
+            dispatch,
             tool_router: Self::tool_router(),
         }
     }
@@ -628,6 +684,84 @@ impl FroodMcp {
                 .map_err(ledger_error)?,
         )
     }
+
+    #[tool(
+        description = "Ask a person a question when you cannot decide yourself and it matters (for example, whether something is a decision or only a discussion). After asking, end your turn: the answer arrives as the next message in this session. Do not ask what you can look up."
+    )]
+    async fn ask_user(
+        &self,
+        Extension(parts): Extension<http::request::Parts>,
+        Parameters(p): Parameters<AskParams>,
+    ) -> ToolResult {
+        let run = run_of(&principal(&parts)?)?;
+        let question = self
+            .dispatch
+            .ask_user(
+                run,
+                &p.question,
+                &p.options.unwrap_or_default(),
+                p.context.as_deref(),
+            )
+            .await?;
+        render(json!({
+            "question_id": question.id,
+            "expires_at": question.expires_at,
+            "next": "Asked. End your turn now; the answer will come as the next message.",
+        }))
+    }
+
+    #[tool(
+        description = "Note progress of this run in one line: what part of the work is done. People see it in the run's log."
+    )]
+    async fn report_progress(
+        &self,
+        Extension(parts): Extension<http::request::Parts>,
+        Parameters(p): Parameters<ProgressParams>,
+    ) -> ToolResult {
+        let run = run_of(&principal(&parts)?)?;
+        self.dispatch
+            .report_progress(run, &p.message)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "database error in report_progress");
+                "internal error; see server logs".to_owned()
+            })?;
+        Ok("Noted.".into())
+    }
+
+    #[tool(
+        description = "Questions agents asked people, newest first: open ones by default.",
+        annotations(read_only_hint = true)
+    )]
+    async fn list_questions(&self, Parameters(p): Parameters<QuestionsParams>) -> ToolResult {
+        let status = p.status.unwrap_or_else(|| "open".into());
+        render(
+            self.dispatch
+                .questions(Some(&status), limit(p.limit, 50))
+                .await
+                .map_err(|err| {
+                    tracing::error!(error = %err, "database error in list_questions");
+                    "internal error; see server logs".to_owned()
+                })?,
+        )
+    }
+
+    #[tool(
+        description = "Answer an agent's question in the person's words; the agent continues in the same session."
+    )]
+    async fn answer_question(
+        &self,
+        Extension(parts): Extension<http::request::Parts>,
+        Parameters(p): Parameters<AnswerParams>,
+    ) -> ToolResult {
+        let principal = principal(&parts)?;
+        let id = parse_uuid(&p.question_id, "question")?;
+        render(
+            self.dispatch
+                .answer_question(id, &p.answer, &principal.actor())
+                .await?,
+        )
+    }
 }
 
 impl FroodMcp {
@@ -642,7 +776,11 @@ impl FroodMcp {
         TOOL_SCOPES
             .iter()
             .find(|(name, _)| *name == tool)
-            .is_some_and(|(_, needed)| principal.has(needed))
+            .is_some_and(|(_, needed)| match *needed {
+                RUN => principal.run.is_some(),
+                PERSON => principal.user_id().is_some() && principal.has(scope::CAPTURE),
+                needed => principal.has(needed),
+            })
     }
 }
 
@@ -689,6 +827,14 @@ impl ServerHandler for FroodMcp {
                 .find(|(name, _)| *name == request.name)
                 .map(|(_, scope)| *scope);
             return match needed {
+                Some(RUN) => Ok(CallToolResult::error(vec![ContentBlock::text(
+                    "Only an agent's run can call this tool.",
+                )])
+                .into()),
+                Some(PERSON) => Ok(CallToolResult::error(vec![ContentBlock::text(
+                    "Only a person can answer questions, with the knowledge:capture permission.",
+                )])
+                .into()),
                 Some(needed) => Ok(CallToolResult::error(vec![ContentBlock::text(format!(
                     "This connection was not granted the {needed} permission. The person can reconnect Frood and grant it on the consent page."
                 ))])

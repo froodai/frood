@@ -4,7 +4,9 @@
 //! M3 has event rules and the standard jobs `transcribe`, `extract` and `embed`; schedules,
 //! agents and questions come with M4.
 
+mod agents;
 mod jobs;
+pub mod questions;
 pub mod runs;
 
 use std::sync::Arc;
@@ -21,7 +23,8 @@ use sqlx::{PgPool, Row};
 use tokio::sync::watch;
 use uuid::Uuid;
 
-pub use jobs::{Capabilities, JobError, JobSpec, Task, resolve};
+pub use jobs::{AgentSettings, Capabilities, JobError, JobSpec, Task, resolve};
+pub use questions::Question;
 pub use runs::Run;
 
 const READER: &str = "dispatcher";
@@ -31,6 +34,7 @@ const EVENTS_PER_PASS: i64 = 200;
 #[derive(Clone)]
 pub(crate) struct Ctx {
     pub pool: PgPool,
+    pub auth: frood_auth::Auth,
     pub ledger: Ledger,
     pub searcher: Searcher,
     pub gateway: Gateway,
@@ -56,6 +60,7 @@ pub struct SourceStatus {
 impl Dispatch {
     pub fn new(
         ledger: Ledger,
+        auth: frood_auth::Auth,
         searcher: Searcher,
         gateway: Gateway,
         modules: Modules,
@@ -64,6 +69,7 @@ impl Dispatch {
         Self {
             ctx: Ctx {
                 pool: ledger.pool().clone(),
+                auth,
                 ledger,
                 searcher,
                 gateway,
@@ -150,10 +156,24 @@ impl Dispatch {
             return Ok(Some(run.id));
         };
         let started = std::time::Instant::now();
+        if spec.task == Task::Agent {
+            // The agent runs in its runtime; the watcher sees it end.
+            let settings = spec.agent.as_ref().expect("agent jobs have settings");
+            if let Err(err) = agents::start_or_resume(&self.ctx, spec, settings, &run).await {
+                let retry = (err.transient && run.attempts < runs::MAX_ATTEMPTS)
+                    .then(|| runs::backoff(run.attempts));
+                tracing::warn!(run = %run.id, job = %run.job, error = %err.message, "agent did not start");
+                runs::fail(&self.ctx.pool, run.id, &err.message, retry).await?;
+            } else {
+                tracing::info!(run = %run.id, job = %run.job, runtime = %settings.runtime, "agent started");
+            }
+            return Ok(Some(run.id));
+        }
         let result = match spec.task {
             Task::Extract => jobs::extract::run(&self.ctx, spec, &run).await,
             Task::Transcribe => jobs::transcribe::run(&self.ctx, spec, &run).await,
             Task::Embed => jobs::embed::run(&self.ctx).await,
+            Task::Agent => unreachable!("handled above"),
         };
         match result {
             Ok(output) => {
@@ -216,6 +236,24 @@ impl Dispatch {
                         break;
                     }
                     if *shutdown.borrow() {
+                        break;
+                    }
+                }
+            }));
+        }
+        {
+            let this = self.clone();
+            let mut shutdown = shutdown.clone();
+            tasks.push(tokio::spawn(async move {
+                loop {
+                    if let Err(err) = this.watch_once().await {
+                        tracing::error!(error = %err, "watching agent runs failed");
+                    }
+                    if tokio::time::timeout(Duration::from_secs(2), shutdown.changed())
+                        .await
+                        .is_ok()
+                        || *shutdown.borrow()
+                    {
                         break;
                     }
                 }

@@ -46,7 +46,7 @@ async fn app(name: &str) -> Option<(Router, Tokens)> {
         .create_personal_token(alice, "reader", &["knowledge:read".to_owned()], Some(1))
         .await
         .unwrap();
-    let app = router(frood_api::assemble(&config, pool, |_| None).state);
+    let app = router(frood_api::assemble(&config, std::path::Path::new("."), pool, |_| None).state);
     Some((
         app,
         Tokens {

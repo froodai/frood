@@ -223,11 +223,16 @@ async fn voice_and_notes_become_knowledge() {
     )
     .unwrap()
     .config;
-    let assembly = frood_api::assemble(&config, pool, |name| match name {
-        "FROOD_MODULE_TOKEN_STT" => Some("stt-token".into()),
-        "FROOD_MODULE_TOKEN_TELEGRAM" => Some("tg-token".into()),
-        _ => None,
-    });
+    let assembly = frood_api::assemble(
+        &config,
+        std::path::Path::new("."),
+        pool,
+        |name| match name {
+            "FROOD_MODULE_TOKEN_STT" => Some("stt-token".into()),
+            "FROOD_MODULE_TOKEN_TELEGRAM" => Some("tg-token".into()),
+            _ => None,
+        },
+    );
     assert!(assembly.warnings.is_empty(), "{:?}", assembly.warnings);
     let names: Vec<&str> = assembly
         .state

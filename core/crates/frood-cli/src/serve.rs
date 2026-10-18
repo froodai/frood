@@ -40,7 +40,7 @@ pub async fn run(paths: &Paths) -> anyhow::Result<()> {
         mut state,
         modules,
         warnings,
-    } = frood_api::assemble(config, pool, |name| secrets.get(name));
+    } = frood_api::assemble(config, &loaded.base_dir, pool, |name| secrets.get(name));
     state.config_sha256 = Some(loaded.sha256.clone());
     for warning in &warnings {
         tracing::warn!("{warning}");
