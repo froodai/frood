@@ -74,6 +74,14 @@ pub fn assemble(
         gateway,
         modules.clone(),
         jobs,
+    )
+    .with_sources(
+        config
+            .sources
+            .as_ref()
+            .and_then(|sources| sources.as_object())
+            .map(|sources| sources.keys().cloned().collect())
+            .unwrap_or_default(),
     );
     Assembly {
         state: AppState {

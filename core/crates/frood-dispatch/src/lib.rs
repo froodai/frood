@@ -1,13 +1,14 @@
 //! Dispatcher (docs/13 §2): reads the journal with its own checkpoint, applies the rules of
 //! the jobs, queues runs (one per job and event) and executes them with retries.
 //!
-//! M3 has event rules and the standard jobs `transcribe`, `extract` and `embed`; schedules,
-//! agents and questions come with M4.
+//! Jobs react to journal events or to schedules (a schedule's tick is a journal event too);
+//! agent jobs run in a runtime module and may wait for people's answers.
 
 mod agents;
 mod jobs;
 pub mod questions;
 pub mod runs;
+mod schedules;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -45,6 +46,8 @@ pub(crate) struct Ctx {
 pub struct Dispatch {
     ctx: Ctx,
     jobs: Arc<Vec<JobSpec>>,
+    /// Names of the sources, for `for_each: source`.
+    sources: Arc<Vec<String>>,
 }
 
 /// Processing of one source: its runs and the proposals that cite it.
@@ -76,7 +79,14 @@ impl Dispatch {
                 modules,
             },
             jobs: Arc::new(jobs),
+            sources: Arc::new(Vec::new()),
         }
+    }
+
+    /// The sources schedules with `for_each: source` run for.
+    pub fn with_sources(mut self, sources: Vec<String>) -> Self {
+        self.sources = Arc::new(sources);
+        self
     }
 
     pub fn jobs(&self) -> &[JobSpec] {
@@ -236,6 +246,24 @@ impl Dispatch {
                         break;
                     }
                     if *shutdown.borrow() {
+                        break;
+                    }
+                }
+            }));
+        }
+        {
+            let this = self.clone();
+            let mut shutdown = shutdown.clone();
+            tasks.push(tokio::spawn(async move {
+                loop {
+                    if let Err(err) = this.tick_schedules(chrono::Utc::now()).await {
+                        tracing::error!(error = %err, "schedules failed");
+                    }
+                    if tokio::time::timeout(Duration::from_secs(15), shutdown.changed())
+                        .await
+                        .is_ok()
+                        || *shutdown.borrow()
+                    {
                         break;
                     }
                 }

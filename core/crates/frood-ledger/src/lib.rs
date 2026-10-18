@@ -755,6 +755,18 @@ impl Ledger {
         Ok(())
     }
 
+    /// Appends an event inside the caller's transaction: it is recorded only together with the
+    /// caller's own changes.
+    pub async fn append_event_in(
+        conn: &mut sqlx::PgConnection,
+        actor: &str,
+        event_type: &'static str,
+        subject: String,
+        data: serde_json::Value,
+    ) -> Result<()> {
+        journal::append(conn, actor, &[Event::new(event_type, subject, data)]).await
+    }
+
     /// Proposals that cite evidence from a source, oldest first.
     pub async fn proposals_citing_source(&self, source_id: Uuid) -> Result<Vec<Proposal>> {
         let ids: Vec<Uuid> = sqlx::query_scalar(

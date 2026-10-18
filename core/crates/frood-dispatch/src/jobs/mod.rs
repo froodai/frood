@@ -54,6 +54,9 @@ pub struct JobSpec {
 
 impl JobSpec {
     pub(crate) fn matches(&self, event_type: &str, data: &Value) -> bool {
+        if event_type == crate::schedules::TICK {
+            return data.get("job").and_then(Value::as_str) == Some(self.name.as_str());
+        }
         self.triggers.iter().any(|trigger| {
             trigger.event.as_deref() == Some(event_type)
                 && trigger

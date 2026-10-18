@@ -547,3 +547,81 @@ async fn agent_asks_waits_resumes_and_proposes() {
     let (_, now) = call(&app, get_json(&format!("/v1/runs/{third}"), &pat)).await;
     assert_eq!(now["status"], "cancelled", "{now}");
 }
+
+#[tokio::test]
+async fn schedules_tick_once_per_source() {
+    use chrono::TimeZone;
+    let Some(url) = frood_store::testing::database_url() else {
+        eprintln!("FROOD_TEST_DATABASE_URL is not set; skipping");
+        return;
+    };
+    let pool = frood_store::testing::fresh_database(&url, "schedules")
+        .await
+        .expect("test database");
+    let raw = "version: 1\ninstallation: {name: test}\nstorage: {uses: postgres, url: 'postgres://unused'}\n\
+         deploy: {server: host}\n\
+         accounts:\n  claude: { kind: api_key, provider: anthropic, secret: sk-test }\n\
+         sources:\n  team-chat: {}\n  wiki: {}\n\
+         jobs:\n  extract: { enabled: false }\n  nightly:\n    uses: agents.execute\n    \
+         on: [{ schedule: '0 3 * * *', timezone: Europe/Amsterdam, for_each: source }]\n    \
+         runtime: runtime\n    agent: claude-code\n    model: claude-haiku-5-5\n    account: claude\n    \
+         instructions: Sweep the source.\n\
+         modules:\n  runtime: { url: 'http://127.0.0.1:1' }\n";
+    let config = frood_config::parse(
+        raw,
+        &frood_config::Secrets::from_pairs(Vec::<(String, String)>::new()),
+    )
+    .unwrap()
+    .config;
+    let assembly = frood_api::assemble(&config, std::path::Path::new("."), pool.clone(), |_| {
+        Some("rt-token".to_owned())
+    });
+    assert!(assembly.warnings.is_empty(), "{:?}", assembly.warnings);
+    let dispatch = assembly.state.dispatch.clone();
+    let at = |d: u32, h: u32| chrono::Utc.with_ymd_and_hms(2026, 11, d, h, 0, 0).unwrap();
+
+    // First seen on the 2nd at noon: nothing fires for the past.
+    assert_eq!(dispatch.tick_schedules(at(2, 12)).await.unwrap(), 0);
+    assert_eq!(
+        dispatch.tick_schedules(at(3, 1)).await.unwrap(),
+        0,
+        "03:00 CET is 02:00 UTC"
+    );
+    // The 3rd, 02:00 UTC: one tick per source, once.
+    assert_eq!(dispatch.tick_schedules(at(3, 2)).await.unwrap(), 2);
+    assert_eq!(dispatch.tick_schedules(at(3, 5)).await.unwrap(), 0);
+    // The server was down for three nights: one tick per source, not three.
+    assert_eq!(dispatch.tick_schedules(at(6, 9)).await.unwrap(), 2);
+
+    dispatch.dispatch_pending().await.unwrap();
+    let runs = dispatch.runs(Some("nightly"), None, 50).await.unwrap();
+    assert_eq!(runs.len(), 4);
+    let mut seen: Vec<(String, String, i64)> = runs
+        .iter()
+        .map(|run| {
+            let data = &run.input["event"]["data"];
+            (
+                data["source"].as_str().unwrap().to_owned(),
+                data["scheduled_for"].as_str().unwrap().to_owned(),
+                data["missed"].as_i64().unwrap(),
+            )
+        })
+        .collect();
+    seen.sort();
+    assert_eq!(
+        seen,
+        [
+            ("team-chat".into(), "2026-11-03T02:00:00Z".into(), 0),
+            ("team-chat".into(), "2026-11-06T02:00:00Z".into(), 2),
+            ("wiki".into(), "2026-11-03T02:00:00Z".into(), 0),
+            ("wiki".into(), "2026-11-06T02:00:00Z".into(), 2),
+        ]
+    );
+    assert_eq!(
+        runs[0]
+            .subject
+            .as_deref()
+            .map(|s| s.starts_with("schedule/nightly/")),
+        Some(true)
+    );
+}
