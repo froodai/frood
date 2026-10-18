@@ -1,10 +1,7 @@
-//! `/v1` routes over the Ledger (docs/12_api_mcp_auth.md §2).
-//!
-//! Until sign-in arrives (M2), writes name their actor in the `Frood-Actor` header and the server
-//! listens on loopback only.
+//! `/v1` routes over the Ledger (docs/12_api_mcp_auth.md §2). Every route needs a bearer token
+//! with the scope named by its `Caller<…>` argument.
 
-use axum::extract::{FromRequestParts, Path, Query, State};
-use axum::http::request::Parts;
+use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -14,6 +11,7 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::AppState;
+use crate::auth::{Caller, Capture, Decide, Journal, Propose, Read};
 use crate::error::ApiError;
 
 pub fn routes() -> Router<AppState> {
@@ -33,37 +31,14 @@ pub fn routes() -> Router<AppState> {
         .route("/v1/journal", get(journal))
 }
 
-/// The acting principal of a write request.
-pub struct ActorHeader(Actor);
-
-impl<S: Send + Sync> FromRequestParts<S> for ActorHeader {
-    type Rejection = ApiError;
-
-    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        let value = parts
-            .headers
-            .get("frood-actor")
-            .ok_or_else(|| {
-                ApiError::new(
-                    StatusCode::UNAUTHORIZED,
-                    "actor-required",
-                    "set the Frood-Actor header, e.g. user:alice",
-                )
-            })?
-            .to_str()
-            .map_err(|_| ApiError::bad_request("Frood-Actor must be ASCII"))?;
-        Actor::parse(value).map(Self).map_err(ApiError::bad_request)
-    }
-}
-
 type ApiResult<T> = Result<Json<T>, ApiError>;
 
 async fn capture(
     State(state): State<AppState>,
-    ActorHeader(actor): ActorHeader,
+    caller: Caller<Capture>,
     Json(input): Json<NewSource>,
 ) -> Result<(StatusCode, Json<CaptureResult>), ApiError> {
-    let result = state.ledger.capture_source(&actor, input).await?;
+    let result = state.ledger.capture_source(&caller.actor(), input).await?;
     let status = if result.created {
         StatusCode::CREATED
     } else {
@@ -72,13 +47,17 @@ async fn capture(
     Ok((status, Json(result)))
 }
 
-async fn source(State(state): State<AppState>, Path(id): Path<Uuid>) -> ApiResult<Source> {
+async fn source(
+    State(state): State<AppState>,
+    _caller: Caller<Read>,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Source> {
     Ok(Json(state.ledger.source(id).await?))
 }
 
 async fn add_evidence(
     State(state): State<AppState>,
-    ActorHeader(_actor): ActorHeader,
+    _caller: Caller<Capture>,
     Json(input): Json<NewEvidence>,
 ) -> Result<(StatusCode, Json<Evidence>), ApiError> {
     Ok((
@@ -89,12 +68,12 @@ async fn add_evidence(
 
 async fn add_observation(
     State(state): State<AppState>,
-    ActorHeader(actor): ActorHeader,
+    caller: Caller<Propose>,
     Json(input): Json<NewObservation>,
 ) -> Result<(StatusCode, Json<Observation>), ApiError> {
     Ok((
         StatusCode::CREATED,
-        Json(state.ledger.add_observation(&actor, input).await?),
+        Json(state.ledger.add_observation(&caller.actor(), input).await?),
     ))
 }
 
@@ -106,6 +85,7 @@ struct PointInTime {
 
 async fn assertion(
     State(state): State<AppState>,
+    _caller: Caller<Read>,
     Path(id): Path<Uuid>,
     Query(point): Query<PointInTime>,
 ) -> ApiResult<AssertionView> {
@@ -116,6 +96,7 @@ async fn assertion(
 
 async fn history(
     State(state): State<AppState>,
+    _caller: Caller<Read>,
     Path(id): Path<Uuid>,
 ) -> ApiResult<Vec<AssertionVersion>> {
     Ok(Json(state.ledger.history(id).await?))
@@ -124,6 +105,7 @@ async fn history(
 /// `GET /v1/assertions?kind=&entity=&status=&text=&valid_at=&as_of=&limit=&after=&slot.<name>.<op>=`
 async fn list_assertions(
     State(state): State<AppState>,
+    _caller: Caller<Read>,
     Query(params): Query<Vec<(String, String)>>,
 ) -> ApiResult<Vec<AssertionVersion>> {
     let mut filter = AssertionFilter::default();
@@ -183,6 +165,7 @@ struct EntityQuery {
 
 async fn list_entities(
     State(state): State<AppState>,
+    _caller: Caller<Read>,
     Query(query): Query<EntityQuery>,
 ) -> ApiResult<Vec<Entity>> {
     Ok(Json(
@@ -197,13 +180,17 @@ async fn list_entities(
     ))
 }
 
-async fn entity(State(state): State<AppState>, Path(id): Path<Uuid>) -> ApiResult<EntityView> {
+async fn entity(
+    State(state): State<AppState>,
+    _caller: Caller<Read>,
+    Path(id): Path<Uuid>,
+) -> ApiResult<EntityView> {
     Ok(Json(state.ledger.entity(id).await?))
 }
 
 async fn open_proposal(
     State(state): State<AppState>,
-    ActorHeader(actor): ActorHeader,
+    caller: Caller<Propose>,
     headers: HeaderMap,
     Json(mut input): Json<NewProposal>,
 ) -> Result<(StatusCode, Json<Proposal>), ApiError> {
@@ -215,7 +202,7 @@ async fn open_proposal(
     }
     Ok((
         StatusCode::CREATED,
-        Json(state.ledger.open_proposal(&actor, input).await?),
+        Json(state.ledger.open_proposal(&caller.actor(), input).await?),
     ))
 }
 
@@ -228,6 +215,7 @@ struct ProposalQuery {
 
 async fn list_proposals(
     State(state): State<AppState>,
+    _caller: Caller<Read>,
     Query(query): Query<ProposalQuery>,
 ) -> ApiResult<Vec<Proposal>> {
     let proposal_state = query
@@ -244,17 +232,26 @@ async fn list_proposals(
     ))
 }
 
-async fn proposal(State(state): State<AppState>, Path(id): Path<Uuid>) -> ApiResult<Proposal> {
+async fn proposal(
+    State(state): State<AppState>,
+    _caller: Caller<Read>,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Proposal> {
     Ok(Json(state.ledger.proposal(id).await?))
 }
 
 async fn submit_verdict(
     State(state): State<AppState>,
-    ActorHeader(actor): ActorHeader,
+    caller: Caller<Decide>,
     Path(id): Path<Uuid>,
     Json(input): Json<VerdictInput>,
 ) -> ApiResult<Proposal> {
-    Ok(Json(state.ledger.submit_verdict(&actor, id, input).await?))
+    Ok(Json(
+        state
+            .ledger
+            .submit_verdict(&caller.actor(), id, input)
+            .await?,
+    ))
 }
 
 #[derive(Deserialize)]
@@ -265,6 +262,7 @@ struct JournalQuery {
 
 async fn journal(
     State(state): State<AppState>,
+    _caller: Caller<Journal>,
     Query(query): Query<JournalQuery>,
 ) -> ApiResult<Vec<JournalEvent>> {
     Ok(Json(

@@ -4,6 +4,7 @@ mod compose;
 mod init;
 mod lifecycle;
 mod serve;
+mod token;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -66,6 +67,11 @@ enum Command {
     Serve,
     /// Show server health and the applied config revision.
     Status,
+    /// Personal tokens for scripts and bots.
+    Token {
+        #[command(subcommand)]
+        command: TokenCommand,
+    },
     /// Config utilities.
     Config {
         #[command(subcommand)]
@@ -74,6 +80,36 @@ enum Command {
     /// Exit 0 if the URL answers 200. Used by container health checks.
     #[command(hide = true)]
     Probe { url: String },
+}
+
+#[derive(Subcommand)]
+enum TokenCommand {
+    /// Create a token and print it (once) to stdout.
+    Create {
+        /// Whose token it is; the user is created if new.
+        #[arg(long)]
+        email: String,
+        /// What it is for, e.g. "iPhone shortcut".
+        #[arg(long)]
+        label: String,
+        /// Comma-separated scopes. Default: all but admin.
+        #[arg(long, value_delimiter = ',')]
+        scopes: Vec<String>,
+        /// Expire after this many days. Default: never.
+        #[arg(long)]
+        expires_days: Option<u32>,
+    },
+    /// List a user's personal tokens.
+    List {
+        #[arg(long)]
+        email: String,
+    },
+    /// Revoke a token by id.
+    Revoke {
+        #[arg(long)]
+        email: String,
+        id: uuid::Uuid,
+    },
 }
 
 #[derive(Subcommand)]
@@ -121,6 +157,23 @@ async fn main() -> ExitCode {
         Command::Apply { render_only } => lifecycle::apply(&paths, render_only).await,
         Command::Serve => serve::run(&paths).await,
         Command::Status => lifecycle::status(&paths).await,
+        Command::Token { command } => match command {
+            TokenCommand::Create {
+                email,
+                label,
+                scopes,
+                expires_days,
+            } => {
+                let scopes = if scopes.is_empty() {
+                    token::default_scopes()
+                } else {
+                    scopes
+                };
+                token::create(&paths, &email, &label, &scopes, expires_days).await
+            }
+            TokenCommand::List { email } => token::list(&paths, &email).await,
+            TokenCommand::Revoke { email, id } => token::revoke(&paths, &email, id).await,
+        },
         Command::Config {
             command: ConfigCommand::Schema,
         } => {
