@@ -80,6 +80,8 @@ FROOD_TEST_DATABASE_URL=postgres://postgres@127.0.0.1:55433/postgres cargo test
 - 48 тестов: сквозной OAuth-поток с моковым OIDC-провайдером (Ed25519-ключ генерируется в тесте) — discovery по 401, DCR, отказ на чужом redirect URI, вход, согласие, неверный PKCE, обмен кода, аудитория токена, MCP `initialize` / `tools/list` / `capture_note` / `propose_change` / `list_inbox` / отказ `submit_verdict`, ротация refresh, отзыв семьи при повторе, одноразовость кода; отказ человеку вне allowlist; токены и scopes на `/v1`. clippy `-D warnings`, rustfmt.
 - Вживую на собранном бинарнике: 401 с `WWW-Authenticate` на `/mcp`, метаданные, `frood token create`, MCP через curl, `/v1/me`; `/oauth/authorize` с настоящим client_id Claude (`https://claude.ai/oauth/mcp-oauth-client-metadata`) — документ скачан с claude.ai, redirect `https://claude.ai/api/mcp/auth_callback` принят.
 
+- Первый вход автора из Claude Code упал: «Cross-site request refused». Причина — `<meta name="referrer" content="no-referrer">` на страницах входа: с ним браузер шлёт `Origin: null` в POST-формах, а сервер проверяет Origin. Тесты этого не ловили, потому что ставили заголовок сами. Исправлено на `same-origin`; весь поток пройден в настоящем браузере (вход → согласие → код → токен → MCP).
+
 **Не проверено:** настоящие ChatGPT и Claude (нужны публичный HTTPS и OIDC-клиент, см. ниже) и Claude Code (можно локально, но это меняет конфиг Claude Code у автора — без спроса не делал).
 
 ### Что нужно для проверки с ChatGPT и Claude (пункт 5)
