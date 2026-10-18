@@ -39,7 +39,7 @@ sends `resume`.
     { "name": "frood", "path": "/mcp", "headers": { "Authorization": "Bearer frood_run_…" } },
     { "name": "source:team-slack", "url": "https://mcp.example.com/slack", "headers": { "Authorization": "Bearer …" } }
   ],
-  "credentials": { "provider": "anthropic", "api_key": "sk-ant-…", "workspace": "wrkspc_…" },
+  "credentials": { "provider": "anthropic", "kind": "api_key", "api_key": "sk-ant-…", "workspace": "wrkspc_…" },
   "budget": { "max_usd": 0.5, "max_minutes": 15 },
   "ask_user": true
 }
@@ -54,8 +54,18 @@ sends `resume`.
 - `mcp_servers` are the only MCP servers the agent gets. `path` is relative to `FROOD_URL`;
   `url` is absolute. Pass `headers` as they are. The `frood` server's token is a **run token**:
   it lives as long as the run, may read, capture and propose, never decide.
-- `credentials` are for this run only. Do not write them where another run, or the agent's own
-  tools, can read them later, and never log them or the headers.
+- `credentials` pay for the run, in one of two kinds:
+  - `{ "kind": "api_key", "provider", "api_key", "workspace" }` — an API key; `workspace` is
+    set for Anthropic organization keys (send it as `anthropic-workspace-id`, or the agent's
+    equivalent);
+  - `{ "kind": "subscription", "provider", "token" }` — a person's subscription, only for that
+    person's runs (the core checks). Anthropic: the token from `claude setup-token`, used as
+    `CLAUDE_CODE_OAUTH_TOKEN` of an unmodified Claude Code. OpenAI: the contents of
+    `~/.codex/auth.json` after `codex login`, for Codex. Never use it for anything but that
+    agent.
+
+  They are for this run only. Do not write them where another run, or the agent's own tools,
+  can read them later, and never log them or the headers.
 - `budget` is a limit the runtime should pass to the agent when it supports one. The core also
   watches `cost_usd` and minutes and sends `stop` when the run is over.
 - `session_ref` is the agent's own session id, kept so that `resume` continues the same

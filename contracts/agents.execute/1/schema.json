@@ -47,13 +47,27 @@
       "oneOf": [{ "required": ["path"] }, { "required": ["url"] }]
     },
     "credentials": {
-      "type": "object",
-      "required": ["provider", "api_key"],
-      "properties": {
-        "provider": { "enum": ["anthropic", "openai"] },
-        "api_key": { "type": "string" },
-        "workspace": { "type": ["string", "null"] }
-      }
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["provider", "kind", "api_key"],
+          "properties": {
+            "provider": { "enum": ["anthropic", "openai"] },
+            "kind": { "const": "api_key" },
+            "api_key": { "type": "string" },
+            "workspace": { "type": ["string", "null"] }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["provider", "kind", "token"],
+          "properties": {
+            "provider": { "enum": ["anthropic", "openai"] },
+            "kind": { "const": "subscription" },
+            "token": { "type": "string" }
+          }
+        }
+      ]
     },
     "start": {
       "allOf": [

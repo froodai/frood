@@ -127,7 +127,8 @@ fn standard() -> Vec<JobSpec> {
 
 /// What the installation can run, decided at startup.
 pub struct Capabilities<'a> {
-    pub default_account: Option<&'a str>,
+    /// Accounts the core can call models with directly (API keys, not subscriptions).
+    pub api_accounts: &'a [String],
     pub embeddings: bool,
     pub modules: usize,
     /// Directory of the config file, for instructions given as paths.
@@ -145,7 +146,8 @@ fn read_instructions(value: &str, base_dir: &Path) -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|e| format!("cannot read {}: {e}", path.display()))
 }
 
-/// The agent part of a job from its config (A3: runtime, agent, model and account are named).
+/// The agent part of a job from its config (A3: runtime, agent, model and account are named;
+/// so is the most a run may spend).
 fn agent_settings(
     name: &str,
     job: &Job,
@@ -157,6 +159,10 @@ fn agent_settings(
         ("agent", job.agent.is_none()),
         ("model", job.model.is_none()),
         ("account", job.account.is_none()),
+        (
+            "budget.max_usd",
+            job.budget.as_ref().is_none_or(|b| b.max_usd.is_none()),
+        ),
     ]
     .iter()
     .filter(|(_, m)| *m)
@@ -232,16 +238,23 @@ pub fn resolve(config: &Config, caps: &Capabilities<'_>) -> (Vec<JobSpec>, Vec<S
         }
         match job.task {
             Task::Extract => {
-                let Some(account) = job.with_str("account").or(caps.default_account) else {
-                    warnings.push(
-                        "job extract is off: add an account (accounts: …) so it can call a model"
-                            .to_owned(),
-                    );
-                    continue;
-                };
-                let account = account.to_owned();
-                job.with.insert("account".into(), json!(account));
-                // No default model (D4): the installation names it.
+                // No default account or model (D4): the installation names them.
+                match job.with_str("account") {
+                    None => {
+                        warnings.push(
+                            "job extract is off: name its account in jobs.extract.with.account"
+                                .to_owned(),
+                        );
+                        continue;
+                    }
+                    Some(account) if !caps.api_accounts.iter().any(|a| a == account) => {
+                        warnings.push(format!(
+                            "job extract is off: account {account} is not an api_key account"
+                        ));
+                        continue;
+                    }
+                    Some(_) => {}
+                }
                 if job.with_str("model").is_none() {
                     warnings.push(
                         "job extract is off: name its model in jobs.extract.with.model".to_owned(),
@@ -388,53 +401,58 @@ mod tests {
         jobs.iter().map(|j| j.name.as_str()).collect()
     }
 
+    fn caps<'a>(accounts: &'a [String], embeddings: bool, modules: usize) -> Capabilities<'a> {
+        Capabilities {
+            api_accounts: accounts,
+            embeddings,
+            modules,
+            base_dir: Path::new("."),
+        }
+    }
+
     #[test]
     fn standard_jobs_follow_what_the_installation_has() {
-        let caps = Capabilities {
-            default_account: Some("claude"),
-            embeddings: false,
-            modules: 0,
-            base_dir: Path::new("."),
-        };
+        let claude = ["claude".to_owned()];
+        let caps = caps(&claude, false, 0);
         let (jobs, warnings) = resolve(&config(""), &caps);
-        assert!(jobs.is_empty(), "no model named, so no extraction");
+        assert!(
+            jobs.is_empty(),
+            "no account or model named, so no extraction"
+        );
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.contains("jobs.extract.with.account"))
+        );
+        let (_, warnings) = resolve(
+            &config("jobs:\n  extract: { with: { account: claude } }\n"),
+            &caps,
+        );
         assert!(
             warnings
                 .iter()
                 .any(|w| w.contains("jobs.extract.with.model"))
         );
         let (jobs, warnings) = resolve(
-            &config("jobs:\n  extract: { with: { model: claude-haiku-5-5 } }\n"),
+            &config("jobs:\n  extract: { with: { account: claude, model: claude-haiku-5-5 } }\n"),
             &caps,
         );
         assert_eq!(names(&jobs), ["extract"]);
-        assert_eq!(jobs[0].with_str("account"), Some("claude"));
         assert!(warnings.iter().any(|w| w.contains("transcribe is off")));
 
-        let caps = Capabilities {
-            default_account: None,
-            embeddings: true,
-            modules: 1,
-            base_dir: Path::new("."),
-        };
-        let (jobs, warnings) = resolve(&config(""), &caps);
+        let (jobs, warnings) = resolve(&config(""), &self::caps(&[], true, 1));
         assert_eq!(names(&jobs), ["transcribe", "embed"]);
         assert!(warnings.iter().any(|w| w.contains("extract is off")));
     }
 
     #[test]
     fn config_changes_and_turns_off_standard_jobs() {
-        let caps = Capabilities {
-            default_account: Some("claude"),
-            embeddings: true,
-            modules: 1,
-            base_dir: Path::new("."),
-        };
+        let claude = ["claude".to_owned()];
         let (jobs, warnings) = resolve(
             &config(
-                "jobs:\n  extract: { with: { model: claude-sonnet-5-5 } }\n  embed: { enabled: false }\n  digest: { uses: llm.complete }\n",
+                "jobs:\n  extract: { account: claude, model: claude-sonnet-5-5 }\n  embed: { enabled: false }\n  digest: { uses: llm.complete }\n",
             ),
-            &caps,
+            &caps(&claude, true, 1),
         );
         assert_eq!(names(&jobs), ["transcribe", "extract"]);
         assert_eq!(jobs[1].with_str("model"), Some("claude-sonnet-5-5"));
@@ -444,13 +462,11 @@ mod tests {
 
     #[test]
     fn triggers_match_event_type_and_fields() {
-        let caps = Capabilities {
-            default_account: Some("claude"),
-            embeddings: true,
-            modules: 1,
-            base_dir: Path::new("."),
-        };
-        let (jobs, _) = resolve(&config("jobs:\n  extract: { with: { model: m } }\n"), &caps);
+        let claude = ["claude".to_owned()];
+        let (jobs, _) = resolve(
+            &config("jobs:\n  extract: { with: { account: claude, model: m } }\n"),
+            &caps(&claude, true, 1),
+        );
         let extract = jobs.iter().find(|j| j.name == "extract").unwrap();
         assert!(extract.matches("source.captured", &json!({ "has_text": true })));
         assert!(!extract.matches(

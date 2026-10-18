@@ -269,7 +269,30 @@ pub enum Account {
         /// must name one in every request.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         workspace: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        budget: Option<AccountBudget>,
     },
+    /// One person's own subscription (Claude Pro or Max, ChatGPT Plus or Pro). Its vendors allow
+    /// it only inside their own agent, for the subscriber's own work, so only agent jobs that run
+    /// that agent (`claude-code`, `codex`) on the owner's behalf may use it.
+    Subscription {
+        provider: ModelProvider,
+        /// The subscriber's email; only runs on their behalf may use the account.
+        owner: String,
+        /// Anthropic: the token from `claude setup-token`. OpenAI: the contents of
+        /// `~/.codex/auth.json` after `codex login`.
+        secret: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        budget: Option<AccountBudget>,
+    },
+}
+
+/// A limit on what an account spends in a calendar month (UTC), counted from what agent runs
+/// report. Runs that would go over it are not started, or are stopped.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AccountBudget {
+    pub monthly_usd: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -282,7 +305,31 @@ pub enum ModelProvider {
 impl Account {
     pub fn provider(&self) -> ModelProvider {
         match self {
-            Self::ApiKey { provider, .. } => *provider,
+            Self::ApiKey { provider, .. } | Self::Subscription { provider, .. } => *provider,
+        }
+    }
+
+    pub fn budget(&self) -> Option<&AccountBudget> {
+        match self {
+            Self::ApiKey { budget, .. } | Self::Subscription { budget, .. } => budget.as_ref(),
+        }
+    }
+
+    /// The subscriber, for a subscription.
+    pub fn owner(&self) -> Option<&str> {
+        match self {
+            Self::ApiKey { .. } => None,
+            Self::Subscription { owner, .. } => Some(owner),
+        }
+    }
+}
+
+impl ModelProvider {
+    /// The vendor's own agent, the only one a subscription may be used in.
+    pub fn own_agent(self) -> &'static str {
+        match self {
+            Self::Anthropic => "claude-code",
+            Self::Openai => "codex",
         }
     }
 }
