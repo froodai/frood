@@ -123,9 +123,9 @@ pub async fn status(paths: &Paths) -> anyhow::Result<()> {
     let loaded = paths.load()?;
     let url = format!("http://{}/readyz", local_address(&loaded));
     match http_status(&url).await {
-        Some(200) => println!("server: ready ({url})"),
-        Some(code) => println!("server: answering but not ready, HTTP {code} ({url})"),
-        None => println!("server: not reachable ({url})"),
+        Ok(200) => println!("server: ready ({url})"),
+        Ok(code) => println!("server: answering but not ready, HTTP {code} ({url})"),
+        Err(err) => println!("server: not reachable ({url}): {err}"),
     }
     match frood_store::connect(&loaded.config.storage.url, Duration::from_secs(2)).await {
         Ok(pool) => match frood_store::last_config_revision(&pool).await {
@@ -150,9 +150,9 @@ pub async fn status(paths: &Paths) -> anyhow::Result<()> {
 
 pub async fn probe(url: &str) -> anyhow::Result<()> {
     match http_status(url).await {
-        Some(200) => Ok(()),
-        Some(code) => bail!("{url} answered HTTP {code}"),
-        None => bail!("{url} is not reachable"),
+        Ok(200) => Ok(()),
+        Ok(code) => bail!("{url} answered HTTP {code}"),
+        Err(err) => bail!("{url} is not reachable: {err}"),
     }
 }
 
@@ -222,7 +222,7 @@ fn local_address(loaded: &Loaded) -> SocketAddr {
 async fn wait_ready(url: &str, wait: Duration) -> bool {
     let deadline = tokio::time::Instant::now() + wait;
     while tokio::time::Instant::now() < deadline {
-        if http_status(url).await == Some(200) {
+        if matches!(http_status(url).await, Ok(200)) {
             return true;
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
@@ -230,17 +230,22 @@ async fn wait_ready(url: &str, wait: Duration) -> bool {
     false
 }
 
-async fn http_status(url: &str) -> Option<u16> {
+async fn http_status(url: &str) -> anyhow::Result<u16> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(3))
         .build()
-        .ok()?;
-    client
-        .get(url)
-        .send()
-        .await
-        .ok()
-        .map(|response| response.status().as_u16())
+        .context("cannot create an HTTP client")?;
+    let response = client.get(url).send().await.map_err(|err| {
+        // reqwest's Display omits the cause (connection refused, timeout, ...).
+        let mut message = err.to_string();
+        let mut source = std::error::Error::source(&err);
+        while let Some(cause) = source {
+            message = format!("{message}: {cause}");
+            source = cause.source();
+        }
+        anyhow::anyhow!(message)
+    })?;
+    Ok(response.status().as_u16())
 }
 
 fn absolute(path: &Path) -> anyhow::Result<PathBuf> {
