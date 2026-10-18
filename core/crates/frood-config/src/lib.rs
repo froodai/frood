@@ -165,12 +165,15 @@ fn validate(config: &Config) -> Result<(), ConfigError> {
 fn validate_auth(config: &Config, problems: &mut Vec<String>) {
     let auth = &config.auth;
     let mut ids = BTreeSet::new();
+    // A server in a container listens on all interfaces inside it, but compose publishes the
+    // port on 127.0.0.1 only, so it is as local as a loopback listen address.
     let loopback_only = config.server.public_url.is_none()
-        && config
-            .server
-            .listen
-            .parse::<SocketAddr>()
-            .is_ok_and(|a| a.ip().is_loopback());
+        && (config.deploy.server == ServerPlacement::Container
+            || config
+                .server
+                .listen
+                .parse::<SocketAddr>()
+                .is_ok_and(|a| a.ip().is_loopback()));
     for provider in &auth.providers {
         let id = provider.id();
         if !is_valid_name(id) {
@@ -191,7 +194,7 @@ fn validate_auth(config: &Config, problems: &mut Vec<String>) {
                 }
             }
             Provider::Dev { .. } if !loopback_only => problems.push(format!(
-                "auth provider {id}: the dev provider works only on a loopback server.listen without server.public_url"
+                "auth provider {id}: the dev provider works only on a local server (loopback server.listen or a container) without server.public_url"
             )),
             Provider::Dev { .. } => {}
         }
@@ -383,6 +386,37 @@ mod tests {
         let loaded = load(&config_path, None).unwrap();
         assert!(loaded.config.storage.url.contains(":fromfile@"));
         assert_eq!(loaded.base_dir, dir.path());
+    }
+
+    #[test]
+    fn dev_sign_in_only_on_local_servers() {
+        let with_dev = |server| {
+            template_for(server).replace(
+                "  providers: []",
+                "  providers:\n    - {kind: dev, id: dev}",
+            )
+        };
+        // A loopback listen address, or a container (published on 127.0.0.1 only).
+        for server in [ServerPlacement::Host, ServerPlacement::Container] {
+            assert!(parse(&with_dev(server), &secrets()).is_ok(), "{server:?}");
+        }
+        let open = with_dev(ServerPlacement::Host)
+            .replace("listen: \"127.0.0.1:8080\"", "listen: \"0.0.0.0:8080\"");
+        let public = with_dev(ServerPlacement::Container).replace(
+            "# public_url: https://mem.example.com",
+            "public_url: https://mem.example.com",
+        );
+        for raw in [open, public] {
+            match parse(&raw, &secrets()) {
+                Err(ConfigError::Invalid(problems)) => {
+                    assert!(
+                        problems.iter().any(|p| p.contains("dev provider")),
+                        "{problems:?}"
+                    );
+                }
+                other => panic!("expected Invalid, got {other:?}"),
+            }
+        }
     }
 
     #[test]
