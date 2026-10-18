@@ -19,8 +19,8 @@ Write the text of each assertion in the language of the source — a Russian not
 
 The source says when it was said (`said_at`). Resolve relative dates against it: "next Friday" said on Thursday 2026-10-15 is 2026-10-23. Put dates as YYYY-MM-DD.
 
-- `valid_from`: when the statement starts to hold, if the source says so; otherwise null (it holds from when it was said).
-- Slots carry structured values: `due` (YYYY-MM-DD) for commitments and deadlines, `owner` (an entity ref) for who is responsible, and others when useful (`version`, `amount`, `status`). Values are strings.
+- `valid_from`: only when the source says the statement itself starts to hold later than when it was said ("from November, standups are at 10"); otherwise null, and it holds from when it was said. The date of an event, a meeting or a deadline is not that: it goes into a slot. A note about tomorrow's lesson is known today, so its `valid_from` is null.
+- Slots carry structured values: `date` (YYYY-MM-DD) and `time` (HH:MM) for events and meetings, `due` (YYYY-MM-DD) for commitments and deadlines, `owner` (an entity ref) for who is responsible, and others when useful (`version`, `amount`, `status`). Values are strings.
 
 ## Entities
 
