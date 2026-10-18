@@ -16,6 +16,9 @@ use crate::rows::{self, version_columns};
 /// Reciprocal rank fusion constant.
 const RRF_K: f64 = 60.0;
 
+/// A version, and its fused score with which lists found it (words, meaning).
+type Ranked = ((Uuid, i32), (f64, bool, bool));
+
 #[derive(Debug, Clone, Default)]
 pub struct SearchQuery {
     pub text: String,
@@ -143,7 +146,7 @@ pub(crate) async fn search(pool: &PgPool, query: &SearchQuery) -> Result<Vec<Sea
         }
     }
 
-    let mut order: Vec<((Uuid, i32), (f64, bool, bool))> = ranked.into_iter().collect();
+    let mut order: Vec<Ranked> = ranked.into_iter().collect();
     order.sort_by(|a, b| b.1.0.total_cmp(&a.1.0));
     order.truncate(limit as usize);
     if order.is_empty() {
