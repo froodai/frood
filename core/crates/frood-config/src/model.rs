@@ -265,6 +265,10 @@ pub enum Account {
         /// Another endpoint with the same API (a proxy or a compatible service).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         base_url: Option<String>,
+        /// Anthropic: the workspace (`wrkspc_…`) for a key made at organization level, which
+        /// must name one in every request.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        workspace: Option<String>,
     },
 }
 
