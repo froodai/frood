@@ -12,16 +12,21 @@ impl Auth {
         if settings.allow.contains(&email) {
             return true;
         }
-        email
-            .rsplit_once('@')
-            .is_some_and(|(_, domain)| settings.allow_domains.iter().any(|allowed| allowed == domain))
+        email.rsplit_once('@').is_some_and(|(_, domain)| {
+            settings
+                .allow_domains
+                .iter()
+                .any(|allowed| allowed == domain)
+        })
     }
 
     /// Finds or creates the user for a verified email and records the sign-in.
     pub(crate) async fn sign_in(&self, email: &str, display_name: Option<&str>) -> Result<Uuid> {
         let email = email.trim().to_lowercase();
         if !self.is_allowed(&email) {
-            return Err(AuthError::Invalid(format!("{email} is not allowed to sign in to this installation")));
+            return Err(AuthError::Invalid(format!(
+                "{email} is not allowed to sign in to this installation"
+            )));
         }
         Ok(sqlx::query_scalar(
             "INSERT INTO users (id, email, display_name, last_login_at) VALUES ($1, $2, $3, now()) \

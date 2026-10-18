@@ -34,11 +34,18 @@ fn page(title: &str, body: &str) -> Html<String> {
 pub(crate) fn error(message: &str) -> Html<String> {
     page(
         "Sign-in problem",
-        &format!("<h1>Sign-in problem</h1><p>{}</p><p class=\"muted\">Start again from the app you were connecting.</p>", escape(message)),
+        &format!(
+            "<h1>Sign-in problem</h1><p>{}</p><p class=\"muted\">Start again from the app you were connecting.</p>",
+            escape(message)
+        ),
     )
 }
 
-pub(crate) fn choose_provider(installation: &str, providers: &[(String, String)], tx: &str) -> Html<String> {
+pub(crate) fn choose_provider(
+    installation: &str,
+    providers: &[(String, String)],
+    tx: &str,
+) -> Html<String> {
     let buttons: String = providers
         .iter()
         .map(|(id, label)| {
@@ -52,7 +59,10 @@ pub(crate) fn choose_provider(installation: &str, providers: &[(String, String)]
         .collect();
     page(
         "Sign in",
-        &format!("<h1>Sign in to Frood</h1><p class=\"muted\">Installation <code>{}</code></p>{buttons}", escape(installation)),
+        &format!(
+            "<h1>Sign in to Frood</h1><p class=\"muted\">Installation <code>{}</code></p>{buttons}",
+            escape(installation)
+        ),
     )
 }
 
@@ -121,7 +131,10 @@ mod tests {
 
     #[test]
     fn escapes_markup() {
-        assert_eq!(escape("<a href=\"x\">'&"), "&lt;a href=&quot;x&quot;&gt;&#39;&amp;");
+        assert_eq!(
+            escape("<a href=\"x\">'&"),
+            "&lt;a href=&quot;x&quot;&gt;&#39;&amp;"
+        );
         let html = error("<script>alert(1)</script>").0;
         assert!(!html.contains("<script>alert"));
     }

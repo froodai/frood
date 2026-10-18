@@ -36,7 +36,12 @@ impl Auth {
     /// must have been registered through DCR.
     pub(crate) async fn resolve_client(&self, client_id: &str) -> Result<ClientInfo> {
         if client_id.starts_with("https://") {
-            if let Some((info, at)) = self.inner.cimd_cache.lock().expect("cache lock").get(client_id)
+            if let Some((info, at)) = self
+                .inner
+                .cimd_cache
+                .lock()
+                .expect("cache lock")
+                .get(client_id)
                 && at.elapsed() < CIMD_TTL
             {
                 return Ok(info.clone());
@@ -50,13 +55,19 @@ impl Auth {
                 .insert(client_id.to_owned(), (info.clone(), Instant::now()));
             return Ok(info);
         }
-        let row: Option<(Option<String>, Vec<String>)> =
-            sqlx::query_as("SELECT client_name, redirect_uris FROM oauth_clients WHERE client_id = $1")
-                .bind(client_id)
-                .fetch_optional(self.pool())
-                .await?;
-        let (name, redirect_uris) = row.ok_or_else(|| AuthError::Invalid(format!("unknown client {client_id:?}")))?;
-        Ok(ClientInfo { client_id: client_id.to_owned(), name, redirect_uris })
+        let row: Option<(Option<String>, Vec<String>)> = sqlx::query_as(
+            "SELECT client_name, redirect_uris FROM oauth_clients WHERE client_id = $1",
+        )
+        .bind(client_id)
+        .fetch_optional(self.pool())
+        .await?;
+        let (name, redirect_uris) =
+            row.ok_or_else(|| AuthError::Invalid(format!("unknown client {client_id:?}")))?;
+        Ok(ClientInfo {
+            client_id: client_id.to_owned(),
+            name,
+            redirect_uris,
+        })
     }
 
     /// RFC 7591 registration of a public client.
@@ -69,24 +80,39 @@ impl Auth {
             )));
         }
         if request.redirect_uris.is_empty() || request.redirect_uris.len() > 10 {
-            return Err(AuthError::Invalid("invalid_redirect_uri: give 1 to 10 redirect URIs".into()));
+            return Err(AuthError::Invalid(
+                "invalid_redirect_uri: give 1 to 10 redirect URIs".into(),
+            ));
         }
         for uri in &request.redirect_uris {
-            check_redirect_uri(uri).map_err(|e| AuthError::Invalid(format!("invalid_redirect_uri: {e}")))?;
+            check_redirect_uri(uri)
+                .map_err(|e| AuthError::Invalid(format!("invalid_redirect_uri: {e}")))?;
         }
-        let name = request.client_name.map(|n| n.chars().take(100).collect::<String>());
-        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM oauth_clients").fetch_one(self.pool()).await?;
+        let name = request
+            .client_name
+            .map(|n| n.chars().take(100).collect::<String>());
+        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM oauth_clients")
+            .fetch_one(self.pool())
+            .await?;
         if count >= MAX_REGISTERED_CLIENTS {
-            return Err(AuthError::Invalid("too many registered clients; remove unused ones".into()));
+            return Err(AuthError::Invalid(
+                "too many registered clients; remove unused ones".into(),
+            ));
         }
         let client_id = format!("frood_client_{}", Uuid::now_v7().simple());
-        sqlx::query("INSERT INTO oauth_clients (client_id, client_name, redirect_uris) VALUES ($1, $2, $3)")
-            .bind(&client_id)
-            .bind(&name)
-            .bind(&request.redirect_uris)
-            .execute(self.pool())
-            .await?;
-        Ok(ClientInfo { client_id, name, redirect_uris: request.redirect_uris })
+        sqlx::query(
+            "INSERT INTO oauth_clients (client_id, client_name, redirect_uris) VALUES ($1, $2, $3)",
+        )
+        .bind(&client_id)
+        .bind(&name)
+        .bind(&request.redirect_uris)
+        .execute(self.pool())
+        .await?;
+        Ok(ClientInfo {
+            client_id,
+            name,
+            redirect_uris: request.redirect_uris,
+        })
     }
 }
 
@@ -121,28 +147,39 @@ pub(crate) fn redirect_allowed(registered: &[String], requested: &str) -> bool {
     if registered.iter().any(|r| r == requested) {
         return true;
     }
-    let Ok(requested) = Url::parse(requested) else { return false };
+    let Ok(requested) = Url::parse(requested) else {
+        return false;
+    };
     if requested.scheme() != "http" || !is_loopback_host(&requested) {
         return false;
     }
-    registered.iter().filter_map(|r| Url::parse(r).ok()).any(|r| {
-        r.scheme() == "http"
-            && is_loopback_host(&r)
-            && r.host_str() == requested.host_str()
-            && r.path() == requested.path()
-            && r.query() == requested.query()
-    })
+    registered
+        .iter()
+        .filter_map(|r| Url::parse(r).ok())
+        .any(|r| {
+            r.scheme() == "http"
+                && is_loopback_host(&r)
+                && r.host_str() == requested.host_str()
+                && r.path() == requested.path()
+                && r.query() == requested.query()
+        })
 }
 
 fn parse_metadata_document(client_id: &str, document: &Value) -> Result<ClientInfo> {
-    let invalid = |m: &str| AuthError::Invalid(format!("client metadata document {client_id}: {m}"));
+    let invalid =
+        |m: &str| AuthError::Invalid(format!("client metadata document {client_id}: {m}"));
     if document.get("client_id").and_then(Value::as_str) != Some(client_id) {
         return Err(invalid("client_id must equal the document URL"));
     }
     let redirect_uris: Vec<String> = document
         .get("redirect_uris")
         .and_then(Value::as_array)
-        .map(|uris| uris.iter().filter_map(Value::as_str).map(str::to_owned).collect())
+        .map(|uris| {
+            uris.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect()
+        })
         .unwrap_or_default();
     if redirect_uris.is_empty() {
         return Err(invalid("redirect_uris is missing"));
@@ -150,8 +187,15 @@ fn parse_metadata_document(client_id: &str, document: &Value) -> Result<ClientIn
     for uri in &redirect_uris {
         check_redirect_uri(uri).map_err(|e| invalid(&e))?;
     }
-    let name = document.get("client_name").and_then(Value::as_str).map(|n| n.chars().take(100).collect());
-    Ok(ClientInfo { client_id: client_id.to_owned(), name, redirect_uris })
+    let name = document
+        .get("client_name")
+        .and_then(Value::as_str)
+        .map(|n| n.chars().take(100).collect());
+    Ok(ClientInfo {
+        client_id: client_id.to_owned(),
+        name,
+        redirect_uris,
+    })
 }
 
 /// Fetches a metadata document without letting the URL reach internal networks: https only,
@@ -160,10 +204,17 @@ fn parse_metadata_document(client_id: &str, document: &Value) -> Result<ClientIn
 async fn fetch_metadata_document(url: &str) -> Result<Value> {
     let invalid = |m: String| AuthError::Invalid(format!("client metadata document {url}: {m}"));
     let parsed = Url::parse(url).map_err(|_| invalid("not a URL".into()))?;
-    if parsed.scheme() != "https" || !parsed.username().is_empty() || parsed.password().is_some() || parsed.fragment().is_some() {
+    if parsed.scheme() != "https"
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.fragment().is_some()
+    {
         return Err(invalid("must be a plain https URL".into()));
     }
-    let host = parsed.host_str().ok_or_else(|| invalid("has no host".into()))?.to_owned();
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| invalid("has no host".into()))?
+        .to_owned();
     let port = parsed.port_or_known_default().unwrap_or(443);
     let addresses: Vec<SocketAddr> = tokio::net::lookup_host((host.as_str(), port))
         .await
@@ -230,12 +281,30 @@ mod tests {
 
     #[test]
     fn redirect_rules() {
-        let registered = vec!["https://claude.ai/api/mcp/auth_callback".to_owned(), "http://127.0.0.1/callback".to_owned()];
-        assert!(redirect_allowed(&registered, "https://claude.ai/api/mcp/auth_callback"));
-        assert!(redirect_allowed(&registered, "http://127.0.0.1:53124/callback"));
-        assert!(!redirect_allowed(&registered, "http://127.0.0.1:53124/other"));
-        assert!(!redirect_allowed(&registered, "http://localhost:53124/callback"));
-        assert!(!redirect_allowed(&registered, "https://evil.example/api/mcp/auth_callback"));
+        let registered = vec![
+            "https://claude.ai/api/mcp/auth_callback".to_owned(),
+            "http://127.0.0.1/callback".to_owned(),
+        ];
+        assert!(redirect_allowed(
+            &registered,
+            "https://claude.ai/api/mcp/auth_callback"
+        ));
+        assert!(redirect_allowed(
+            &registered,
+            "http://127.0.0.1:53124/callback"
+        ));
+        assert!(!redirect_allowed(
+            &registered,
+            "http://127.0.0.1:53124/other"
+        ));
+        assert!(!redirect_allowed(
+            &registered,
+            "http://localhost:53124/callback"
+        ));
+        assert!(!redirect_allowed(
+            &registered,
+            "https://evil.example/api/mcp/auth_callback"
+        ));
 
         assert!(check_redirect_uri("https://chatgpt.com/connector/oauth/abc").is_ok());
         assert!(check_redirect_uri("http://localhost:3000/cb").is_ok());
@@ -253,24 +322,56 @@ mod tests {
         let ok = json!({ "client_id": url, "client_name": "ChatGPT", "redirect_uris": ["https://chatgpt.com/cb"] });
         let info = parse_metadata_document(url, &ok).unwrap();
         assert_eq!(info.name.as_deref(), Some("ChatGPT"));
-        assert!(parse_metadata_document(url, &json!({ "client_id": "https://other", "redirect_uris": ["https://x/cb"] })).is_err());
+        assert!(
+            parse_metadata_document(
+                url,
+                &json!({ "client_id": "https://other", "redirect_uris": ["https://x/cb"] })
+            )
+            .is_err()
+        );
         assert!(parse_metadata_document(url, &json!({ "client_id": url })).is_err());
     }
 
     #[test]
     fn only_public_addresses_pass() {
-        for blocked in ["127.0.0.1", "10.1.2.3", "172.16.0.1", "192.168.1.1", "169.254.169.254", "100.64.0.1", "0.0.0.0", "::1", "fd00::1", "fe80::1", "::ffff:10.0.0.1"] {
-            assert!(!is_public_ip(blocked.parse().unwrap()), "{blocked} must be blocked");
+        for blocked in [
+            "127.0.0.1",
+            "10.1.2.3",
+            "172.16.0.1",
+            "192.168.1.1",
+            "169.254.169.254",
+            "100.64.0.1",
+            "0.0.0.0",
+            "::1",
+            "fd00::1",
+            "fe80::1",
+            "::ffff:10.0.0.1",
+        ] {
+            assert!(
+                !is_public_ip(blocked.parse().unwrap()),
+                "{blocked} must be blocked"
+            );
         }
         for allowed in ["8.8.8.8", "1.1.1.1", "2606:4700:4700::1111"] {
-            assert!(is_public_ip(allowed.parse().unwrap()), "{allowed} must pass");
+            assert!(
+                is_public_ip(allowed.parse().unwrap()),
+                "{allowed} must pass"
+            );
         }
     }
 
     #[tokio::test]
     async fn metadata_fetch_refuses_internal_targets() {
-        for url in ["http://example.com/c.json", "https://127.0.0.1/c.json", "https://localhost/c.json", "https://user:pw@example.com/c.json"] {
-            assert!(fetch_metadata_document(url).await.is_err(), "{url} must be refused");
+        for url in [
+            "http://example.com/c.json",
+            "https://127.0.0.1/c.json",
+            "https://localhost/c.json",
+            "https://user:pw@example.com/c.json",
+        ] {
+            assert!(
+                fetch_metadata_document(url).await.is_err(),
+                "{url} must be refused"
+            );
         }
     }
 }
