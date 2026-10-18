@@ -1,0 +1,626 @@
+//! Knowledge Ledger (docs/11_knowledge_model.md v0.2): sources and evidence, observations,
+//! entities, bitemporal assertion versions, proposals and verdicts, and the journal.
+//!
+//! Knowledge changes only through proposals. A verdict applies one alternative atomically, after
+//! checking that every version the proposal was built on is still current.
+
+mod apply;
+mod error;
+mod journal;
+pub mod model;
+mod policy;
+mod query;
+mod rows;
+
+use serde_json::json;
+use sha2::{Digest, Sha256};
+use sqlx::PgPool;
+use uuid::Uuid;
+
+pub use error::{LedgerError, Result};
+use error::{invalid, is_unique_violation};
+use journal::Event;
+use model::*;
+pub use policy::PolicyConfig;
+
+#[derive(Clone)]
+pub struct Ledger {
+    pool: PgPool,
+    policy: PolicyConfig,
+}
+
+impl Ledger {
+    pub fn new(pool: PgPool, policy: PolicyConfig) -> Self {
+        Self { pool, policy }
+    }
+
+    pub fn pool(&self) -> &PgPool {
+        &self.pool
+    }
+
+    /// Stores a source with one evidence row covering all of it. Capturing the same content
+    /// from the same origin again returns the existing source.
+    pub async fn capture_source(&self, actor: &Actor, input: NewSource) -> Result<CaptureResult> {
+        if input.kind.trim().is_empty() {
+            return Err(invalid("source kind must not be empty"));
+        }
+        if input.content.trim().is_empty() {
+            return Err(invalid("source content must not be empty"));
+        }
+        let sha = hex::encode(Sha256::digest(input.content.as_bytes()));
+        let mut tx = self.pool.begin().await?;
+        let existing: Option<Uuid> =
+            sqlx::query_scalar("SELECT id FROM sources WHERE origin = $1 AND content_sha256 = $2")
+                .bind(&input.origin)
+                .bind(&sha)
+                .fetch_optional(&mut *tx)
+                .await?;
+        if let Some(id) = existing {
+            tx.commit().await?;
+            return Ok(CaptureResult {
+                source: query::source(&self.pool, id).await?,
+                created: false,
+            });
+        }
+
+        let id = Uuid::now_v7();
+        let metadata = if input.metadata.is_null() {
+            json!({})
+        } else {
+            input.metadata
+        };
+        let inserted = sqlx::query(
+            "INSERT INTO sources (id, kind, origin, uri, title, content, content_sha256, said_at, captured_by, metadata) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+        )
+        .bind(id)
+        .bind(input.kind.trim())
+        .bind(&input.origin)
+        .bind(&input.uri)
+        .bind(&input.title)
+        .bind(&input.content)
+        .bind(&sha)
+        .bind(input.said_at)
+        .bind(actor.as_str())
+        .bind(&metadata)
+        .execute(&mut *tx)
+        .await;
+        if let Err(err) = inserted {
+            if is_unique_violation(&err) {
+                // Captured concurrently by someone else.
+                drop(tx);
+                let id: Uuid = sqlx::query_scalar(
+                    "SELECT id FROM sources WHERE origin = $1 AND content_sha256 = $2",
+                )
+                .bind(&input.origin)
+                .bind(&sha)
+                .fetch_one(&self.pool)
+                .await?;
+                return Ok(CaptureResult {
+                    source: query::source(&self.pool, id).await?,
+                    created: false,
+                });
+            }
+            return Err(err.into());
+        }
+        let evidence_id = Uuid::now_v7();
+        sqlx::query("INSERT INTO evidence (id, source_id, anchor) VALUES ($1, $2, $3)")
+            .bind(evidence_id)
+            .bind(id)
+            .bind(json!({ "type": "whole" }))
+            .execute(&mut *tx)
+            .await?;
+        journal::append(
+            &mut tx,
+            actor.as_str(),
+            &[Event::new(
+                "source.captured",
+                format!("source/{id}"),
+                json!({ "source_id": id, "kind": input.kind.trim() }),
+            )],
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(CaptureResult {
+            source: query::source(&self.pool, id).await?,
+            created: true,
+        })
+    }
+
+    pub async fn add_evidence(&self, input: NewEvidence) -> Result<Evidence> {
+        if !input.anchor.is_object() {
+            return Err(invalid("evidence anchor must be an object"));
+        }
+        let id = Uuid::now_v7();
+        let row = sqlx::query(
+            "INSERT INTO evidence (id, source_id, anchor, quote) \
+             SELECT $1, id, $3, $4 FROM sources WHERE id = $2 \
+             RETURNING id, source_id, anchor, quote, created_at",
+        )
+        .bind(id)
+        .bind(input.source_id)
+        .bind(&input.anchor)
+        .bind(&input.quote)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or_else(|| LedgerError::NotFound(format!("source {}", input.source_id)))?;
+        rows::evidence(&row)
+    }
+
+    pub async fn add_observation(
+        &self,
+        actor: &Actor,
+        input: NewObservation,
+    ) -> Result<Observation> {
+        if input.text.trim().is_empty() {
+            return Err(invalid("observation text must not be empty"));
+        }
+        if input.confidence.is_some_and(|c| !(0.0..=1.0).contains(&c)) {
+            return Err(invalid("confidence must be between 0 and 1"));
+        }
+        let mut tx = self.pool.begin().await?;
+        let id = Uuid::now_v7();
+        let row = sqlx::query(
+            "INSERT INTO observations (id, source_id, evidence_id, text, modality, said_at, extracted_by, confidence, flags) \
+             SELECT $1, s.id, $3, $4, $5, $6, $7, $8, $9 FROM sources s WHERE s.id = $2 \
+             AND ($3::uuid IS NULL OR EXISTS (SELECT 1 FROM evidence e WHERE e.id = $3 AND e.source_id = s.id)) \
+             RETURNING id, source_id, evidence_id, text, modality, said_at, extracted_by, confidence, flags, created_at",
+        )
+        .bind(id)
+        .bind(input.source_id)
+        .bind(input.evidence_id)
+        .bind(input.text.trim())
+        .bind(input.modality.as_str())
+        .bind(input.said_at)
+        .bind(actor.as_str())
+        .bind(input.confidence)
+        .bind(&input.flags)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| LedgerError::NotFound(format!("source {} (or its evidence)", input.source_id)))?;
+        journal::append(
+            &mut tx,
+            actor.as_str(),
+            &[Event::new(
+                "observation.extracted",
+                format!("observation/{id}"),
+                json!({ "observation_id": id, "source_id": input.source_id }),
+            )],
+        )
+        .await?;
+        tx.commit().await?;
+        rows::observation(&row)
+    }
+
+    /// Opens a proposal, then lets the policies decide whether it is accepted right away.
+    pub async fn open_proposal(&self, author: &Actor, input: NewProposal) -> Result<Proposal> {
+        let alternatives = match (input.operations, input.alternatives) {
+            (Some(operations), None) => vec![Alternative {
+                key: "default".to_owned(),
+                label: None,
+                operations,
+            }],
+            (None, Some(alternatives)) => alternatives,
+            _ => return Err(invalid("give either operations or alternatives")),
+        };
+        if alternatives.is_empty() {
+            return Err(invalid("a proposal needs at least one alternative"));
+        }
+        let mut keys: Vec<&str> = alternatives.iter().map(|a| a.key.as_str()).collect();
+        keys.sort_unstable();
+        if keys.windows(2).any(|w| w[0] == w[1]) || keys.iter().any(|k| k.is_empty()) {
+            return Err(invalid("alternative keys must be non-empty and unique"));
+        }
+        for alternative in &alternatives {
+            apply::validate(&alternative.operations, &input.base)
+                .map_err(|e| invalid(format!("alternative {:?}: {e}", alternative.key)))?;
+        }
+        if input.confidence.is_some_and(|c| !(0.0..=1.0).contains(&c)) {
+            return Err(invalid("confidence must be between 0 and 1"));
+        }
+
+        let mut tx = self.pool.begin().await?;
+        if let Some(key) = &input.idempotency_key
+            && let Some(id) =
+                sqlx::query_scalar::<_, Uuid>("SELECT id FROM proposals WHERE idempotency_key = $1")
+                    .bind(key)
+                    .fetch_optional(&mut *tx)
+                    .await?
+        {
+            return query::proposal(&mut tx, id).await;
+        }
+        for base in &input.base {
+            let current = apply::current_version(&mut tx, base.assertion_id)
+                .await?
+                .ok_or_else(|| LedgerError::NotFound(format!("assertion {}", base.assertion_id)))?;
+            if current.version != base.version {
+                return Err(LedgerError::Stale {
+                    proposal: None,
+                    assertion: base.assertion_id,
+                    expected: base.version,
+                    actual: current.version,
+                });
+            }
+        }
+        let id = Uuid::now_v7();
+        let inserted = sqlx::query(
+            "INSERT INTO proposals (id, idempotency_key, author, rationale, risk, confidence, base, alternatives, evidence, state) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'open')",
+        )
+        .bind(id)
+        .bind(&input.idempotency_key)
+        .bind(author.as_str())
+        .bind(&input.rationale)
+        .bind(input.risk.as_str())
+        .bind(input.confidence)
+        .bind(serde_json::to_value(&input.base).expect("base serializes"))
+        .bind(serde_json::to_value(&alternatives).expect("alternatives serialize"))
+        .bind(&input.evidence)
+        .execute(&mut *tx)
+        .await;
+        if let Err(err) = inserted {
+            if is_unique_violation(&err)
+                && let Some(key) = &input.idempotency_key
+            {
+                drop(tx);
+                let id: Uuid =
+                    sqlx::query_scalar("SELECT id FROM proposals WHERE idempotency_key = $1")
+                        .bind(key)
+                        .fetch_one(&self.pool)
+                        .await?;
+                return self.proposal(id).await;
+            }
+            return Err(err.into());
+        }
+
+        let mut events = vec![Event::new(
+            "proposal.opened",
+            format!("proposal/{id}"),
+            json!({ "proposal_id": id, "risk": input.risk, "author": author.as_str() }),
+        )];
+        if input.risk == Risk::Conflict {
+            for base in &input.base {
+                sqlx::query(
+                    "INSERT INTO assertion_flags (assertion_id, flag, reason) VALUES ($1, 'contested', $2) \
+                     ON CONFLICT (assertion_id, flag) DO NOTHING",
+                )
+                .bind(base.assertion_id)
+                .bind(format!("proposal {id}"))
+                .execute(&mut *tx)
+                .await?;
+                events.push(Event::new(
+                    "assertion.flagged",
+                    format!("assertion/{}", base.assertion_id),
+                    json!({ "assertion_id": base.assertion_id, "flag": "contested", "proposal_id": id }),
+                ));
+            }
+        }
+        journal::append(&mut tx, author.as_str(), &events).await?;
+        tx.commit().await?;
+
+        let proposal = self.proposal(id).await?;
+        if let Some((policy, alternative)) = policy::evaluate(&proposal, &self.policy) {
+            let verdict = VerdictInput {
+                decision: Decision::Accept,
+                alternative: Some(alternative),
+                operations: None,
+                reason: Some(format!("auto-accepted by policy {policy}")),
+                deferred_until: None,
+            };
+            match self
+                .submit_verdict(&Actor::policy(policy), id, verdict)
+                .await
+            {
+                Ok(decided) => return Ok(decided),
+                Err(LedgerError::Stale { .. }) => return self.proposal(id).await,
+                Err(err) => return Err(err),
+            }
+        }
+        Ok(proposal)
+    }
+
+    /// Records a verdict. Accepting applies one alternative atomically; if a base version is no
+    /// longer current, the proposal becomes `stale` and nothing is applied.
+    pub async fn submit_verdict(
+        &self,
+        actor: &Actor,
+        proposal_id: Uuid,
+        input: VerdictInput,
+    ) -> Result<Proposal> {
+        let mut tx = self.pool.begin().await?;
+        let locked: Option<String> =
+            sqlx::query_scalar("SELECT state FROM proposals WHERE id = $1 FOR UPDATE")
+                .bind(proposal_id)
+                .fetch_optional(&mut *tx)
+                .await?;
+        let state: ProposalState = match locked {
+            Some(state) => error::parse_text(&state)?,
+            None => return Err(LedgerError::NotFound(format!("proposal {proposal_id}"))),
+        };
+        if !matches!(state, ProposalState::Open | ProposalState::Deferred) {
+            return Err(LedgerError::AlreadyDecided(proposal_id, state));
+        }
+        let proposal = query::proposal(&mut tx, proposal_id).await?;
+        let verdict_id = Uuid::now_v7();
+        let subject = format!("proposal/{proposal_id}");
+
+        let (new_state, chosen, edits): (
+            Option<ProposalState>,
+            Option<String>,
+            Option<Vec<Operation>>,
+        ) = match input.decision {
+            Decision::Reject => (Some(ProposalState::Rejected), None, None),
+            Decision::Defer => (Some(ProposalState::Deferred), None, None),
+            Decision::Investigate => (None, None, None),
+            Decision::Accept => (
+                Some(ProposalState::Accepted),
+                Some(self.choose(&proposal, input.alternative.as_deref())?),
+                None,
+            ),
+            Decision::AcceptWithEdits => {
+                let operations = input
+                    .operations
+                    .clone()
+                    .ok_or_else(|| invalid("accept_with_edits needs operations"))?;
+                apply::validate(&operations, &proposal.base)?;
+                let key = input
+                    .alternative
+                    .clone()
+                    .unwrap_or_else(|| "edited".to_owned());
+                (Some(ProposalState::Accepted), Some(key), Some(operations))
+            }
+        };
+
+        let mut events = Vec::new();
+        let at: chrono::DateTime<chrono::Utc>;
+        if new_state == Some(ProposalState::Accepted) {
+            let operations = match &edits {
+                Some(operations) => operations.clone(),
+                None => {
+                    let key = chosen.as_deref().unwrap_or_default();
+                    proposal
+                        .alternatives
+                        .iter()
+                        .find(|a| a.key == key)
+                        .map(|a| a.operations.clone())
+                        .unwrap_or_default()
+                }
+            };
+            let touched = apply::touched_assertions(&operations, &proposal.base);
+            sqlx::query("SELECT id FROM assertions WHERE id = ANY($1) ORDER BY id FOR UPDATE")
+                .bind(&touched)
+                .execute(&mut *tx)
+                .await?;
+            for base in &proposal.base {
+                let actual = apply::current_version(&mut tx, base.assertion_id)
+                    .await?
+                    .map_or(0, |v| v.version);
+                if actual != base.version {
+                    sqlx::query("UPDATE proposals SET state = 'stale', decided_at = clock_timestamp() WHERE id = $1")
+                        .bind(proposal_id)
+                        .execute(&mut *tx)
+                        .await?;
+                    self.release_contested(&mut tx, &proposal).await?;
+                    journal::append(
+                        &mut tx,
+                        actor.as_str(),
+                        &[Event::new("proposal.stale", subject, json!({ "proposal_id": proposal_id, "assertion_id": base.assertion_id }))],
+                    )
+                    .await?;
+                    tx.commit().await?;
+                    return Err(LedgerError::Stale {
+                        proposal: Some(proposal_id),
+                        assertion: base.assertion_id,
+                        expected: base.version,
+                        actual,
+                    });
+                }
+            }
+            at = sqlx::query_scalar("SELECT clock_timestamp()")
+                .fetch_one(&mut *tx)
+                .await?;
+            self.insert_verdict(
+                &mut tx,
+                verdict_id,
+                proposal_id,
+                &input,
+                chosen.as_deref(),
+                edits.as_ref(),
+                actor,
+                at,
+            )
+            .await?;
+            let mut applier =
+                apply::Applier::new(&mut tx, at, proposal_id, verdict_id, actor.as_str());
+            applier.apply(&operations).await?;
+            events.append(&mut applier.events);
+        } else {
+            at = sqlx::query_scalar("SELECT clock_timestamp()")
+                .fetch_one(&mut *tx)
+                .await?;
+            self.insert_verdict(
+                &mut tx,
+                verdict_id,
+                proposal_id,
+                &input,
+                None,
+                None,
+                actor,
+                at,
+            )
+            .await?;
+        }
+
+        if let Some(new_state) = new_state {
+            sqlx::query("UPDATE proposals SET state = $2, deferred_until = $3, decided_at = $4 WHERE id = $1")
+                .bind(proposal_id)
+                .bind(new_state.as_str())
+                .bind(if new_state == ProposalState::Deferred { input.deferred_until } else { None })
+                .bind(if new_state == ProposalState::Deferred { None } else { Some(at) })
+                .execute(&mut *tx)
+                .await?;
+            if matches!(new_state, ProposalState::Accepted | ProposalState::Rejected) {
+                self.release_contested(&mut tx, &proposal).await?;
+            }
+        }
+        events.insert(
+            0,
+            Event::new(
+                "proposal.verdict",
+                subject,
+                json!({ "proposal_id": proposal_id, "verdict_id": verdict_id, "decision": input.decision, "alternative": chosen }),
+            ),
+        );
+        journal::append(&mut tx, actor.as_str(), &events).await?;
+        tx.commit().await?;
+        self.proposal(proposal_id).await
+    }
+
+    fn choose(&self, proposal: &Proposal, requested: Option<&str>) -> Result<String> {
+        match (requested, proposal.alternatives.as_slice()) {
+            (Some(key), alternatives) => alternatives
+                .iter()
+                .find(|a| a.key == key)
+                .map(|a| a.key.clone())
+                .ok_or_else(|| invalid(format!("proposal has no alternative {key:?}"))),
+            (None, [only]) => Ok(only.key.clone()),
+            (None, _) => Err(invalid("the proposal has several alternatives; choose one")),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn insert_verdict(
+        &self,
+        conn: &mut sqlx::PgConnection,
+        id: Uuid,
+        proposal_id: Uuid,
+        input: &VerdictInput,
+        alternative: Option<&str>,
+        edits: Option<&Vec<Operation>>,
+        actor: &Actor,
+        at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO verdicts (id, proposal_id, decision, alternative, edits, reason, decided_by, created_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+        )
+        .bind(id)
+        .bind(proposal_id)
+        .bind(input.decision.as_str())
+        .bind(alternative)
+        .bind(edits.map(|ops| serde_json::to_value(ops).expect("operations serialize")))
+        .bind(&input.reason)
+        .bind(actor.as_str())
+        .bind(at)
+        .execute(&mut *conn)
+        .await?;
+        Ok(())
+    }
+
+    /// Clears `contested` from the proposal's base unless another open conflict still holds it.
+    async fn release_contested(
+        &self,
+        conn: &mut sqlx::PgConnection,
+        proposal: &Proposal,
+    ) -> Result<()> {
+        if proposal.risk != Risk::Conflict {
+            return Ok(());
+        }
+        for base in &proposal.base {
+            sqlx::query(
+                "DELETE FROM assertion_flags f WHERE f.assertion_id = $1 AND f.flag = 'contested' AND NOT EXISTS ( \
+                 SELECT 1 FROM proposals p WHERE p.id <> $2 AND p.risk = 'conflict' AND p.state IN ('open', 'deferred') \
+                 AND p.base @> jsonb_build_array(jsonb_build_object('assertion_id', $1::text)))",
+            )
+            .bind(base.assertion_id)
+            .bind(proposal.id)
+            .execute(&mut *conn)
+            .await?;
+        }
+        Ok(())
+    }
+
+    /// Marks an assertion for re-verification. Flags are not knowledge changes, so no proposal.
+    pub async fn flag_for_verification(
+        &self,
+        actor: &Actor,
+        assertion_id: Uuid,
+        reason: &str,
+    ) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        let done = sqlx::query(
+            "INSERT INTO assertion_flags (assertion_id, flag, reason) SELECT id, 'needs_verification', $2 FROM assertions \
+             WHERE id = $1 ON CONFLICT (assertion_id, flag) DO NOTHING",
+        )
+        .bind(assertion_id)
+        .bind(reason)
+        .execute(&mut *tx)
+        .await?;
+        if done.rows_affected() > 0 {
+            journal::append(
+                &mut tx,
+                actor.as_str(),
+                &[Event::new(
+                    "assertion.flagged",
+                    format!("assertion/{assertion_id}"),
+                    json!({ "assertion_id": assertion_id, "flag": "needs_verification", "reason": reason }),
+                )],
+            )
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn source(&self, id: Uuid) -> Result<Source> {
+        query::source(&self.pool, id).await
+    }
+
+    pub async fn assertion(
+        &self,
+        id: Uuid,
+        as_of: Option<Timestamp>,
+        valid_at: Option<Timestamp>,
+    ) -> Result<AssertionView> {
+        query::assertion(&self.pool, id, as_of, valid_at).await
+    }
+
+    pub async fn history(&self, id: Uuid) -> Result<Vec<AssertionVersion>> {
+        query::history(&self.pool, id).await
+    }
+
+    pub async fn assertions(&self, filter: &AssertionFilter) -> Result<Vec<AssertionVersion>> {
+        query::assertions(&self.pool, filter).await
+    }
+
+    pub async fn entity(&self, id: Uuid) -> Result<EntityView> {
+        query::entity(&self.pool, id).await
+    }
+
+    pub async fn entities(
+        &self,
+        name: Option<&str>,
+        entity_type: Option<&str>,
+        limit: i64,
+    ) -> Result<Vec<Entity>> {
+        query::entities(&self.pool, name, entity_type, limit).await
+    }
+
+    pub async fn proposal(&self, id: Uuid) -> Result<Proposal> {
+        let mut conn = self.pool.acquire().await?;
+        query::proposal(&mut conn, id).await
+    }
+
+    pub async fn proposals(
+        &self,
+        state: Option<ProposalState>,
+        after: Option<Uuid>,
+        limit: i64,
+    ) -> Result<Vec<Proposal>> {
+        query::proposals(&self.pool, state, after, limit).await
+    }
+
+    pub async fn journal(&self, after: i64, limit: i64) -> Result<Vec<JournalEvent>> {
+        journal::read(&self.pool, after, limit).await
+    }
+}
