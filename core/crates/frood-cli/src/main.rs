@@ -73,6 +73,14 @@ enum Command {
         #[command(subcommand)]
         command: TokenCommand,
     },
+    /// Link your account in a channel (Telegram, …): prints a one-time code for the bot.
+    Link {
+        /// The channel module's name in frood.yaml, e.g. telegram.
+        channel: String,
+        /// Whose account it is; the user is created if new.
+        #[arg(long)]
+        email: String,
+    },
     /// Config utilities.
     Config {
         #[command(subcommand)]
@@ -158,6 +166,7 @@ async fn main() -> ExitCode {
         Command::Apply { render_only } => lifecycle::apply(&paths, render_only).await,
         Command::Serve => serve::run(&paths).await,
         Command::Status => lifecycle::status(&paths).await,
+        Command::Link { channel, email } => token::link(&paths, &channel, &email).await,
         Command::Token { command } => match command {
             TokenCommand::Create {
                 email,

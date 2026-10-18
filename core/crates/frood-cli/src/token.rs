@@ -68,6 +68,25 @@ pub async fn revoke(paths: &Paths, email: &str, id: Uuid) -> anyhow::Result<()> 
     Ok(())
 }
 
+/// A one-time code that links the person's account in `channel` (e.g. Telegram).
+pub async fn link(paths: &Paths, channel: &str, email: &str) -> anyhow::Result<()> {
+    let auth = auth(paths).await?;
+    let loaded = paths.load()?;
+    if !loaded.config.modules.contains_key(channel) {
+        eprintln!(
+            "note: there is no module {channel:?} in modules; the code works once one is added"
+        );
+    }
+    let user = auth.user_id_by_email(email, true).await?;
+    let code = auth.create_link_code(user, channel).await?;
+    eprintln!(
+        "send this to the {channel} bot within 15 minutes (until {}):",
+        code.expires_at.format("%H:%M UTC")
+    );
+    println!("/link {}", code.code);
+    Ok(())
+}
+
 /// Default scopes of a token made on the command line: everything but `admin`.
 pub fn default_scopes() -> Vec<String> {
     scope::ALL
