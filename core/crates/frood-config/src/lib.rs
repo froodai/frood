@@ -368,6 +368,11 @@ fn validate_trigger(job: &str, trigger: &Trigger, problems: &mut Vec<String>) {
                     "job {job}: schedule {schedule:?} is not a cron expression like \"0 3 * * *\""
                 ));
             }
+            if trigger.timezone.is_none() {
+                problems.push(format!(
+                    "job {job}: schedule {schedule:?} needs a timezone, like Europe/Amsterdam (there is no default)"
+                ));
+            }
         }
         _ => problems.push(format!(
             "job {job}: a trigger needs either an event or a schedule"
@@ -598,7 +603,11 @@ jobs:
             .replace("'0 3 * * *'", "'every night'")
             .replace("Europe/Amsterdam", "Mars/Base")
             .replace("knowledge:propose]", "knowledge:decide]")
-            .replace("expire_after: 3d", "expire_after: soon");
+            .replace("expire_after: 3d", "expire_after: soon")
+            .replace(
+                "  daily-sweep:\n",
+                "  other:\n    uses: agents.execute\n    on: [{ schedule: '0 * * * *' }]\n  daily-sweep:\n",
+            );
         match parse(&bad, &secrets()) {
             Err(ConfigError::Invalid(problems)) => {
                 for needle in [
@@ -606,6 +615,7 @@ jobs:
                     "IANA zone",
                     "not knowledge:decide",
                     "duration like",
+                    "needs a timezone",
                 ] {
                     assert!(
                         problems.iter().any(|p| p.contains(needle)),

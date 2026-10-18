@@ -56,12 +56,14 @@ ALTER TABLE tokens ADD CONSTRAINT tokens_owner_check CHECK (
     END
 );
 
--- When each scheduled job (and each item it runs for) last fired.
+-- When each schedule of a job (and each item it runs for) last fired: the scheduled time of
+-- the last tick, or when the schedule was first seen.
 CREATE TABLE schedule_state (
     job        TEXT NOT NULL,
+    trigger    INT NOT NULL,                        -- index of the trigger in the job's `on`
     item       TEXT NOT NULL DEFAULT '',            -- e.g. the source of `for_each: source`
     last_tick  TIMESTAMPTZ NOT NULL,
-    PRIMARY KEY (job, item)
+    PRIMARY KEY (job, trigger, item)
 );
 
 -- How far each source has been read, for "what changed since last time".

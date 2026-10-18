@@ -9,6 +9,8 @@ license.workspace = true
 [dependencies]
 base64.workspace = true
 chrono.workspace = true
+chrono-tz.workspace = true
+croner.workspace = true
 frood-auth.workspace = true
 frood-config.workspace = true
 frood-ledger.workspace = true
