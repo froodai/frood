@@ -152,14 +152,47 @@ fn prompt(source: &Source, text: &str, similar: &[Value], entities: &[Entity]) -
         "<source kind=\"{kind}\" said_at=\"{said_at}\" sent_by=\"{who}\"{about}>\n{text}\n</source>\n\n\
          <known_assertions>\n{similar}\n</known_assertions>\n\n\
          <known_entities>\n{entities}\n</known_entities>\n\n\
-         Today is {today}.",
+         {language}Today is {today}.",
         kind = source.kind,
         said_at = said_at.to_rfc3339(),
         text = quoted(text),
         similar = serde_json::to_string_pretty(similar).unwrap_or_default(),
         entities = serde_json::to_string_pretty(&entities).unwrap_or_default(),
         today = Utc::now().date_naive(),
+        language = language_line(text),
     )
+}
+
+/// The script most letters of a text are written in, when it is clear.
+fn script(text: &str) -> Option<&'static str> {
+    let (mut cyrillic, mut latin) = (0usize, 0usize);
+    for c in text.chars().filter(|c| c.is_alphabetic()) {
+        match c {
+            '\u{0400}'..='\u{04FF}' => cyrillic += 1,
+            'a'..='z' | 'A'..='Z' => latin += 1,
+            _ => {}
+        }
+    }
+    let total = cyrillic + latin;
+    if total == 0 {
+        None
+    } else if cyrillic * 10 >= total * 7 {
+        Some("Cyrillic")
+    } else if latin * 10 >= total * 7 {
+        Some("Latin")
+    } else {
+        None
+    }
+}
+
+/// Models answer in English unless told plainly; name the source's script.
+fn language_line(text: &str) -> String {
+    match script(text) {
+        Some(script) => format!(
+            "The source is written in {script} script: write every assertion text, entity name and alias in the source's language and script, not in English unless the source is in English.\n"
+        ),
+        None => "Write every assertion text and entity name in the source's language.\n".to_owned(),
+    }
 }
 
 fn parse_time(value: &str) -> Option<DateTime<Utc>> {
@@ -263,8 +296,9 @@ pub(crate) async fn run(ctx: &Ctx, spec: &JobSpec, run: &Run) -> Result<Value, J
 
     // The related knowledge the model saw, kept with its answer.
     let saved = run.output.as_ref().and_then(|o| o.get("answer")).cloned();
-    let (answer, similar_ids, entity_ids) = match saved {
+    let (progress, answer, similar_ids, entity_ids) = match saved {
         Some(answer) => (
+            run.output.clone().unwrap_or_else(|| json!({})),
             answer,
             ids(run.output.as_ref(), "similar"),
             ids(run.output.as_ref(), "entities"),
@@ -307,14 +341,11 @@ pub(crate) async fn run(ctx: &Ctx, spec: &JobSpec, run: &Run) -> Result<Value, J
                 .map(|h| format!("{}:{}", h.version.assertion_id, h.version.version))
                 .collect();
             let entity_ids: Vec<String> = entities.iter().map(|e| e.id.to_string()).collect();
-            runs::save_progress(
-                &ctx.pool,
-                run.id,
-                &json!({ "answer": done.value, "model": done.model, "similar": similar_ids,
-                         "entities": entity_ids, "input_tokens": done.input_tokens, "output_tokens": done.output_tokens }),
-            )
-            .await?;
-            (done.value, similar_ids, entity_ids)
+            let progress = json!({ "answer": done.value, "model": done.model, "similar": similar_ids,
+                                   "entities": entity_ids, "input_tokens": done.input_tokens,
+                                   "output_tokens": done.output_tokens });
+            runs::save_progress(&ctx.pool, run.id, &progress).await?;
+            (progress, done.value, similar_ids, entity_ids)
         }
     };
     let extraction: Extraction = serde_json::from_value(answer.clone())
@@ -330,7 +361,7 @@ pub(crate) async fn run(ctx: &Ctx, spec: &JobSpec, run: &Run) -> Result<Value, J
         &entity_ids,
     )
     .await?;
-    let mut output = run.output.clone().unwrap_or_else(|| json!({}));
+    let mut output = progress;
     if output.get("answer").is_none() {
         output["answer"] = answer;
     }
@@ -612,6 +643,17 @@ mod tests {
         );
         assert_eq!(proposer("user:1").as_str(), "user:1/via/extract");
         assert_eq!(proposer("integration:slack").as_str(), "agent:extract");
+    }
+
+    #[test]
+    fn the_source_script_is_named() {
+        assert_eq!(
+            script("Договорились с Олей, релиз 24 — 14 ноября."),
+            Some("Cyrillic")
+        );
+        assert_eq!(script("Release 2.4 ships on Nov 14"), Some("Latin"));
+        assert_eq!(script("2.4 — 14.11"), None);
+        assert!(language_line("Оля пишет: релиз переносим").contains("Cyrillic"));
     }
 
     #[test]

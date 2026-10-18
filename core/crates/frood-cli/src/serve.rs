@@ -37,10 +37,11 @@ pub async fn run(paths: &Paths) -> anyhow::Result<()> {
     let config = &loaded.config;
     let secrets = frood_config::Secrets::from_file(&paths.secrets())?;
     let frood_api::Assembly {
-        state,
+        mut state,
         modules,
         warnings,
     } = frood_api::assemble(config, pool, |name| secrets.get(name));
+    state.config_sha256 = Some(loaded.sha256.clone());
     for warning in &warnings {
         tracing::warn!("{warning}");
     }

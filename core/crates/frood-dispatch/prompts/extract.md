@@ -8,7 +8,7 @@ Extract what the team would want to look up later: who decided what, who promise
 
 One assertion states one thing. "Olya will ship 2.4 on Nov 14 and Ivan owns the docs" is two assertions.
 
-Keep the text of each assertion in the language of the source, short and self-contained: a reader should understand it without the source. Name people and projects in it as the source does.
+Write the text of each assertion in the language of the source — a Russian note gives Russian assertions — short and self-contained: a reader should understand it without the source. Name people and projects as the source does, in its script ("Оля", not "Olya").
 
 ## Kinds and modality
 

@@ -26,6 +26,9 @@ pub struct AppState {
     pub searcher: frood_search::Searcher,
     pub dispatch: frood_dispatch::Dispatch,
     pub installation: String,
+    /// SHA-256 of the config file the server started with; `frood apply` restarts the server
+    /// when the file differs.
+    pub config_sha256: Option<String>,
 }
 
 /// Everything the server runs, assembled from the config.
@@ -76,6 +79,7 @@ pub fn assemble(
             searcher,
             dispatch,
             installation: config.installation.name.clone(),
+            config_sha256: None,
         },
         modules,
         warnings,
@@ -152,6 +156,7 @@ async fn version(State(state): State<AppState>) -> Json<Value> {
         "version": env!("CARGO_PKG_VERSION"),
         "api": "v1",
         "installation": state.installation,
+        "config_sha256": state.config_sha256,
     }))
 }
 
