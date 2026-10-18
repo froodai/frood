@@ -213,8 +213,8 @@ async fn voice_and_notes_become_knowledge() {
          deploy: {{server: host}}\n\
          accounts:\n  claude: {{ kind: api_key, provider: anthropic, secret: test, base_url: '{fake}' }}\n  \
          openai: {{ kind: api_key, provider: openai, secret: test, base_url: '{fake}' }}\n\
-         search:\n  embeddings: {{ account: openai }}\n\
-         jobs:\n  extract: {{ with: {{ account: claude }} }}\n\
+         search:\n  embeddings: {{ account: openai, model: text-embedding-3-small }}\n\
+         jobs:\n  extract: {{ with: {{ account: claude, model: claude-haiku-5-5 }} }}\n\
          modules:\n  stt: {{ url: '{fake}' }}\n  telegram: {{ url: 'http://127.0.0.1:1' }}\n"
     );
     let config = frood_config::parse(

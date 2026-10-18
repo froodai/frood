@@ -476,7 +476,7 @@ jobs:
   transcribe: { with: { module: stt } }
   embed: { enabled: false }
 search:
-  embeddings: { account: openai }
+  embeddings: { account: openai, model: text-embedding-3-small }
 ";
 
     #[test]
@@ -507,8 +507,8 @@ search:
         let raw = format!("{}{WORK}", template_for(ServerPlacement::Host))
             .replace("account: anthropic, model", "account: nobody, model")
             .replace(
-                "embeddings: { account: openai }",
-                "embeddings: { account: anthropic }",
+                "embeddings: { account: openai,",
+                "embeddings: { account: anthropic,",
             )
             .replace(
                 "image: 'ghcr.io/froodai/telegram:0.0.1'",

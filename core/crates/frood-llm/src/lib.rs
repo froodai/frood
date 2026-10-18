@@ -12,11 +12,6 @@ use frood_config::{Account, ModelProvider};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-/// Model used when a job names none.
-pub const DEFAULT_ANTHROPIC_MODEL: &str = "claude-opus-5-5";
-pub const DEFAULT_OPENAI_MODEL: &str = "gpt-6-astra";
-pub const DEFAULT_EMBEDDING_MODEL: &str = "text-embedding-3-small";
-
 const ANTHROPIC_URL: &str = "https://api.anthropic.com";
 const OPENAI_URL: &str = "https://api.openai.com";
 /// Opts into server-side fallback when a safety classifier declines a request.
@@ -63,7 +58,8 @@ pub type Result<T> = std::result::Result<T, LlmError>;
 /// One structured completion: instructions, the input, and the shape of the answer.
 #[derive(Debug, Clone)]
 pub struct CompleteRequest {
-    pub model: Option<String>,
+    /// Always named in the config: Frood has no default model (D4).
+    pub model: String,
     /// Instructions of the job.
     pub system: String,
     /// The input. Untrusted content goes here, quoted, never into `system`.
@@ -195,19 +191,11 @@ impl Gateway {
         endpoint: &Endpoint,
         request: &CompleteRequest,
     ) -> Result<Completion> {
-        let model = request
-            .model
-            .clone()
-            .unwrap_or_else(|| DEFAULT_ANTHROPIC_MODEL.to_owned());
+        let model = request.model.clone();
         let mut output_config = json!({
             "format": { "type": "json_schema", "schema": request.schema },
         });
-        // Claude Opus 5.5 defaults to medium effort; say so explicitly.
-        let effort = request
-            .effort
-            .clone()
-            .or_else(|| (model == DEFAULT_ANTHROPIC_MODEL).then(|| "medium".to_owned()));
-        if let Some(effort) = effort {
+        if let Some(effort) = &request.effort {
             output_config["effort"] = json!(effort);
         }
         let mut body = json!({
@@ -255,10 +243,7 @@ impl Gateway {
     }
 
     async fn openai(&self, endpoint: &Endpoint, request: &CompleteRequest) -> Result<Completion> {
-        let model = request
-            .model
-            .clone()
-            .unwrap_or_else(|| DEFAULT_OPENAI_MODEL.to_owned());
+        let model = request.model.clone();
         let body = json!({
             "model": model,
             "input": [
@@ -302,17 +287,12 @@ impl Gateway {
     }
 
     /// Embeddings for search (`llm.embed@1`). Only OpenAI accounts have them.
-    pub async fn embed(
-        &self,
-        account: &str,
-        model: Option<&str>,
-        inputs: &[String],
-    ) -> Result<Embeddings> {
+    pub async fn embed(&self, account: &str, model: &str, inputs: &[String]) -> Result<Embeddings> {
         let endpoint = self.endpoint(account)?;
         if endpoint.provider != ModelProvider::Openai {
             return Err(LlmError::NoEmbeddings(account.to_owned()));
         }
-        let model = model.unwrap_or(DEFAULT_EMBEDDING_MODEL).to_owned();
+        let model = model.to_owned();
         let body = json!({ "model": model, "input": inputs, "encoding_format": "float" });
         let call = self
             .http
@@ -468,12 +448,12 @@ mod tests {
 
     fn request() -> CompleteRequest {
         CompleteRequest {
-            model: None,
+            model: "claude-opus-5-5".into(),
             system: "Extract.".into(),
             user: "<source>hello</source>".into(),
             schema: json!({ "type": "object", "properties": { "ok": { "type": "boolean" } }, "required": ["ok"], "additionalProperties": false }),
             max_tokens: 16000,
-            effort: None,
+            effort: Some("medium".into()),
         }
     }
 
@@ -499,7 +479,7 @@ mod tests {
         assert_eq!(headers["x-api-key"], "test-key");
         assert_eq!(headers["anthropic-version"], "2023-06-01");
         assert_eq!(headers["anthropic-beta"], FALLBACK_BETA);
-        assert_eq!(body["model"], DEFAULT_ANTHROPIC_MODEL);
+        assert_eq!(body["model"], "claude-opus-5-5");
         assert_eq!(body["fallbacks"], "default");
         assert_eq!(body["output_config"]["effort"], "medium");
         assert_eq!(body["output_config"]["format"]["type"], "json_schema");
@@ -550,13 +530,14 @@ mod tests {
         })
         .await;
         let mut haiku = request();
-        haiku.model = Some("claude-haiku-5-5".into());
+        haiku.model = "claude-haiku-5-5".into();
+        haiku.effort = None;
         let err = gateway(ModelProvider::Anthropic, &url)
             .complete("main", &haiku)
             .await
             .unwrap_err();
         assert!(matches!(err, LlmError::Truncated));
-        // No server-side fallback for models that do not take it, and no implied effort.
+        // No server-side fallback for models that do not take it; effort only when set.
         let (headers, body) = seen.lock().unwrap()[0].clone();
         assert!(headers.get("anthropic-beta").is_none());
         assert!(body.get("fallbacks").is_none());
@@ -573,14 +554,16 @@ mod tests {
             })
         })
         .await;
+        let mut gpt = request();
+        gpt.model = "gpt-6-luna".into();
         let done = gateway(ModelProvider::Openai, &url)
-            .complete("main", &request())
+            .complete("main", &gpt)
             .await
             .unwrap();
         assert_eq!(done.value, json!({ "ok": false }));
         let (headers, body) = seen.lock().unwrap()[0].clone();
         assert_eq!(headers["authorization"], "Bearer test-key");
-        assert_eq!(body["model"], DEFAULT_OPENAI_MODEL);
+        assert_eq!(body["model"], "gpt-6-luna");
         assert_eq!(body["text"]["format"]["strict"], true);
         assert_eq!(body["input"][0]["role"], "system");
 
@@ -609,11 +592,11 @@ mod tests {
         .await;
         let gateway = gateway(ModelProvider::Openai, &url);
         let out = gateway
-            .embed("main", None, &["a".into(), "b".into()])
+            .embed("main", "text-embedding-3-small", &["a".into(), "b".into()])
             .await
             .unwrap();
         assert_eq!(out.vectors, vec![vec![0.0, 1.0], vec![1.0, 1.0]]);
-        assert_eq!(seen.lock().unwrap()[0].1["model"], DEFAULT_EMBEDDING_MODEL);
+        assert_eq!(seen.lock().unwrap()[0].1["model"], "text-embedding-3-small");
 
         let anthropic = super::Gateway::new(&BTreeMap::from([(
             "a".to_owned(),
@@ -625,7 +608,7 @@ mod tests {
             },
         )]));
         assert!(matches!(
-            anthropic.embed("a", None, &["x".into()]).await,
+            anthropic.embed("a", "m", &["x".into()]).await,
             Err(LlmError::NoEmbeddings(_))
         ));
     }
