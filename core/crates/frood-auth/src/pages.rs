@@ -13,11 +13,16 @@ pub(crate) fn escape(value: &str) -> String {
         .replace('\'', "&#39;")
 }
 
+/// Referrer policy of every page: `same-origin` keeps the `tx` in our URLs away from other
+/// sites, while form posts still carry our `Origin`, which the server checks. (With
+/// `no-referrer` browsers send `Origin: null` on form posts, and every sign-in is refused.)
+const REFERRER_POLICY: &str = "same-origin";
+
 fn page(title: &str, body: &str) -> Html<String> {
     Html(format!(
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">\
          <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\
-         <meta name=\"referrer\" content=\"no-referrer\"><title>{title}</title><style>\
+         <meta name=\"referrer\" content=\"{REFERRER_POLICY}\"><title>{title}</title><style>\
          :root{{--bg:#f2f5f1;--card:#fbfcfa;--ink:#17231d;--muted:#56675e;--rule:#d3dfd6;--accent:#1d6b4c;--on-accent:#fff}}\
          @media (prefers-color-scheme:dark){{:root{{--bg:#0e1411;--card:#151d19;--ink:#dce6df;--muted:#93a59b;--rule:#26332c;--accent:#5cc495;--on-accent:#0b1a12}}}}\
          *{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,sans-serif}}\
@@ -137,6 +142,13 @@ mod tests {
         );
         let html = error("<script>alert(1)</script>").0;
         assert!(!html.contains("<script>alert"));
+    }
+
+    #[test]
+    fn form_posts_keep_their_origin() {
+        let html = dev_form("test", "dev", "tx_1").0;
+        assert!(html.contains("<meta name=\"referrer\" content=\"same-origin\">"));
+        assert!(!html.contains("no-referrer"));
     }
 
     #[test]
