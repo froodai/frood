@@ -25,7 +25,7 @@ MCP capture_note ┘                       └───────────�
 | Telegram | `modules/telegram` (Apache-2.0) | Long polling (публичный адрес не нужен); `/link <код>` связывает аккаунт; текст, голос и файлы → `/v1/capture` от имени связанного пользователя; ответ «сохранено», затем итог обработки |
 | Связка каналов | `frood-api`, `frood-cli` | `frood link telegram --email …` и `POST /v1/channels/links` выдают одноразовый код; модуль погашает его |
 | Поиск | `frood-ledger`, `frood-api`, `frood-mcp` | Гибридный: Postgres FTS + pgvector (косинус), слияние RRF; без аккаунта эмбеддингов — только слова. `GET /v1/search`, MCP `search_knowledge` |
-| Postgres | compose, CI, тесты | Образ с pgvector (`pgvector/pgvector:pg18`) |
+| Postgres | compose, CI, тесты | Образ с pgvector (`pgvector/pgvector:pg18-trixie`) |
 
 ## 3. Чьё это действие (R1′)
 
