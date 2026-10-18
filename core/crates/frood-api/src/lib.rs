@@ -1,12 +1,16 @@
-//! HTTP API of the Frood core (docs/12_api_mcp_auth.md): health, version and the Ledger.
+//! HTTP surface of the Frood core (docs/12_api_mcp_auth.md): health, `/v1` over the Ledger,
+//! the OAuth endpoints and `/mcp`, all on one origin.
 
+mod account;
+mod auth;
 mod error;
 mod ledger;
 
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::routing::get;
-use axum::{Json, Router};
+use axum::{Json, Router, middleware};
+use frood_auth::Auth;
 use frood_ledger::Ledger;
 use serde_json::{Value, json};
 
@@ -15,16 +19,47 @@ pub use error::ApiError;
 #[derive(Clone)]
 pub struct AppState {
     pub ledger: Ledger,
+    pub auth: Auth,
     pub installation: String,
 }
 
 pub fn router(state: AppState) -> Router {
+    let mcp = Router::new()
+        .nest_service(
+            "/mcp",
+            frood_mcp::service(state.ledger.clone(), allowed_hosts(&state.auth)),
+        )
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth::mcp_bearer,
+        ));
+    let oauth = frood_auth::routes(state.auth.clone());
     Router::new()
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
         .route("/v1/version", get(version))
         .merge(ledger::routes())
+        .merge(account::routes())
         .with_state(state)
+        .merge(mcp)
+        .merge(oauth)
+}
+
+/// Hosts `/mcp` answers to (DNS-rebinding protection): the issuer's host and loopback.
+fn allowed_hosts(auth: &Auth) -> Vec<String> {
+    let mut hosts = vec![
+        "localhost".to_owned(),
+        "127.0.0.1".to_owned(),
+        "::1".to_owned(),
+    ];
+    if let Some(host) = url::Url::parse(&auth.settings().issuer)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_owned))
+        && !hosts.contains(&host)
+    {
+        hosts.push(host);
+    }
+    hosts
 }
 
 /// Liveness: the process is up.
@@ -66,8 +101,15 @@ mod tests {
     fn app() -> Router {
         // Nothing listens on port 1, so readiness fails fast without a real database.
         let pool = frood_store::connect_lazy("postgres://frood:x@127.0.0.1:1/frood").unwrap();
+        let config = frood_config::parse(
+            "version: 1\ninstallation: {name: test}\nstorage: {uses: postgres, url: 'postgres://x'}\ndeploy: {server: host}\n",
+            &frood_config::Secrets::from_pairs(Vec::<(String, String)>::new()),
+        )
+        .unwrap()
+        .config;
         router(AppState {
-            ledger: Ledger::new(pool, frood_ledger::PolicyConfig::default()),
+            ledger: Ledger::new(pool.clone(), frood_ledger::PolicyConfig::default()),
+            auth: Auth::new(pool, frood_auth::AuthSettings::from_config(&config)),
             installation: "test".to_owned(),
         })
     }
@@ -95,6 +137,29 @@ mod tests {
         let (status, body) = get_json("/readyz").await;
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(body["status"], "not_ready");
+    }
+
+    #[tokio::test]
+    async fn v1_needs_a_bearer_token() {
+        let response = app()
+            .oneshot(Request::get("/v1/assertions").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        let challenge = response.headers()["www-authenticate"].to_str().unwrap();
+        assert_eq!(
+            challenge,
+            "Bearer resource_metadata=\"http://127.0.0.1:8080/.well-known/oauth-protected-resource/v1\""
+        );
+    }
+
+    #[tokio::test]
+    async fn authorization_server_metadata_is_public() {
+        let (status, body) = get_json("/.well-known/oauth-authorization-server").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["issuer"], "http://127.0.0.1:8080");
+        assert_eq!(body["client_id_metadata_document_supported"], true);
+        assert_eq!(body["code_challenge_methods_supported"], json!(["S256"]));
     }
 
     #[tokio::test]

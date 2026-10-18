@@ -788,15 +788,23 @@ name = "frood-api"
 version = "0.0.1"
 dependencies = [
  "axum",
+ "base64 0.23.1",
  "chrono",
+ "ed25519-dalek",
+ "frood-auth",
+ "frood-config",
  "frood-ledger",
+ "frood-mcp",
  "frood-store",
  "http-body-util",
+ "jsonwebtoken",
  "serde",
  "serde_json",
+ "sha2 0.11.1",
  "tokio",
  "tower",
  "tracing",
+ "url",
  "uuid",
 ]
 
@@ -834,6 +842,7 @@ dependencies = [
  "axum",
  "clap",
  "frood-api",
+ "frood-auth",
  "frood-config",
  "frood-ledger",
  "frood-store",
@@ -882,7 +891,16 @@ dependencies = [
 name = "frood-mcp"
 version = "0.0.1"
 dependencies = [
+ "chrono",
+ "frood-auth",
+ "frood-ledger",
+ "http",
  "rmcp",
+ "schemars",
+ "serde",
+ "serde_json",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

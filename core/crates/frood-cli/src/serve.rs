@@ -35,6 +35,11 @@ pub async fn run(paths: &Paths) -> anyhow::Result<()> {
         .context("migrations failed")?;
 
     let policies = &loaded.config.policies;
+    let auth = frood_auth::Auth::new(
+        pool.clone(),
+        frood_auth::AuthSettings::from_config(&loaded.config),
+    );
+    tracing::info!(issuer = %auth.settings().issuer, providers = auth.settings().providers.len(), "sign-in configured");
     let ledger = frood_ledger::Ledger::new(
         pool,
         frood_ledger::PolicyConfig {
@@ -44,6 +49,7 @@ pub async fn run(paths: &Paths) -> anyhow::Result<()> {
     );
     let app = frood_api::router(frood_api::AppState {
         ledger,
+        auth,
         installation: loaded.config.installation.name.clone(),
     });
     let listener = tokio::net::TcpListener::bind(addr)

@@ -12,6 +12,7 @@ pub struct ApiError {
     code: &'static str,
     detail: String,
     extra: Value,
+    challenge: Option<String>,
 }
 
 impl ApiError {
@@ -21,7 +22,14 @@ impl ApiError {
             code,
             detail: detail.into(),
             extra: json!({}),
+            challenge: None,
         }
+    }
+
+    /// Adds a `WWW-Authenticate` challenge to the response.
+    pub fn with_challenge(mut self, challenge: String) -> Self {
+        self.challenge = Some(challenge);
+        self
     }
 
     pub fn bad_request(detail: impl Into<String>) -> Self {
@@ -50,6 +58,7 @@ impl From<LedgerError> for ApiError {
                 code: "stale-base",
                 detail: err.to_string(),
                 extra: json!({ "proposal_id": proposal, "assertion_id": assertion, "expected_version": expected, "current_version": actual }),
+                challenge: None,
             },
             LedgerError::AlreadyDecided(..) => {
                 Self::new(StatusCode::CONFLICT, "already-decided", err.to_string())
@@ -82,6 +91,11 @@ impl IntoResponse for ApiError {
             header::CONTENT_TYPE,
             HeaderValue::from_static("application/problem+json"),
         );
+        if let Some(challenge) = self.challenge.and_then(|c| HeaderValue::from_str(&c).ok()) {
+            response
+                .headers_mut()
+                .insert(header::WWW_AUTHENTICATE, challenge);
+        }
         response
     }
 }
