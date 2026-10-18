@@ -312,21 +312,52 @@ pub struct Module {
 }
 
 /// A job: what capability to call, on which events, with which inputs (docs/13 §3–4).
-/// Jobs of the standard set (`transcribe`, `extract`, `embed`) exist without being written;
-/// writing one changes only the fields given.
+/// Jobs of the standard set (`transcribe`, `extract`, `embed`, `daily-sweep`) exist without
+/// being written; writing one changes only the fields given.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Job {
-    /// Capability the job calls: `llm.complete`, `media.transcribe`, `llm.embed`, …
+    /// Capability the job calls: `llm.complete`, `agents.execute`, `media.transcribe`, …
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub uses: Option<String>,
     /// `false` turns the job off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
-    /// Events that start the job.
+    /// Events and schedules that start the job.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on: Option<Vec<Trigger>>,
-    /// Inputs: `account`, `model` (always named; there is no default), `module`, `instructions`, …
+    /// Instructions: inline text, or a path (`./agents/daily-sweep.md`, relative to the config).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instructions: Option<String>,
+    /// MCP servers the agent may use: `frood` and `source:<name>` (or `source:${source}` with
+    /// `for_each: source`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<String>>,
+    /// Module that runs the agent (gives `agents.execute`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<String>,
+    /// Which agent the runtime starts: `claude-code`, `codex`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
+    /// Model, always named: there is no default (D4).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Account from `accounts` that pays.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
+    /// Rights of the run token; agents never get `knowledge:decide` or `admin`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permissions: Option<Vec<String>>,
+    /// Email of the person the agent works for; required with a subscription account.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on_behalf_of: Option<String>,
+    /// Whether and how the agent may ask a person.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ask_user: Option<AskUser>,
+    /// Limits of one run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget: Option<Budget>,
+    /// Other inputs for the capability (`module`, `effort`, …).
     #[serde(
         default,
         rename = "with",
@@ -335,15 +366,83 @@ pub struct Job {
     pub with: serde_json::Map<String, serde_json::Value>,
 }
 
-/// An event that starts a job, optionally narrowed by fields of the event data.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+/// An event or a schedule that starts a job.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Trigger {
     /// Journal event type, e.g. `source.captured`.
-    pub event: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event: Option<String>,
     /// Event data fields that must equal these values, e.g. `{ has_text: true }`.
     #[serde(default, rename = "where", skip_serializing_if = "BTreeMap::is_empty")]
     pub filter: BTreeMap<String, serde_json::Value>,
+    /// Cron schedule, e.g. `"0 3 * * *"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schedule: Option<String>,
+    /// IANA time zone of the schedule, e.g. `Europe/Amsterdam`; UTC when omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timezone: Option<String>,
+    /// Run once per item: `source` runs the job for each source in `sources`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub for_each: Option<String>,
+}
+
+impl Trigger {
+    pub fn on_event(event: &str) -> Self {
+        Self {
+            event: Some(event.to_owned()),
+            ..Self::default()
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AskUser {
+    #[serde(default = "default_true")]
+    pub allowed: bool,
+    /// How long a question waits, e.g. `3d`, `12h`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expire_after: Option<String>,
+    /// What happens when nobody answers in time.
+    #[serde(default)]
+    pub on_expire: OnExpire,
+    /// The answer used with `on_expire: default_answer`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_answer: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum OnExpire {
+    /// The agent continues without the answer.
+    #[default]
+    Skip,
+    /// The run is cancelled.
+    Cancel,
+    /// The agent continues with `default_answer`.
+    DefaultAnswer,
+}
+
+impl OnExpire {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Skip => "skip",
+            Self::Cancel => "cancel",
+            Self::DefaultAnswer => "default_answer",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Budget {
+    /// Stop the run when it has cost this much.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_usd: Option<f64>,
+    /// Stop the run after this many minutes of work.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_minutes: Option<u32>,
 }
 
 /// Search settings.

@@ -17,6 +17,14 @@ pub struct TokenPair {
     pub scope: String,
 }
 
+/// A run token as issued; the secret goes to the runtime and nowhere else.
+#[derive(Debug, Clone)]
+pub struct RunToken {
+    pub id: Uuid,
+    pub token: String,
+    pub scopes: Vec<String>,
+}
+
 /// A personal token as listed; the secret itself is shown only once, at creation.
 #[derive(Debug, Clone, Serialize)]
 pub struct PersonalToken {
@@ -54,7 +62,7 @@ impl Auth {
         };
 
         let row = sqlx::query(
-            "SELECT t.id, t.kind, t.user_id, t.module, t.client_id, t.scopes, t.resource, \
+            "SELECT t.id, t.kind, t.user_id, t.module, t.run_id, t.label, t.client_id, t.scopes, t.resource, \
              (t.expires_at IS NOT NULL AND t.expires_at <= now()) AS expired, t.revoked_at IS NOT NULL AS revoked, u.email \
              FROM tokens t LEFT JOIN users u ON u.id = t.user_id WHERE t.token_hash = $1",
         )
@@ -94,8 +102,18 @@ impl Auth {
             (Some(id), Some(email)) => Some(crate::User { id, email }),
             _ => None,
         };
+        let run = match row.try_get::<Option<Uuid>, _>("run_id")? {
+            Some(id) => Some(crate::RunRef {
+                id,
+                job: row
+                    .try_get::<Option<String>, _>("label")?
+                    .unwrap_or_default(),
+            }),
+            None => None,
+        };
         Ok(Principal {
             user,
+            run,
             module: row.try_get("module")?,
             scopes: row.try_get("scopes")?,
             client_id: row.try_get("client_id")?,
@@ -307,6 +325,54 @@ impl Auth {
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
+        Ok(())
+    }
+
+    /// The credentials of one agent run: rights of the job within what agents may hold, for
+    /// the person the run acts for, valid until the run ends (or `ttl`).
+    pub async fn issue_run_token(
+        &self,
+        run_id: Uuid,
+        job: &str,
+        on_behalf_of: Option<Uuid>,
+        requested: &[String],
+        ttl: std::time::Duration,
+    ) -> Result<RunToken> {
+        let scopes: Vec<String> = requested
+            .iter()
+            .filter(|s| scope::AGENT_ALLOWED.contains(&s.as_str()))
+            .cloned()
+            .collect();
+        let secret = new_secret("frood_run_");
+        let id = Uuid::now_v7();
+        sqlx::query(
+            "INSERT INTO tokens (id, token_hash, kind, user_id, run_id, scopes, label, expires_at) \
+             VALUES ($1, $2, 'run', $3, $4, $5, $6, now() + make_interval(secs => $7))",
+        )
+        .bind(id)
+        .bind(hash(&secret))
+        .bind(on_behalf_of)
+        .bind(run_id)
+        .bind(&scopes)
+        .bind(job)
+        .bind(ttl.as_secs_f64())
+        .execute(self.pool())
+        .await?;
+        Ok(RunToken {
+            id,
+            token: secret,
+            scopes,
+        })
+    }
+
+    /// Ends every token of a run (when it finishes, fails or is cancelled).
+    pub async fn revoke_run_tokens(&self, run_id: Uuid) -> Result<()> {
+        sqlx::query(
+            "UPDATE tokens SET revoked_at = now() WHERE kind = 'run' AND run_id = $1 AND revoked_at IS NULL",
+        )
+        .bind(run_id)
+        .execute(self.pool())
+        .await?;
         Ok(())
     }
 

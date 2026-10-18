@@ -115,11 +115,22 @@ fn substitute(
         let end = after
             .find('}')
             .ok_or_else(|| format!("unclosed reference in {input:?}"))?;
-        out.push_str(&resolve(&after[..end], secrets, used)?);
+        let reference = &after[..end];
+        if is_run_variable(reference) {
+            // `${source}` and the like are filled per run by the dispatcher.
+            out.push_str(&rest[start..start + 2 + end + 1]);
+        } else {
+            out.push_str(&resolve(reference, secrets, used)?);
+        }
         rest = &after[end + 1..];
     }
     out.push_str(rest);
     Ok(out)
+}
+
+/// A run variable (`${source}`): a plain name, no `kind:` prefix. Only these exist.
+fn is_run_variable(reference: &str) -> bool {
+    matches!(reference, "source")
 }
 
 fn resolve(

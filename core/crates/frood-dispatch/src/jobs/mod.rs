@@ -32,7 +32,7 @@ pub struct JobSpec {
 impl JobSpec {
     pub(crate) fn matches(&self, event_type: &str, data: &Value) -> bool {
         self.triggers.iter().any(|trigger| {
-            trigger.event == event_type
+            trigger.event.as_deref() == Some(event_type)
                 && trigger
                     .filter
                     .iter()
@@ -47,11 +47,11 @@ impl JobSpec {
 
 fn trigger(event: &str, filter: &[(&str, Value)]) -> Trigger {
     Trigger {
-        event: event.to_owned(),
         filter: filter
             .iter()
             .map(|(k, v)| ((*k).to_owned(), v.clone()))
             .collect::<BTreeMap<_, _>>(),
+        ..Trigger::on_event(event)
     }
 }
 
