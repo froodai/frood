@@ -141,7 +141,7 @@ Claude Code и другие локальные клиенты ничего из 
 
 Положить в `~/frood-local/.frood/secrets.env` (не в чат):
 
-- `ANTHROPIC_API_KEY` и/или `OPENAI_API_KEY` — извлечение (Claude или GPT); эмбеддинги и распознавание — только OpenAI;
+- `ANTHROPIC_API_KEY` и/или `OPENAI_API_KEY` — извлечение (Claude или GPT); эмбеддинги и распознавание — OpenAI или локальные модели (Whisper, Ollama);
 - `TELEGRAM_BOT_TOKEN` — бот от @BotFather (`/newbot`).
 
 После этого добавлю в `~/frood-local/frood.yaml` аккаунты, модули и поиск по смыслу и проверю шаги 1–2 сценария вживую.
