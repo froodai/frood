@@ -37,7 +37,7 @@ sends `resume`.
   "prompt": "You are running the Frood job `daily-sweep` (run …). What started this run: …",
   "mcp_servers": [
     { "name": "frood", "path": "/mcp", "headers": { "Authorization": "Bearer frood_run_…" } },
-    { "name": "source:team-slack", "url": "https://mcp.example.com/slack", "headers": { "Authorization": "Bearer …" } }
+    { "name": "source-team-slack", "url": "https://mcp.example.com/slack", "headers": { "Authorization": "Bearer …" } }
   ],
   "credentials": { "provider": "anthropic", "kind": "api_key", "api_key": "sk-ant-…", "workspace": "wrkspc_…" },
   "budget": { "max_usd": 0.5, "max_minutes": 15 },
@@ -51,8 +51,8 @@ sends `resume`.
   rejects others with 400.
 - `instructions` are the system prompt (appended to the agent's own); `prompt` is the first user
   message.
-- `mcp_servers` are the only MCP servers the agent gets. `path` is relative to `FROOD_URL`;
-  `url` is absolute. Pass `headers` as they are. The `frood` server's token is a **run token**:
+- `mcp_servers` are the only MCP servers the agent gets. Names are letters, digits, `_` and
+  `-` (agents name tools after them). `path` is relative to `FROOD_URL`; `url` is absolute. Pass `headers` as they are. The `frood` server's token is a **run token**:
   it lives as long as the run, may read, capture and propose, never decide.
 - `credentials` pay for the run, in one of two kinds:
   - `{ "kind": "api_key", "provider", "api_key", "workspace" }` — an API key; `workspace` is
@@ -69,7 +69,8 @@ sends `resume`.
 - `budget` is a limit the runtime should pass to the agent when it supports one. The core also
   watches `cost_usd` and minutes and sends `stop` when the run is over.
 - `session_ref` is the agent's own session id, kept so that `resume` continues the same
-  conversation. Sessions must survive a restart of the runtime (keep them on a volume).
+  conversation. It may be `null` when the agent names its session only after it starts; then
+  `status` reports it. Sessions must survive a restart of the runtime (keep them on a volume).
 
 ### `resume`
 
@@ -89,14 +90,16 @@ also carries people's messages sent while the run waited.
 `{ "op": "send", "run_id": "…", "message": "Also look at #release" }` → `{ "delivered": true }`
 
 A person's message to a running agent. Return `delivered: false` when the agent cannot take
-input now; the core keeps the message and delivers it with the next `resume`.
+input now; the core keeps the message and, when the agent ends its turn, resumes the session
+with it.
 
 ### `stop`
 
 `{ "op": "stop", "run_id": "…" }` → `{}`
 
-Ends the agent and frees what it holds. Idempotent; stopping an unknown or ended run is not an
-error.
+Ends the agent and frees what it holds, its session included. The core sends it whenever a run
+ends: succeeded, failed, cancelled or over its budget. Idempotent; stopping an unknown or ended
+run is not an error.
 
 ### `status`
 

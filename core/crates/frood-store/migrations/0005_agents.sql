@@ -39,6 +39,7 @@ CREATE TABLE questions (
     expires_at      TIMESTAMPTZ,
     on_expire       TEXT NOT NULL DEFAULT 'skip' CHECK (on_expire IN ('skip', 'cancel', 'default_answer')),
     default_answer  TEXT,
+    delivered       BOOLEAN NOT NULL DEFAULT false,  -- the answer reached the agent
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX questions_open_idx ON questions (created_at) WHERE status = 'open';
