@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://frood.dev/contracts/media.transcribe/1/schema.json",
+  "title": "media.transcribe@1",
+  "$defs": {
+    "request": {
+      "type": "object",
+      "required": ["audio"],
+      "properties": {
+        "audio": {
+          "type": "object",
+          "required": ["content_type", "data_base64"],
+          "properties": {
+            "content_type": { "type": "string" },
+            "filename": { "type": ["string", "null"] },
+            "data_base64": { "type": "string", "contentEncoding": "base64" }
+          }
+        },
+        "languages": { "type": ["array", "null"], "items": { "type": "string" } }
+      }
+    },
+    "response": {
+      "type": "object",
+      "required": ["text"],
+      "properties": {
+        "text": { "type": "string" },
+        "language": { "type": ["string", "null"] },
+        "segments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "start": { "type": "number" },
+              "end": { "type": "number" },
+              "text": { "type": "string" }
+            }
+          }
+        },
+        "model": { "type": "string" }
+      }
+    }
+  }
+}

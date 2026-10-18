@@ -121,13 +121,14 @@ pub fn router(state: AppState) -> Router {
 
 /// Hosts `/mcp` answers to (DNS-rebinding protection): the issuer's host and loopback.
 fn allowed_hosts(auth: &Auth) -> Vec<String> {
-    // `frood` is the server's name inside the Compose network, where agent containers and
-    // modules reach it.
+    // Modules and agent containers reach the server as `frood` inside the Compose network, or
+    // as `host.docker.internal` when the server runs on the host.
     let mut hosts = vec![
         "localhost".to_owned(),
         "127.0.0.1".to_owned(),
         "::1".to_owned(),
         "frood".to_owned(),
+        "host.docker.internal".to_owned(),
     ];
     if let Some(host) = url::Url::parse(&auth.settings().issuer)
         .ok()
