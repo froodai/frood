@@ -5,8 +5,9 @@ pub(crate) mod extract;
 pub(crate) mod transcribe;
 
 use std::collections::BTreeMap;
+use std::path::Path;
 
-use frood_config::{Config, Trigger};
+use frood_config::{AskUser, Budget, Config, Job, OnExpire, Trigger};
 use serde_json::{Map, Value, json};
 
 /// What the platform does around the capability call.
@@ -18,7 +19,27 @@ pub enum Task {
     Extract,
     /// Embeddings of new knowledge for search (`llm.embed`).
     Embed,
+    /// An agent in a runtime module (`agents.execute`).
+    Agent,
 }
+
+/// What an agent job needs to run (docs/13 §3); all of it named in the config (A3).
+#[derive(Debug, Clone)]
+pub struct AgentSettings {
+    pub runtime: String,
+    pub agent: String,
+    pub model: String,
+    pub account: String,
+    pub instructions: String,
+    pub tools: Vec<String>,
+    pub permissions: Vec<String>,
+    pub on_behalf_of: Option<String>,
+    pub ask_user: AskUser,
+    pub budget: Budget,
+}
+
+/// Instructions of the standard `daily-sweep`, used unless the config gives its own.
+const DAILY_SWEEP: &str = include_str!("../../prompts/daily-sweep.md");
 
 #[derive(Debug, Clone)]
 pub struct JobSpec {
@@ -27,6 +48,8 @@ pub struct JobSpec {
     pub task: Task,
     pub triggers: Vec<Trigger>,
     pub with: Map<String, Value>,
+    /// Agent jobs only.
+    pub agent: Option<AgentSettings>,
 }
 
 impl JobSpec {
@@ -64,6 +87,7 @@ fn standard() -> Vec<JobSpec> {
             task: Task::Transcribe,
             triggers: vec![trigger("source.captured", &[("has_media", json!(true))])],
             with: Map::new(),
+            agent: None,
         },
         JobSpec {
             name: "extract".into(),
@@ -74,6 +98,7 @@ fn standard() -> Vec<JobSpec> {
                 trigger("source.transcribed", &[]),
             ],
             with: Map::new(),
+            agent: None,
         },
         JobSpec {
             name: "embed".into(),
@@ -84,6 +109,15 @@ fn standard() -> Vec<JobSpec> {
                 trigger("assertion.superseded", &[]),
             ],
             with: Map::new(),
+            agent: None,
+        },
+        JobSpec {
+            name: "daily-sweep".into(),
+            uses: "agents.execute".into(),
+            task: Task::Agent,
+            triggers: vec![],
+            with: Map::new(),
+            agent: None,
         },
     ]
 }
@@ -93,6 +127,74 @@ pub struct Capabilities<'a> {
     pub default_account: Option<&'a str>,
     pub embeddings: bool,
     pub modules: usize,
+    /// Directory of the config file, for instructions given as paths.
+    pub base_dir: &'a Path,
+}
+
+/// Instructions as written in the config: inline text, or a path to a file.
+fn read_instructions(value: &str, base_dir: &Path) -> Result<String, String> {
+    let looks_like_path = !value.contains('\n')
+        && (value.starts_with("./") || value.starts_with('/') || value.ends_with(".md"));
+    if !looks_like_path {
+        return Ok(value.to_owned());
+    }
+    let path = base_dir.join(value);
+    std::fs::read_to_string(&path).map_err(|e| format!("cannot read {}: {e}", path.display()))
+}
+
+/// The agent part of a job from its config (A3: runtime, agent, model and account are named).
+fn agent_settings(
+    name: &str,
+    job: &Job,
+    builtin_instructions: Option<&str>,
+    base_dir: &Path,
+) -> Result<AgentSettings, String> {
+    let missing: Vec<&str> = [
+        ("runtime", job.runtime.is_none()),
+        ("agent", job.agent.is_none()),
+        ("model", job.model.is_none()),
+        ("account", job.account.is_none()),
+    ]
+    .iter()
+    .filter(|(_, m)| *m)
+    .map(|(f, _)| *f)
+    .collect();
+    if !missing.is_empty() {
+        return Err(format!(
+            "job {name} is off: name its {} (there are no defaults)",
+            missing.join(", ")
+        ));
+    }
+    let instructions = match (&job.instructions, builtin_instructions) {
+        (Some(text), _) => {
+            read_instructions(text, base_dir).map_err(|e| format!("job {name}: {e}"))?
+        }
+        (None, Some(builtin)) => builtin.to_owned(),
+        (None, None) => return Err(format!("job {name} is off: it has no instructions")),
+    };
+    Ok(AgentSettings {
+        runtime: job.runtime.clone().unwrap_or_default(),
+        agent: job.agent.clone().unwrap_or_default(),
+        model: job.model.clone().unwrap_or_default(),
+        account: job.account.clone().unwrap_or_default(),
+        instructions,
+        tools: job.tools.clone().unwrap_or_else(|| vec!["frood".into()]),
+        permissions: job.permissions.clone().unwrap_or_else(|| {
+            vec![
+                "knowledge:read".into(),
+                "knowledge:capture".into(),
+                "knowledge:propose".into(),
+            ]
+        }),
+        on_behalf_of: job.on_behalf_of.clone(),
+        ask_user: job.ask_user.clone().unwrap_or(AskUser {
+            allowed: true,
+            expire_after: Some("3d".into()),
+            on_expire: OnExpire::Skip,
+            default_answer: None,
+        }),
+        budget: job.budget.clone().unwrap_or_default(),
+    })
 }
 
 /// The jobs this installation runs, with a warning for each job that cannot run.
@@ -119,6 +221,11 @@ pub fn resolve(config: &Config, caps: &Capabilities<'_>) -> (Vec<JobSpec>, Vec<S
             for (key, value) in &change.with {
                 job.with.insert(key.clone(), value.clone());
             }
+            for (key, value) in [("account", &change.account), ("model", &change.model)] {
+                if let Some(value) = value {
+                    job.with.insert(key.into(), json!(value));
+                }
+            }
         }
         match job.task {
             Task::Extract => {
@@ -139,6 +246,18 @@ pub fn resolve(config: &Config, caps: &Capabilities<'_>) -> (Vec<JobSpec>, Vec<S
                     continue;
                 }
             }
+            Task::Agent => {
+                let Some(change) = config.jobs.get(&job.name) else {
+                    continue;
+                };
+                match agent_settings(&job.name, change, Some(DAILY_SWEEP), caps.base_dir) {
+                    Ok(settings) => job.agent = Some(settings),
+                    Err(warning) => {
+                        warnings.push(warning);
+                        continue;
+                    }
+                }
+            }
             Task::Embed if !caps.embeddings => continue,
             Task::Transcribe if caps.modules == 0 => {
                 warnings.push(
@@ -151,11 +270,30 @@ pub fn resolve(config: &Config, caps: &Capabilities<'_>) -> (Vec<JobSpec>, Vec<S
         }
         jobs.push(job);
     }
-    for name in config.jobs.keys() {
-        if !matches!(name.as_str(), "transcribe" | "extract" | "embed") {
-            warnings.push(format!(
-                "job {name}: jobs beyond the standard set arrive in M4; ignored for now"
-            ));
+    for (name, job) in &config.jobs {
+        if matches!(
+            name.as_str(),
+            "transcribe" | "extract" | "embed" | "daily-sweep"
+        ) || job.enabled == Some(false)
+        {
+            continue;
+        }
+        match job.uses.as_deref() {
+            Some("agents.execute") => match agent_settings(name, job, None, caps.base_dir) {
+                Ok(settings) => jobs.push(JobSpec {
+                    name: name.clone(),
+                    uses: "agents.execute".into(),
+                    task: Task::Agent,
+                    triggers: job.on.clone().unwrap_or_default(),
+                    with: job.with.clone(),
+                    agent: Some(settings),
+                }),
+                Err(warning) => warnings.push(warning),
+            },
+            other => warnings.push(format!(
+                "job {name}: only agent jobs (uses: agents.execute) can be added for now, not {}",
+                other.unwrap_or("a job without uses")
+            )),
         }
     }
     (jobs, warnings)
@@ -253,6 +391,7 @@ mod tests {
             default_account: Some("claude"),
             embeddings: false,
             modules: 0,
+            base_dir: Path::new("."),
         };
         let (jobs, warnings) = resolve(&config(""), &caps);
         assert!(jobs.is_empty(), "no model named, so no extraction");
@@ -273,6 +412,7 @@ mod tests {
             default_account: None,
             embeddings: true,
             modules: 1,
+            base_dir: Path::new("."),
         };
         let (jobs, warnings) = resolve(&config(""), &caps);
         assert_eq!(names(&jobs), ["transcribe", "embed"]);
@@ -285,6 +425,7 @@ mod tests {
             default_account: Some("claude"),
             embeddings: true,
             modules: 1,
+            base_dir: Path::new("."),
         };
         let (jobs, warnings) = resolve(
             &config(
@@ -304,6 +445,7 @@ mod tests {
             default_account: Some("claude"),
             embeddings: true,
             modules: 1,
+            base_dir: Path::new("."),
         };
         let (jobs, _) = resolve(&config("jobs:\n  extract: { with: { model: m } }\n"), &caps);
         let extract = jobs.iter().find(|j| j.name == "extract").unwrap();

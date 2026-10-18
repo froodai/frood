@@ -740,6 +740,21 @@ impl Ledger {
         query::proposals(&self.pool, state, after, limit).await
     }
 
+    /// Appends an event from another part of the core (runs, questions, schedules) to the
+    /// journal, in the journal's single order.
+    pub async fn append_event(
+        &self,
+        actor: &str,
+        event_type: &'static str,
+        subject: String,
+        data: serde_json::Value,
+    ) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        journal::append(&mut tx, actor, &[Event::new(event_type, subject, data)]).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
     /// Proposals that cite evidence from a source, oldest first.
     pub async fn proposals_citing_source(&self, source_id: Uuid) -> Result<Vec<Proposal>> {
         let ids: Vec<Uuid> = sqlx::query_scalar(

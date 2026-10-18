@@ -991,11 +991,13 @@ version = "0.0.1"
 dependencies = [
  "base64 0.23.1",
  "chrono",
+ "frood-auth",
  "frood-config",
  "frood-ledger",
  "frood-llm",
  "frood-modhost",
  "frood-search",
+ "humantime",
  "serde",
  "serde_json",
  "sqlx",
@@ -1042,6 +1044,7 @@ version = "0.0.1"
 dependencies = [
  "chrono",
  "frood-auth",
+ "frood-dispatch",
  "frood-ledger",
  "frood-search",
  "http",

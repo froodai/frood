@@ -44,6 +44,7 @@ pub struct Assembly {
 /// with the jobs the installation can run.
 pub fn assemble(
     config: &frood_config::Config,
+    base_dir: &std::path::Path,
     pool: frood_store::sqlx::PgPool,
     token_of: impl Fn(&str) -> Option<String>,
 ) -> Assembly {
@@ -63,10 +64,12 @@ pub fn assemble(
         default_account: gateway.default_account(),
         embeddings: searcher.embedding_model().is_some(),
         modules: config.modules.len(),
+        base_dir,
     };
     let (jobs, warnings) = frood_dispatch::resolve(config, &caps);
     let dispatch = frood_dispatch::Dispatch::new(
         ledger.clone(),
+        auth.clone(),
         searcher.clone(),
         gateway,
         modules.clone(),
@@ -93,6 +96,7 @@ pub fn router(state: AppState) -> Router {
             frood_mcp::service(
                 state.ledger.clone(),
                 state.searcher.clone(),
+                state.dispatch.clone(),
                 allowed_hosts(&state.auth),
             ),
         )
@@ -117,10 +121,13 @@ pub fn router(state: AppState) -> Router {
 
 /// Hosts `/mcp` answers to (DNS-rebinding protection): the issuer's host and loopback.
 fn allowed_hosts(auth: &Auth) -> Vec<String> {
+    // `frood` is the server's name inside the Compose network, where agent containers and
+    // modules reach it.
     let mut hosts = vec![
         "localhost".to_owned(),
         "127.0.0.1".to_owned(),
         "::1".to_owned(),
+        "frood".to_owned(),
     ];
     if let Some(host) = url::Url::parse(&auth.settings().issuer)
         .ok()
@@ -178,7 +185,7 @@ mod tests {
         )
         .unwrap()
         .config;
-        router(assemble(&config, pool, |_| None).state)
+        router(assemble(&config, std::path::Path::new("."), pool, |_| None).state)
     }
 
     async fn get_json(path: &str) -> (StatusCode, Value) {

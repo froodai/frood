@@ -86,6 +86,14 @@ pub struct Embeddings {
     pub vectors: Vec<Vec<f32>>,
 }
 
+/// An account's credentials, for a runtime module that runs an agent with them.
+#[derive(Debug, Clone)]
+pub struct Credential {
+    pub provider: ModelProvider,
+    pub key: String,
+    pub workspace: Option<String>,
+}
+
 #[derive(Clone)]
 struct Endpoint {
     provider: ModelProvider,
@@ -150,6 +158,16 @@ impl Gateway {
 
     pub fn has_account(&self, name: &str) -> bool {
         self.accounts.contains_key(name)
+    }
+
+    /// What an agent runtime needs to pay with this account: the provider, the key, and the
+    /// Anthropic workspace for organization keys. Goes only to runtime modules.
+    pub fn credential(&self, account: &str) -> Option<Credential> {
+        self.accounts.get(account).map(|e| Credential {
+            provider: e.provider,
+            key: e.key.clone(),
+            workspace: e.workspace.clone(),
+        })
     }
 
     fn endpoint(&self, account: &str) -> Result<&Endpoint> {
