@@ -16,6 +16,8 @@ frood-config = { path = "crates/frood-config" }
 frood-ledger = { path = "crates/frood-ledger" }
 frood-llm = { path = "crates/frood-llm" }
 frood-mcp = { path = "crates/frood-mcp" }
+frood-modhost = { path = "crates/frood-modhost" }
+frood-search = { path = "crates/frood-search" }
 frood-store = { path = "crates/frood-store" }
 
 anyhow = "1"

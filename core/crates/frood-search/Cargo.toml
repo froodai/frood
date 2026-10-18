@@ -1,0 +1,17 @@
+[package]
+name = "frood-search"
+description = "Search of the Frood core: embeds queries and knowledge through the LLM gateway"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+frood-config.workspace = true
+frood-ledger.workspace = true
+frood-llm.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

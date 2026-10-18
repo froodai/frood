@@ -928,6 +928,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "frood-modhost"
+version = "0.0.1"
+dependencies = [
+ "axum",
+ "frood-config",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "frood-search"
+version = "0.0.1"
+dependencies = [
+ "frood-config",
+ "frood-ledger",
+ "frood-llm",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
 name = "frood-store"
 version = "0.0.1"
 dependencies = [
