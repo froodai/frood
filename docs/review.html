@@ -1,0 +1,2053 @@
+<title>Ревью дизайна Frood</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Unbounded:wght@500;600&display=swap">
+<style>
+/* Layout: ledger-paper review hub. Tabs per review stage; a contents rail on the left built from the open tab; review controls inline; a tally bar pinned to the bottom. */
+:root{
+  --bg:#F2F5F1; --surface:#FBFCFA; --ink:#17231D; --muted:#56675E; --rule:#D3DFD6; --rule-strong:#AFC4B6;
+  --accent:#1D6B4C; --accent-ink:#FFFFFF; --accent-soft:#DDEBE2;
+  --red:#AD3823; --red-soft:#F6E2DC; --amber:#875E00; --amber-soft:#F3E8C8; --core:#E6F0E9;
+  --f-display:"Unbounded","Golos Text",system-ui,sans-serif;
+  --f-body:"Golos Text",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0E1411; --surface:#151D19; --ink:#DCE6DF; --muted:#93A59B; --rule:#26332C; --rule-strong:#3B4D43;
+    --accent:#5CC495; --accent-ink:#0B1A12; --accent-soft:#16301F;
+    --red:#F08C74; --red-soft:#3A1E18; --amber:#E2B54A; --amber-soft:#33290F; --core:#122119;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0E1411; --surface:#151D19; --ink:#DCE6DF; --muted:#93A59B; --rule:#26332C; --rule-strong:#3B4D43;
+  --accent:#5CC495; --accent-ink:#0B1A12; --accent-soft:#16301F;
+  --red:#F08C74; --red-soft:#3A1E18; --amber:#E2B54A; --amber-soft:#33290F; --core:#122119;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-underline-offset:2px}
+a:hover{text-decoration-thickness:2px}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+code,.mono{font-family:var(--f-mono);font-size:.86em}
+code{background:var(--accent-soft);padding:1px 5px;border-radius:4px;overflow-wrap:anywhere}
+pre{font-family:var(--f-mono);font-size:13px;line-height:1.5;background:var(--surface);border:1px solid var(--rule);border-radius:8px;padding:12px 14px;margin:0;overflow-x:auto}
+h1,h2{font-family:var(--f-display);font-weight:500;text-wrap:balance;letter-spacing:-.01em;margin:0}
+h3{font-size:17px;font-weight:600;margin:0;text-wrap:balance}
+p{margin:0}
+ul,ol{margin:0;padding-left:1.25em}
+
+.shell{display:grid;grid-template-columns:minmax(0,1fr);gap:48px;max-width:1200px;margin:0 auto;padding-block:32px 150px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+@media (min-width:1040px){.shell{grid-template-columns:210px minmax(0,1fr)}}
+.rail{display:none;position:sticky;top:calc(env(safe-area-inset-top,0px) + 72px);align-self:start;font-size:14px}
+@media (min-width:1040px){.rail{display:block}}
+.rail .t{font:500 11px var(--f-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:10px}
+.rail ol{list-style:none;padding:0;display:grid;gap:2px;border-left:1px solid var(--rule)}
+.rail a{display:block;color:var(--muted);text-decoration:none;padding:4px 0 4px 12px;margin-left:-1px;border-left:2px solid transparent}
+.rail a:hover{color:var(--ink);border-left-color:var(--rule-strong)}
+main{min-width:0;max-width:900px}
+
+.hero{display:grid;gap:14px;padding-bottom:20px}
+.eyebrow{font:500 12px var(--f-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.hero h1{font-size:clamp(40px,7vw,64px);line-height:1;font-weight:600;color:var(--accent)}
+.lede{font-size:18px;max-width:62ch}
+.meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.pill{display:inline-flex;align-items:center;gap:6px;font:500 12px var(--f-mono);padding:4px 10px;border-radius:999px;border:1px solid var(--rule-strong);color:var(--muted);background:var(--surface);white-space:nowrap}
+.pill::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--rule-strong)}
+.pill.wait{color:var(--amber);background:var(--amber-soft);border-color:transparent}
+.pill.wait::before{background:var(--amber)}
+.pill.done{color:var(--accent);background:var(--accent-soft);border-color:transparent}
+.pill.done::before{background:var(--accent)}
+
+.tabs{position:sticky;top:env(safe-area-inset-top,0px);z-index:4;background:var(--bg);display:flex;gap:2px;overflow-x:auto;border-bottom:1px solid var(--rule-strong);margin-bottom:4px;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tab{font:500 15px var(--f-body);color:var(--muted);background:transparent;border:0;border-bottom:3px solid transparent;padding:12px 14px 10px;cursor:pointer;white-space:nowrap;display:inline-flex;gap:8px;align-items:center}
+.tab:hover{color:var(--ink)}
+.tab[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
+.tab .n{font:600 11px var(--f-mono);color:var(--amber);background:var(--amber-soft);padding:1px 6px;border-radius:999px}
+
+section{padding-block:32px;border-top:1px solid var(--rule);display:grid;gap:18px;scroll-margin-top:64px}
+.panel > section:first-child{border-top:0}
+.sh{display:grid;gap:6px}
+.sh h2{font-size:clamp(21px,3vw,27px);line-height:1.2}
+.tag{justify-self:start;font:500 11px var(--f-mono);letter-spacing:.08em;text-transform:uppercase;padding:2px 8px;border-radius:4px}
+.tag.need{color:var(--amber);background:var(--amber-soft)}
+.tag.ref{color:var(--muted);background:var(--accent-soft)}
+.sub{color:var(--muted);max-width:68ch}
+.prose{max-width:68ch;display:grid;gap:12px}
+.caption{font-size:13px;color:var(--muted)}
+
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+table{border-collapse:collapse;width:100%;font-size:15px}
+th{font:500 11px var(--f-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);text-align:left;padding:8px 12px;border-bottom:1px solid var(--rule-strong);white-space:nowrap}
+td{padding:10px 12px;border-bottom:1px solid var(--rule);vertical-align:top}
+td.k{font-family:var(--f-mono);font-size:13px;white-space:nowrap;color:var(--accent);font-weight:500}
+.boxed{background:var(--surface);border:1px solid var(--rule);border-radius:8px}
+.ledger td{font-variant-numeric:tabular-nums}
+.ledger .id{font-family:var(--f-mono);font-size:13px;color:var(--muted);white-space:nowrap}
+.ledger .dt{font-family:var(--f-mono);font-size:13px;white-space:nowrap}
+.st{font:500 11px var(--f-mono);padding:2px 7px;border-radius:4px;white-space:nowrap}
+.st.act{color:var(--accent);background:var(--accent-soft)}
+.st.sup{color:var(--muted);background:var(--bg);text-decoration:line-through}
+.st.wait{color:var(--amber);background:var(--amber-soft)}
+.st.no{color:var(--red);background:var(--red-soft)}
+
+.pillars{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.pillar{background:var(--surface);border:1px solid var(--rule);border-radius:8px;padding:14px 16px;display:grid;gap:4px;align-content:start}
+.pillar b{font-weight:600}
+.pillar span{color:var(--muted);font-size:15px}
+
+/* response table */
+.resp td:nth-child(2){white-space:nowrap}
+.resp td:nth-child(3){color:var(--muted);font-style:italic}
+
+/* explain */
+.explain{background:var(--surface);border:1px solid var(--rule);border-radius:8px;padding:14px 16px;display:grid;gap:10px;font-size:15px}
+.explain dl{display:grid;grid-template-columns:minmax(0,190px) minmax(0,1fr);gap:8px 16px;margin:0}
+.explain dt{font-weight:600}
+.explain dd{margin:0;color:var(--muted)}
+@media (max-width:640px){.explain dl{grid-template-columns:minmax(0,1fr)}.explain dd{margin-bottom:6px}}
+
+/* layer diagram */
+.stack{display:grid;font-size:14.5px}
+.layer{display:grid;grid-template-columns:120px minmax(0,1fr);gap:14px;align-items:center;padding:12px 14px;background:var(--surface);border:1px solid var(--rule);border-radius:8px}
+.lname{font:500 11px var(--f-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{display:inline-block;padding:3px 9px;border-radius:6px;background:var(--bg);border:1px solid var(--rule);white-space:nowrap}
+.chip.soft{color:var(--muted)}
+.link{display:flex;justify-content:center;gap:28px;flex-wrap:wrap;padding:6px 0;font:500 12px var(--f-mono);color:var(--muted)}
+.link span::before{content:"│ ";color:var(--rule-strong)}
+.link.up span:last-child{color:var(--accent)}
+.layer.core{border:2px solid var(--accent);background-color:var(--core);background-image:repeating-linear-gradient(to bottom,transparent 0 27px,var(--rule) 27px 28px);padding:16px 14px}
+.layer.core .lname{color:var(--accent)}
+.pipe{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.pipe .chip{background:var(--surface);border-color:var(--rule-strong);font-weight:500}
+.pipe .chip.k{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.ar{color:var(--muted);font-family:var(--f-mono)}
+.pipe .dec{font:500 12px var(--f-mono);color:var(--accent)}
+.corefoot{margin-top:8px;font-size:13px;color:var(--muted)}
+@media (max-width:640px){.layer{grid-template-columns:minmax(0,1fr);gap:8px}.link{gap:14px}}
+
+.life{display:flex;flex-wrap:wrap;gap:8px;align-items:stretch}
+.life .s{flex:1 1 140px;min-width:0;background:var(--surface);border:1px solid var(--rule);border-radius:8px;padding:10px 12px;display:grid;gap:2px;align-content:start}
+.life .s b{font-weight:600;font-size:15px}
+.life .s span{font-size:13px;color:var(--muted)}
+.life .s.k{border-color:var(--accent)}
+.life .s.end{border-style:dashed}
+.life .s .rel{font:500 11px var(--f-mono);color:var(--accent)}
+
+/* components */
+.ctable td.name{font-weight:600;min-width:170px}
+.ctable td.name .num{font-weight:500;color:var(--muted);margin-right:6px}
+.ctable td.alt{color:var(--muted)}
+.ctable tr.hl td.name{color:var(--accent)}
+@media (max-width:760px){
+  .ctable thead{display:none}
+  .ctable tr{display:grid;gap:4px;padding:12px 0;border-bottom:1px solid var(--rule)}
+  .ctable td{display:block;border:0;padding:0}
+  .ctable td[data-l]::before{content:attr(data-l);display:inline-block;min-width:96px;font:500 10.5px var(--f-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+}
+
+/* flows */
+.flows{display:grid;gap:16px}
+.flow{display:grid;gap:8px}
+.flow h3 .k{font-family:var(--f-mono);font-weight:500;color:var(--accent);margin-right:8px}
+.steps{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:14.5px}
+.steps .chip{background:var(--surface)}
+.steps .chip.k{border-color:var(--accent);color:var(--accent);font-weight:500}
+.steps .chip.you{border-color:var(--amber);color:var(--amber);font-weight:500}
+.flow .note{font-size:14px;color:var(--muted)}
+
+.inv{display:grid;gap:10px;counter-reset:inv;padding:0;list-style:none}
+.inv li{display:grid;grid-template-columns:28px minmax(0,1fr);gap:8px;max-width:72ch}
+.inv li::before{counter-increment:inv;content:counter(inv);font:500 13px var(--f-mono);color:var(--accent);padding-top:2px}
+
+/* timeline */
+.tl{display:grid;gap:6px;background:var(--surface);border:1px solid var(--rule);border-radius:8px;padding:14px 16px;font-size:13px}
+.tl-row{display:grid;grid-template-columns:120px minmax(0,1fr);gap:12px;align-items:center}
+.tl-l{color:var(--muted);font-family:var(--f-mono);font-size:12px}
+.tl-track{position:relative;height:24px;background:repeating-linear-gradient(to right,transparent 0,transparent calc(33% - 1px),var(--rule) calc(33% - 1px),var(--rule) 33%)}
+.tl-bar{position:absolute;top:3px;height:18px;border-radius:4px;font:500 11px var(--f-mono);line-height:18px;padding:0 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tl-bar.old{background:var(--rule-strong);color:var(--ink)}
+.tl-bar.new{background:var(--accent);color:var(--accent-ink)}
+.tl-bar.mem{background:transparent;border:1.5px solid var(--rule-strong);color:var(--muted)}
+.tl-bar.mem.new{border-color:var(--accent);color:var(--accent);background:transparent}
+.tl-axis{position:relative;height:18px;font-family:var(--f-mono);font-size:11px;color:var(--muted)}
+.tl-axis span{position:absolute;transform:translateX(-50%);white-space:nowrap}
+.tl-axis span:first-child{transform:none}
+.tl-axis span:last-child{transform:translateX(-100%)}
+.tl-legend{display:flex;flex-wrap:wrap;gap:14px;color:var(--muted);font-size:12.5px;padding-top:4px}
+.tl-legend i{display:inline-block;width:18px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+@media (max-width:640px){.tl-row{grid-template-columns:minmax(0,1fr);gap:2px}}
+
+/* spaces */
+.spaces{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+.space{background:var(--surface);border:1px solid var(--rule);border-radius:8px;padding:12px 14px;display:grid;gap:6px;align-content:start;font-size:14.5px}
+.space b{font-weight:600}
+.space .who{font:500 11.5px var(--f-mono);color:var(--muted)}
+.space.personal{border-color:var(--accent)}
+
+/* review items */
+.rv-list{display:grid;border-top:1px solid var(--rule)}
+.rv{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:12px 24px;padding:16px 0;border-bottom:1px solid var(--rule)}
+@media (max-width:760px){.rv{grid-template-columns:minmax(0,1fr)}}
+.rv .txt{display:grid;gap:6px;min-width:0}
+.rv .id{font:600 13px var(--f-mono);color:var(--accent)}
+.rv h3{font-size:16.5px}
+.rv .why{color:var(--muted);font-size:15px}
+.rv .more{font-size:14px}
+.rv .ctl{display:grid;gap:8px;align-content:start}
+.rv.q{grid-template-columns:minmax(0,1fr) 340px}
+@media (max-width:760px){.rv.q{grid-template-columns:minmax(0,1fr)}}
+.seg{display:flex;border:1px solid var(--rule-strong);border-radius:8px;overflow:hidden;background:var(--surface)}
+.seg button{flex:1;font:500 13.5px var(--f-body);color:var(--ink);background:transparent;border:0;border-right:1px solid var(--rule);padding:7px 6px;cursor:pointer;min-width:0}
+.seg button:last-child{border-right:0}
+.seg button:hover{background:var(--bg)}
+.seg button[aria-pressed="true"][data-v="ok"],.seg button[aria-pressed="true"][data-v="approve"]{background:var(--accent);color:var(--accent-ink)}
+.seg button[aria-pressed="true"][data-v="discuss"],.seg button[aria-pressed="true"][data-v="approve_changes"]{background:var(--amber);color:var(--surface)}
+.seg button[aria-pressed="true"][data-v="no"],.seg button[aria-pressed="true"][data-v="redo"]{background:var(--red);color:var(--surface)}
+textarea{width:100%;font:inherit;font-size:14.5px;color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:8px;padding:8px 10px;resize:vertical;min-height:40px;line-height:1.45}
+textarea::placeholder{color:var(--muted)}
+.overall{background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--accent);border-radius:0 8px 8px 0;padding:16px;display:grid;gap:10px}
+.locked{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:14.5px}
+.locked .chip{background:var(--accent-soft);border-color:transparent;color:var(--accent);font-weight:500}
+
+/* gotchas */
+.gl{display:grid;border-top:1px solid var(--rule)}
+.g{display:grid;grid-template-columns:56px minmax(0,1fr) minmax(0,1fr);gap:6px 20px;padding:14px 0 14px 12px;border-bottom:1px solid var(--rule);border-left:3px solid transparent}
+.g.hi{border-left-color:var(--red)}
+.g.mid{border-left-color:var(--amber)}
+.g .id{font:600 13px var(--f-mono);color:var(--muted);padding-top:2px}
+.g.hi .id{color:var(--red)}
+.g .fact,.g .imp{font-size:15px}
+.g .imp{color:var(--muted)}
+.g .imp::before{content:"→ ";color:var(--accent)}
+@media (max-width:760px){.g{grid-template-columns:44px minmax(0,1fr)}.g .imp{grid-column:2}}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:13px;color:var(--muted)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+
+/* reconciliation */
+.rec{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
+.rbox{background:var(--surface);border:1px solid var(--rule);border-radius:8px;padding:14px 16px;display:grid;gap:8px;align-content:start;min-width:0}
+.rbox h3{font-size:15px}
+.rbox ul{font-size:14.5px;display:grid;gap:5px}
+.rbox .lbl{font:500 11px var(--f-mono);letter-spacing:.06em;text-transform:uppercase}
+.rbox.same .lbl{color:var(--muted)}
+.rbox.took .lbl{color:var(--accent)}
+.rbox.new .lbl{color:var(--amber)}
+.diff td:first-child{font-weight:600;white-space:nowrap}
+
+/* landscape */
+details.area{border-bottom:1px solid var(--rule)}
+details.area:first-of-type{border-top:1px solid var(--rule)}
+details.area summary{cursor:pointer;list-style:none;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 16px;padding:14px 0;align-items:baseline}
+details.area summary::-webkit-details-marker{display:none}
+details.area summary b{font-weight:600;font-size:16.5px}
+details.area summary .gist{grid-column:1;color:var(--muted);font-size:14.5px}
+details.area summary .tw{grid-row:1;grid-column:2;font-family:var(--f-mono);color:var(--muted);transition:transform .15s}
+details.area[open] summary .tw{transform:rotate(90deg)}
+.adet{display:grid;gap:12px;padding:0 0 20px}
+.adet table{font-size:14.5px}
+.adet ul{font-size:14.5px;display:grid;gap:6px;max-width:76ch}
+.src{font-size:13px;color:var(--muted)}
+.src a{color:var(--muted)}
+.ok,.unk{display:inline-block;font:600 10.5px var(--f-mono);padding:0 5px;border-radius:3px;vertical-align:1px;margin-left:3px;white-space:nowrap}
+.ok{color:var(--accent);background:var(--accent-soft)}
+.unk{color:var(--amber);background:var(--amber-soft)}
+
+.phases{display:grid;gap:8px;padding-left:1.4em;max-width:72ch}
+.phases li::marker{font-family:var(--f-mono);color:var(--accent)}
+.phases li.cur{font-weight:600}
+.twocol{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:28px}
+.twocol h3{margin-bottom:10px}
+.twocol ul{display:grid;gap:6px;font-size:15px}
+
+/* tally bar */
+.bar{position:fixed;left:0;right:0;bottom:0;z-index:5;background:var(--surface);border-top:1px solid var(--rule-strong);padding-top:10px;padding-bottom:calc(10px + env(safe-area-inset-bottom,0px));padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.bar-in{max-width:1200px;margin:0 auto;display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center}
+.tally{font:500 13px var(--f-mono);font-variant-numeric:tabular-nums;display:flex;gap:14px;flex-wrap:wrap}
+.tally b{color:var(--accent);font-weight:600}
+.status{font-size:13px;color:var(--muted);flex:1 1 220px;min-width:0}
+.status.err{color:var(--red)}
+.btn{font:600 14px var(--f-body);background:var(--accent);color:var(--accent-ink);border:0;border-radius:8px;padding:9px 16px;cursor:pointer;white-space:nowrap}
+.btn:hover{filter:brightness(1.08)}
+#out{max-width:1200px;margin:10px auto 0;display:block;min-height:120px;font-family:var(--f-mono);font-size:12.5px}
+@media (prefers-reduced-motion: reduce){*{transition:none!important}}
+</style>
+
+<div class="shell">
+  <nav class="rail" aria-label="Разделы вкладки"><div class="t">Разделы</div><ol id="rail-list"></ol></nav>
+
+  <main>
+    <header class="hero">
+      <div class="eyebrow">frood · design review · 17 октября 2026</div>
+      <h1>Frood</h1>
+      <p class="lede">Открытая self-hosted платформа памяти и проактивных ассистентов.</p>
+      <div class="meta">
+        <span class="pill done">архитектура v0.2</span>
+        <span class="pill done">модель знаний v0.2</span>
+        <span class="pill done">API и вход v0.2</span>
+        <span class="pill done">задачи и агенты v0.3</span>
+        <span class="pill done">ввод и источники v0.2</span>
+        <span class="pill done">Inbox и уведомления v0.2</span>
+        <span class="pill done">платформа v0.2</span>
+        <span class="pill wait">план MVP · на ревью</span>
+        <span class="pill">исходники: docs/*.md</span>
+      </div>
+    </header>
+
+    <div class="tabs" role="tablist" aria-label="Этапы ревью">
+      <button class="tab" role="tab" id="t-now" data-tab="now" aria-controls="now" aria-selected="true">Сейчас на ревью <span class="n">8</span></button>
+      <button class="tab" role="tab" id="t-mvp" data-tab="mvp" aria-controls="mvp" aria-selected="false">План MVP</button>
+      <button class="tab" role="tab" id="t-platform" data-tab="platform" aria-controls="platform" aria-selected="false">Платформа</button>
+      <button class="tab" role="tab" id="t-notify" data-tab="notify" aria-controls="notify" aria-selected="false">Inbox и уведомления</button>
+      <button class="tab" role="tab" id="t-ingest" data-tab="ingest" aria-controls="ingest" aria-selected="false">Ввод и источники</button>
+      <button class="tab" role="tab" id="t-work" data-tab="work" aria-controls="work" aria-selected="false">Задачи и агенты</button>
+      <button class="tab" role="tab" id="t-api" data-tab="api" aria-controls="api" aria-selected="false">API и вход</button>
+      <button class="tab" role="tab" id="t-model" data-tab="model" aria-controls="model" aria-selected="false">Модель знаний</button>
+      <button class="tab" role="tab" id="t-arch" data-tab="arch" aria-controls="arch" aria-selected="false">Архитектура v0.2</button>
+      <button class="tab" role="tab" id="t-ref" data-tab="ref" aria-controls="ref" aria-selected="false">Справка</button>
+    </div>
+
+    <!-- ================= NOW ================= -->
+    <div class="panel" id="now" role="tabpanel" aria-labelledby="t-now">
+      <section id="now-intro">
+        <div class="sh"><h2>Что нужно от вас</h2></div>
+        <div class="prose">
+          <p>Раунд 8: фаза 6 одобрена, сторонние реестры разрешены сразу. <b>Детализация по всем шести фазам закончена.</b></p>
+          <p>Осталось два шага: выбрать лицензию (ваше условие в одну стандартную лицензию целиком не ложится, разбор ниже) и посмотреть план реализации MVP — 6 решений и 1 вопрос.</p>
+          <p>Отметки сохраняются в странице. Напишите в чат «готово», и я их прочитаю.</p>
+        </div>
+        <div class="locked"><span class="caption">Принято:</span><span class="chip">Архитектура D1′–D10</span><span class="chip">Модель M1–M11</span><span class="chip">API A1–A8</span><span class="chip">Агенты W1′–W9</span><span class="chip">Ввод I1–I9</span><span class="chip">Inbox N1–N9′</span><span class="chip">Платформа K1–K9</span></div>
+      </section>
+
+      <section id="now-license">
+        <div class="sh"><span class="tag need">нужно ваше решение</span><h2>Лицензия</h2><p class="sub">Ваше условие: брать можно, но при коммерческом использовании — публиковать все исходники; нельзя просто взять, развернуть и начать продавать.</p></div>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Вариант</th><th>Что разрешает</th><th>Что запрещает или требует</th><th>Open source?</th></tr></thead>
+            <tbody>
+              <tr><td><b>A. AGPL-3.0 + CLA</b></td><td>Любое использование, в том числе коммерческое</td><td>Кто <b>изменил</b> код и даёт им пользоваться по сети, обязан открыть изменения. Развернуть <b>без изменений</b> и продавать хостинг — можно. CLA позволяет вам продавать коммерческую лицензию тем, кто не хочет открывать изменения</td><td><span class="st act">да</span></td></tr>
+              <tr><td><b>B. FSL-1.1</b></td><td>Всё, кроме конкурирующего коммерческого: компании могут пользоваться внутри, люди — лично</td><td>Нельзя продавать как продукт или сервис, заменяющий ваш. Каждый релиз через 2 года становится Apache-2.0 или MIT<span class="ok">✓</span></td><td><span class="st wait">нет, fair source</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="explain">
+          <p>«Коммерческое использование → публикуй исходники» — это AGPL, но она не мешает развернуть вашу версию как есть и продавать хостинг. «Нельзя просто взять и продавать» — это FSL, но она не open source в строгом смысле, а в требованиях был «открытый проект».</p>
+          <p><b>Рекомендую A:</b> ядро под AGPL-3.0, контракты, SDK и официальные модули — под Apache-2.0, плюс CLA. Это настоящий open source; сторонние модули могут быть под любой лицензией; CLA оставляет возможность двойной лицензии или смены лицензии позже. Если важнее запретить перепродажу совсем — B.</p>
+        </div>
+        <div class="rv-list">
+          <div class="rv q" data-id="platform02_L1" data-kind="question" data-label="L1 Лицензия ядра">
+            <div class="txt"><span class="id">L1</span><h3>Какую лицензию берём для ядра: A (AGPL-3.0 + CLA) или B (FSL-1.1)?</h3><p class="affects">Напишите букву и, если нужно, оговорки.</p></div>
+            <div class="ctl"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="now-mvp">
+        <div class="sh"><span class="tag need">нужно ваше решение</span><h2>План MVP: 6 решений</h2><p class="sub">Подробности на вкладке «План MVP».</p></div>
+        <div class="rv-list">
+          <div class="rv" data-id="mvp01_P1" data-kind="decision" data-label="P1 Критерий готовности — сквозной сценарий">
+            <div class="txt"><span class="id">P1</span><h3>MVP готов, когда сквозной сценарий проходит автоматически в CI и вручную на VPS</h3><p class="why">Голосовое в Telegram → вопрос в Claude или ChatGPT → ночной агент находит противоречие → перезапуск → вопрос на месте → вердикт кнопкой → бэкап и восстановление.</p><p class="more"><a href="#v-done">Сценарий по шагам</a></p></div><div class="ctl"></div>
+          </div>
+          <div class="rv" data-id="mvp01_P2" data-kind="decision" data-label="P2 Объём MVP">
+            <div class="txt"><span class="id">P2</span><h3>Объём MVP: Postgres, вход через Google и OIDC, MCP, поиск, агенты в контейнерах на VPS (Claude Code, Codex), Telegram, один MCP-источник, облачное распознавание, минимальная админка, бэкапы</h3><p class="why">Air, Managed Agents, разбор документов, встречи, pull-коннекторы, Slack, ntfy, графы — после MVP.</p><p class="more"><a href="#v-scope">Таблица «в MVP / позже»</a></p></div><div class="ctl"></div>
+          </div>
+          <div class="rv" data-id="mvp01_P3" data-kind="decision" data-label="P3 Этапы M0–M7">
+            <div class="txt"><span class="id">P3</span><h3>Этапы M0–M7 в этом порядке, каждый с демонстрируемым результатом: скелет → Ledger и API → вход и MCP → ввод → агенты → Inbox и Telegram → эксплуатация → приёмка</h3><p class="more"><a href="#v-stages">Этапы</a></p></div><div class="ctl"></div>
+          </div>
+          <div class="rv" data-id="mvp01_P4" data-kind="decision" data-label="P4 Монорепозиторий">
+            <div class="txt"><span class="id">P4</span><h3>Монорепозиторий: Rust-ядро, контракты с тестами, официальные модули, бандлы, деплой, документация. Реестр — отдельный репозиторий</h3><p class="more"><a href="#v-repo">Структура</a></p></div><div class="ctl"></div>
+          </div>
+          <div class="rv" data-id="mvp01_P5" data-kind="decision" data-label="P5 Лицензии частей">
+            <div class="txt"><span class="id">P5</span><h3>Контракты, SDK и официальные модули — Apache-2.0, чтобы сторонние модули могли быть под любой лицензией. Ядро — по решению L1</h3></div><div class="ctl"></div>
+          </div>
+          <div class="rv" data-id="mvp01_P6" data-kind="decision" data-label="P6 Тестирование">
+            <div class="txt"><span class="id">P6</span><h3>Тестирование: тесты соответствия контрактов, property-тесты Ledger, записанные ответы моделей в CI (детерминированно и бесплатно), e2e-сценарий</h3><p class="more"><a href="#v-tests">Подробнее</a></p></div><div class="ctl"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="now-questions">
+        <div class="sh"><span class="tag need">нужно ваше решение</span><h2>Вопрос</h2></div>
+        <div class="rv-list">
+          <div class="rv q" data-id="mvp01_Q1" data-kind="question" data-label="QP1 Публичный или приватный репозиторий">
+            <div class="txt"><span class="id">QP1</span><h3>Репозиторий сразу публичный или приватный до готовности MVP?</h3></div><div class="ctl"></div>
+          </div>
+        </div>
+        <div class="overall" data-id="mvp01_overall" data-kind="overall" data-label="Общий вердикт по плану MVP">
+          <h3>Общий вердикт по плану MVP</h3>
+          <div class="ctl"></div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ================= MVP ================= -->
+    <div class="panel" id="mvp" role="tabpanel" aria-labelledby="t-mvp">
+      <section id="v-done">
+        <div class="sh"><span class="tag need">план MVP · на ревью</span><h2>Критерий готовности</h2><p class="sub">Сценарий проходит целиком: автоматически (e2e в CI) и вручную на VPS.</p></div>
+        <div class="flows">
+          <div class="flow"><h3><span class="k">1</span>Записать через один клиент</h3><div class="steps"><span class="chip you">Голосовое в Telegram: «Договорились с Олей: релиз 2.4 — 14 ноября»</span><span class="ar">→</span><span class="chip">распознавание, извлечение</span><span class="ar">→</span><span class="chip k">Утверждение принято политикой</span></div></div>
+          <div class="flow"><h3><span class="k">2</span>Прочитать через другой</h3><div class="steps"><span class="chip you">Claude, ChatGPT Enterprise или Claude Code: «какие сроки в ноябре?»</span><span class="ar">→</span><span class="chip k">Ответ со ссылкой на утверждение и источник</span></div></div>
+          <div class="flow"><h3><span class="k">3</span>Агент находит противоречие</h3><div class="steps"><span class="chip">Ночной проход по MCP-источнику</span><span class="ar">→</span><span class="chip">«релиз переносим на 28.11»</span><span class="ar">→</span><span class="chip k">Конфликтное предложение</span><span class="ar">→</span><span class="chip">Telegram с кнопками</span></div></div>
+          <div class="flow"><h3><span class="k">4</span>Перезапуск сервера</h3><div class="steps"><span class="chip">Рестарт</span><span class="ar">→</span><span class="chip k">Предложение и запись в Inbox на месте</span></div></div>
+          <div class="flow"><h3><span class="k">5</span>Вердикт</h3><div class="steps"><span class="chip you">Кнопка в Telegram</span><span class="ar">→</span><span class="chip">старая версия superseded, новая active</span><span class="ar">→</span><span class="chip k">История видна в любом клиенте</span></div></div>
+          <div class="flow"><h3><span class="k">6</span>Бэкап и восстановление</h3><div class="steps"><span class="chip">Бэкап в два хранилища</span><span class="ar">→</span><span class="chip">Восстановление на чистой машине</span><span class="ar">→</span><span class="chip k">Сценарий читается заново</span></div></div>
+        </div>
+      </section>
+
+      <section id="v-scope">
+        <div class="sh"><h2>В MVP и позже</h2></div>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Область</th><th>В MVP</th><th>Позже</th></tr></thead>
+            <tbody>
+              <tr><td><b>Ядро</b></td><td>API, Ledger, dispatcher, расписания, очередь, хост модулей, конфиг из файла и git, ревизии</td><td>push-источник конфига</td></tr>
+              <tr><td><b>Хранилище</b></td><td>Postgres</td><td>другие через экспорт и импорт</td></tr>
+              <tr><td><b>Вход</b></td><td>OAuth: CIMD, DCR, PKCE, refresh; Google и любой OIDC; личные токены</td><td>Apple, Microsoft, GitHub</td></tr>
+              <tr><td><b>MCP</b></td><td>Без сессий + совместимость; поиск, list_assertions, сводка, capture, propose, Inbox, вердикт, вопросы</td><td>карточки MCP Apps, Tasks</td></tr>
+              <tr><td><b>Поиск</b></td><td>Полнотекстовый + векторный в Postgres</td><td>граф</td></tr>
+              <tr><td><b>LLM</b></td><td>API-ключи Anthropic и OpenAI</td><td>CLI вендора без инструментов</td></tr>
+              <tr><td><b>Агенты</b></td><td>Контейнеры на VPS: Claude Code (ключ или подписка), Codex; вопросы, сообщения на ходу, продолжение; аккаунты, бюджеты</td><td>Air, Managed Agents, OpenCode, ACP</td></tr>
+              <tr><td><b>Ввод</b></td><td>capture, Telegram (текст, голос, файлы), одно облачное распознавание</td><td>документы, встречи, бот, локальный Whisper</td></tr>
+              <tr><td><b>Источники</b></td><td>Один MCP-источник (Slack MCP или Glean)</td><td>pull и push-коннекторы</td></tr>
+              <tr><td><b>Джобы</b></td><td>extract, daily-sweep, investigate, digest, напоминания по срокам</td><td>lifecycle-review, reverify, настройщик</td></tr>
+              <tr><td><b>Внимание</b></td><td>Inbox, простые правила, лимиты, тихие часы, исследование перед обращением</td><td>классификатор, эскалация</td></tr>
+              <tr><td><b>Каналы</b></td><td>Telegram: уведомления, кнопки-вердикты, обновление сообщений, связка по коду</td><td>Slack, ntfy, web push, почта, OpenClaw</td></tr>
+              <tr><td><b>Админка</b></td><td>Здоровье, запуски, события, логи, Inbox</td><td>расходы, diff конфига, Explorer, аудит</td></tr>
+              <tr><td><b>Платформа</b></td><td>init, plan, apply, status, backup, restore, export; Compose; restic в два хранилища + проверка; снапшот перед обновлением</td><td>подписи в реестре, Helm</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="v-stages">
+        <div class="sh"><h2>Этапы</h2></div>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Этап</th><th>Что делаем</th><th>Результат</th></tr></thead>
+            <tbody>
+              <tr><td class="k">M0</td><td>Монорепозиторий, Rust workspace, CI, docker-compose, миграции, схема конфига, init / plan / apply</td><td>Пустая инсталляция одной командой</td></tr>
+              <tr><td class="k">M1</td><td>Ledger: источники, свидетельства, утверждения с версиями и тремя временами, предложения и вердикты, журнал, политика своих фактов</td><td>Тесты времени, атомарности, устаревшей базы</td></tr>
+              <tr><td class="k">M2</td><td>OAuth-сервер, Google и OIDC, личные токены; MCP-адаптер и инструменты</td><td>Подключаются Claude, ChatGPT Enterprise, Claude Code</td></tr>
+              <tr><td class="k">M3</td><td>capture, Telegram-ввод, распознавание, extract с поиском похожих, сущности, поиск</td><td>Шаги 1–2</td></tr>
+              <tr><td class="k">M4</td><td>События, правила, dispatcher, очередь; запуски с ожиданием; рантайм на VPS; вопросы и сообщения; аккаунты и бюджеты; daily-sweep</td><td>Шаг 3 без уведомления</td></tr>
+              <tr><td class="k">M5</td><td>Inbox, маршрутизация, Telegram-уведомления с кнопками, исследование перед обращением, сводка, напоминания</td><td>Шаги 3–5</td></tr>
+              <tr><td class="k">M6</td><td>Админка, логи и метрики, детекторы «заглохло», бэкапы с проверкой, экспорт, снапшот перед обновлением</td><td>Шаг 6</td></tr>
+              <tr><td class="k">M7</td><td>Сценарий как e2e в CI + прогон на VPS с настоящими клиентами</td><td>MVP готов</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="v-repo">
+        <div class="sh"><h2>Репозиторий</h2></div>
+<pre>frood/
+  core/                 # Rust workspace: бинарник frood (сервер + CLI)
+    crates/
+      frood-ledger      # модель знаний, версии, предложения, журнал
+      frood-api         # HTTP API (axum), OpenAPI
+      frood-mcp         # MCP-адаптер (rmcp)
+      frood-auth        # OAuth-сервер, федерация, токены
+      frood-dispatch    # события, правила, расписания, очередь, запуски
+      frood-modhost     # хост модулей, разрешение возможностей
+      frood-config      # конфиг, секреты, ревизии
+      frood-cli         # init / plan / apply / backup / export
+  contracts/            # схемы возможностей + тесты соответствия (Apache-2.0)
+  modules/              # telegram, stt-*, runtime-docker, ui-admin (Apache-2.0)
+  bundles/standard/     # стандартные джобы и инструкции
+  deploy/compose/
+  docs/</pre>
+        <p class="caption">Реестр модулей — отдельный репозиторий frood-registry.</p>
+      </section>
+
+      <section id="v-tests">
+        <div class="sh"><h2>Тестирование и риски</h2></div>
+        <div class="pillars">
+          <div class="pillar"><b>Контракты</b><span>Тесты соответствия для каждой возможности; модули прогоняют их в CI.</span></div>
+          <div class="pillar"><b>Ledger</b><span>Property-тесты: запросы по времени, атомарность, идемпотентность, устаревшая база.</span></div>
+          <div class="pillar"><b>LLM в CI</b><span>Записанные ответы провайдеров: детерминированно и бесплатно. Ночной прогон с настоящими моделями.</span></div>
+          <div class="pillar"><b>e2e</b><span>Сценарий в docker-compose с фейковыми Telegram и MCP-источником.</span></div>
+        </div>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Риск</th><th>Что делаем</th></tr></thead>
+            <tbody>
+              <tr><td>Клиенты по-разному реализуют MCP и OAuth</td><td>M2 рано и проверяется на настоящих клиентах</td></tr>
+              <tr><td>Условия подписок меняются</td><td>Подписка — опция, API-ключ работает всегда</td></tr>
+              <tr><td>«Обсуждали» принимается за «договорились»</td><td>От агентов всё на ревью; evals на реальных примерах с M3</td></tr>
+              <tr><td>Стоимость агентов</td><td>Бюджеты с M4; один вызов там, где хватает</td></tr>
+              <tr><td>Rust замедляет итерации</td><td>Ядро маленькое; ML-части — контейнеры на любом языке</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <!-- ================= PLATFORM ================= -->
+    <div class="panel" id="platform" role="tabpanel" aria-labelledby="t-platform">
+      <section id="p-core">
+        <div class="sh"><span class="tag ref">фаза 6 · v0.2 · принята</span><h2>Ядро: что внутри, что снаружи</h2><p class="sub">Один бинарник на Rust: сервер + CLI. Стартует без LLM, графа и чата.</p></div>
+        <div class="twocol">
+          <div>
+            <h3>Внутри ядра</h3>
+            <ul>
+              <li>HTTP API, MCP-адаптер, вход (OAuth-сервер, внешние провайдеры)</li>
+              <li>Ledger: модель знаний, предложения, вердикты, журнал — поверх хранилища по контракту</li>
+              <li>Dispatcher, расписания, очередь запусков</li>
+              <li>Хост модулей: реестр, разрешение возможностей, вызовы</li>
+              <li>Конфиг, секреты, ревизии</li>
+              <li>Миграции, здоровье, сбор наблюдаемости</li>
+            </ul>
+          </div>
+          <div>
+            <h3>Модули</h3>
+            <ul>
+              <li>Хранилище, поиск, граф</li>
+              <li>LLM gateway, рантаймы агентов</li>
+              <li>Распознавание речи, разбор документов</li>
+              <li>Источники, каналы, маршрутизатор внимания</li>
+              <li>Админ-панель</li>
+              <li>Бэкапы, цель деплоя, хранилище секретов</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section id="p-module">
+        <div class="sh"><h2>Модуль</h2></div>
+<pre>name: google-drive
+version: 0.4.2
+license: Apache-2.0
+provides: [sources.pull@1]
+requires: [storage.objects@1]
+config:                          # JSON Schema настроек
+  type: object
+  properties: { folder: { type: string } }
+  required: [folder]
+permissions:
+  egress: [www.googleapis.com, oauth2.googleapis.com]
+  secrets: [google_oauth]
+  frood_api: [knowledge:capture]
+events:
+  produces: [source.captured]
+runtime:
+  form: container                # builtin | container | bundle
+  image: ghcr.io/frood/google-drive@sha256:…
+  health: /healthz</pre>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Форма</th><th>Что</th><th>Примеры</th></tr></thead>
+            <tbody>
+              <tr><td class="k">builtin</td><td>Скомпилирован в бинарник ядра</td><td>Ledger, вход, dispatcher, MCP-адаптер источников, базовый LLM gateway</td></tr>
+              <tr><td class="k">container</td><td>Отдельный процесс на любом языке, HTTP-протокол модулей</td><td>Распознавание, разбор документов, коннекторы, каналы, рантаймы</td></tr>
+              <tr><td class="k">bundle</td><td>Только конфиг: джобы, инструкции, правила, скиллы</td><td><code>frood/standard</code>, «Meeting Intelligence», «Personal PM»</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <ul class="inv">
+          <li>Каждая возможность — версионированный контракт (OpenAPI / JSON Schema).</li>
+          <li>Контейнерный модуль при старте отдаёт ядру манифест и проходит проверку здоровья; ядро маршрутизирует вызовы.</li>
+          <li>Модуль ходит в API Frood сервисным токеном с правами из манифеста.</li>
+          <li>Встроенные модули реализуют те же контракты, поэтому любой из них можно заменить контейнерным.</li>
+        </ul>
+      </section>
+
+      <section id="p-compat">
+        <div class="sh"><h2>Совместимость</h2></div>
+        <ul class="inv">
+          <li>Версии контрактов — semver: несовместимое изменение = новая major-версия.</li>
+          <li>Ядро поддерживает текущую и предыдущую major-версию каждого контракта.</li>
+          <li>Для каждого контракта есть тесты соответствия: модуль прогоняет их в своём CI, ядро — при <code>frood plan</code>.</li>
+          <li>При plan для каждой требуемой возможности нужен ровно один провайдер или явный выбор в конфиге.</li>
+          <li>Замена хранилища — не одна строка: данные переносятся через экспорт и импорт.</li>
+        </ul>
+      </section>
+
+      <section id="p-registry">
+        <div class="sh"><h2>Реестр</h2></div>
+<pre>registry/
+  modules/google-drive/0.4.2.yaml   # манифест + digest + исходники + лицензия
+  bundles/standard/1.2.0.yaml
+  index.json</pre>
+        <ul class="inv">
+          <li>Можно подключить несколько реестров: официальный, свой, компании. Сторонние разрешены с v1.</li>
+          <li>Версии фиксируются; digest образа обязателен; подписи проверяются, если есть.</li>
+          <li><code>frood search</code>, <code>frood add</code>, <code>frood upgrade</code> работают с индексом.</li>
+          <li>При установке <code>plan</code> показывает, что модуль просит — сеть, секреты, доступ к API, — и требует подтверждения.</li>
+        </ul>
+      </section>
+
+      <section id="p-lifecycle">
+        <div class="sh"><h2>Конфиг и команды</h2><p class="sub"><code>frood.yaml</code> описывает инсталляцию целиком; где он лежит — файл, git или push через API.</p></div>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Команда</th><th>Что делает</th></tr></thead>
+            <tbody>
+              <tr><td class="k">frood init</td><td>Заготовка конфига и секретов</td></tr>
+              <tr><td class="k">frood plan</td><td>Проверка схемы, разрешение возможностей, diff с работающей инсталляцией, миграции, права модулей</td></tr>
+              <tr><td class="k">frood apply</td><td>Развернуть, мигрировать, проверить здоровье, записать ревизию</td></tr>
+              <tr><td class="k">frood status</td><td>Здоровье, версии, отставания</td></tr>
+              <tr><td class="k">frood upgrade / rollback</td><td>Обновление и откат</td></tr>
+              <tr><td class="k">frood backup / restore / backup verify</td><td>Бэкапы и проверка восстановления</td></tr>
+              <tr><td class="k">frood export / import</td><td>Переносимый экспорт</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="caption">Цель деплоя — модуль: в v1 Docker Compose на VPS с Caddy и Tailscale; позже Helm и «один бинарник + systemd». В режиме git ядро следит за веткой и применяет изменения само или через подтверждение в Inbox.</p>
+      </section>
+
+      <section id="p-upgrade">
+        <div class="sh"><h2>Обновления</h2></div>
+        <div class="steps"><span class="chip">plan: совместимость, миграции, права</span><span class="ar">→</span><span class="chip k">Снапшот</span><span class="ar">→</span><span class="chip">Миграции, совместимые со старой версией</span><span class="ar">→</span><span class="chip">Проверки здоровья</span><span class="ar">→</span><span class="chip">Провал — откат или восстановление из снапшота</span></div>
+        <p class="caption">Релиз платформы = набор версий ядра, модулей по умолчанию и контрактов. Инсталляция выбирает релиз и может переопределять версии модулей.</p>
+      </section>
+
+      <section id="p-backup">
+        <div class="sh"><h2>Бэкапы</h2></div>
+        <ul class="inv">
+          <li>Модуль <code>backup.target</code>; примеры: restic или Kopia в S3-совместимое хранилище, Hetzner Storage Box, локальный диск.</li>
+          <li>В шаблоне конфига по умолчанию два независимых хранилища.</li>
+          <li>Бэкапится: согласованная копия БД, файлы (заметки, голосовые, встречи), ревизии конфига, данные модулей.</li>
+          <li>Секреты — отдельно, под ключом восстановления, который хранится у вас вне сервера.</li>
+          <li>Расписание и хранение — из конфига; пример: каждые 6 часов, дневные 30 дней, месячные 12 месяцев.</li>
+          <li><code>frood backup verify</code> по расписанию поднимает временную копию и сверяет; провал — тревога в Inbox. Снапшот — перед каждым обновлением.</li>
+        </ul>
+      </section>
+
+      <section id="p-export">
+        <div class="sh"><h2>Переносимый экспорт</h2></div>
+        <ul class="inv">
+          <li>JSONL событий, утверждения со всей историей, сущности, предложения и вердикты, ссылки на источники и якоря, вложения файлами, версия схемы; плюс Markdown по сущностям для чтения.</li>
+          <li>Куда: приватный git, файл, другая инсталляция.</li>
+          <li><code>frood import</code> поднимает знания в инсталляции с другим хранилищем — так и меняется СУБД.</li>
+        </ul>
+      </section>
+
+      <section id="p-observe">
+        <div class="sh"><h2>Наблюдаемость и безопасность</h2></div>
+        <div class="pillars">
+          <div class="pillar"><b>Логи, трассы, метрики</b><span>Структурированные логи и OpenTelemetry, связанные по запуску и событию; трасса проходит и через MCP (<code>traceparent</code> в спеке 2026-07-28<span class="ok">✓</span>).</span></div>
+          <div class="pillar"><b>Метрики</b><span>Отставание dispatcher, очередь, длительность и ошибки запусков, расходы, возраст курсоров источников, результаты бэкапов.</span></div>
+          <div class="pillar"><b>Хранение</b><span>Лёгкое, внутри инсталляции и ограниченное по времени; Prometheus, Loki, Grafana — модулями-экспортёрами.</span></div>
+          <div class="pillar"><b>Секреты</b><span>Модуль: зашифрованный файл по умолчанию, Vault или облачный KMS по выбору. Модулю — только объявленные секреты и сеть.</span></div>
+          <div class="pillar"><b>Цепочка поставок</b><span>Digest вместо тегов, SBOM у официальных модулей, подписи — если есть.</span></div>
+          <div class="pillar"><b>Аудит и данные</b><span>Аудит вердиктов, конфига, токенов, установок. Какие данные в какие модели — в конфиге.</span></div>
+        </div>
+        <p class="caption">Ориентир по размеру: ядро + БД + Caddy помещаются на маленький VPS (порядка 2 vCPU / 4 GB). Локальное распознавание крупными моделями требует заметно больше — на маленьком VPS разумнее облачное.</p>
+      </section>
+
+      <section id="p-next">
+        <div class="sh"><h2>Что дальше</h2></div>
+        <div class="prose"><p>Детализация по фазам закончена. План реализации — на вкладке <a href="#v-done">«План MVP»</a>.</p></div>
+      </section>
+    </div>
+
+    <!-- ================= NOTIFY ================= -->
+    <div class="panel" id="notify" role="tabpanel" aria-labelledby="t-notify">
+      <section id="n-principle">
+        <div class="sh"><span class="tag ref">фаза 5 · v0.2 · принята</span><h2>Главный принцип</h2></div>
+        <div class="prose"><p>Уведомление — не цель. За ним всегда стоит ситуация в памяти, которую можно рассмотреть и разрешить: предложение, вопрос агента, срок, сбой. Ассистент проактивен, потому что сам замечает такие ситуации, исследует их и приходит с понятным вопросом.</p></div>
+      </section>
+
+      <section id="n-inbox">
+        <div class="sh"><h2>Inbox — одна очередь ситуаций</h2></div>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Вид</th><th>Откуда</th><th>Действия</th></tr></thead>
+            <tbody>
+              <tr><td class="k">proposal</td><td>Предложение изменения знаний ждёт вердикта</td><td>принять, с правкой, отклонить, отложить, исследовать</td></tr>
+              <tr><td class="k">question</td><td>Агент спросил в ходе запуска</td><td>ответить, выбрать вариант, отложить</td></tr>
+              <tr><td class="k">reminder</td><td>Срок обязательства, зависший вопрос, пора перепроверить</td><td>выполнено, перенести, перепроверить, открыть</td></tr>
+              <tr><td class="k">alert</td><td>Запуск упал, бюджет исчерпан, источник отключился</td><td>открыть, повторить, отключить</td></tr>
+              <tr><td class="k">digest</td><td>Сводка за период</td><td>открыть, отметить просмотренным</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="life">
+          <div class="s"><b>new</b><span>Появилась</span></div>
+          <div class="s"><b>seen</b><span>Вы видели</span></div>
+          <div class="s"><b>snoozed</b><span>Отложена до даты</span></div>
+          <div class="s end"><b>resolved</b><span>Ситуация разрешена — где угодно</span></div>
+        </div>
+        <p class="caption">У каждой записи: ссылки на утверждения, предложения, запуски и источники; почему она появилась; срок.</p>
+      </section>
+
+      <section id="n-route">
+        <div class="sh"><h2>Кому, когда и куда</h2><p class="sub">Модуль <code>attention.route@v1</code>: правила из конфига плюс, по желанию, дешёвая классификация через <code>llm.complete</code>.</p></div>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Решение</th><th>Варианты</th></tr></thead>
+            <tbody>
+              <tr><td><b>Кому</b></td><td>Тем, кого касается: ответственным по связанным сущностям, автору исходной заметки, тому, от чьего имени работал агент. В Inbox видят все пользователи инсталляции, push — только касающиеся</td></tr>
+              <tr><td><b>Насколько срочно</b></td><td><span class="st no">now</span> push сейчас · <span class="st wait">digest</span> в ближайшую сводку · <span class="st sup" style="text-decoration:none">silent</span> только в Inbox</td></tr>
+              <tr><td><b>Куда</b></td><td>Предпочтительный канал для этой срочности, запасной при отказе</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <ul class="inv">
+          <li><b>Касается ли меня:</b> связанные сущности сравниваются с моими обязанностями и проектами. Они сами — утверждения <code>responsibility</code> обо мне в Ledger, поэтому профиль внимания обновляется так же, как всё знание.</li>
+          <li><b>Свойства ситуации:</b> риск (конфликт важнее нового факта), близость срока, затронуты ли мои обязательства, достоверность источника, автор.</li>
+          <li><b>Мои настройки:</b> тихие часы, лимит push в день, каналы.</li>
+        </ul>
+      </section>
+
+      <section id="n-spam">
+        <div class="sh"><h2>Против спама</h2></div>
+        <ul class="inv">
+          <li>Одна запись — одно сообщение на канал; повтор — только напоминание с растущим интервалом.</li>
+          <li>Мелочи собираются в сводку.</li>
+          <li>Лимит push в день; тихие часы; срочное в тихие часы — только если разрешено.</li>
+          <li>Эскалация только для срочного: нет реакции за N часов — следующий канал.</li>
+          <li>Исследование перед обращением сокращает пустые вопросы.</li>
+        </ul>
+      </section>
+
+      <section id="n-channels">
+        <div class="sh"><h2>Каналы</h2><p class="sub">Возможности модулей: <code>notify.send</code> (показать), <code>notify.ask</code> (принять ответ), <code>notify.update</code> (обновить отправленное).</p></div>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Канал</th><th>Кнопки</th><th>Ответ текстом или голосом</th><th>Заметки</th></tr></thead>
+            <tbody>
+              <tr><td>Telegram-бот</td><td>inline-кнопки</td><td>да</td><td>Тот же бот, что для быстрого ввода</td></tr>
+              <tr><td>Slack-бот</td><td>Block Kit</td><td>да</td><td>Для рабочей инсталляции</td></tr>
+              <tr><td>ntfy</td><td>до 3, <code>http</code>-кнопка вызывает действие<span class="ok">✓</span></td><td>нет</td><td><code>http</code>-кнопки на iOS не подтверждены<span class="unk">?</span></td></tr>
+              <tr><td>Web push (PWA)</td><td>да</td><td>через веб</td><td>На iOS — для установленного PWA</td></tr>
+              <tr><td>Почта</td><td>ссылки</td><td>по желанию</td><td>Для сводок</td></tr>
+              <tr><td>AI-клиенты через MCP</td><td>карточки MCP Apps</td><td>да, в чате</td><td>«Что у меня в Inbox?»</td></tr>
+              <tr><td>OpenClaw, Hermes</td><td>в их каналах</td><td>да</td><td>Их heartbeat опрашивает наш Inbox, или мы шлём через их MCP (<code>messages_send</code>)<span class="ok">✓</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="caption">Связка аккаунта канала с пользователем — одноразовым кодом: «отправьте боту /link 4821». Действия из канала идут от имени связанного пользователя и пишутся в аудит.</p>
+      </section>
+
+      <section id="n-investigate">
+        <div class="sh"><h2>Исследовать перед обращением</h2></div>
+<pre>attention:
+  before_notify:
+    - when: { kind: proposal, risk: conflict }
+      run: investigate      # джоба из фазы 3
+      max_wait: 30m         # не дождались — шлём как есть</pre>
+        <div class="steps"><span class="chip">Найден конфликт</span><span class="ar">→</span><span class="chip">investigate: кто ещё это обсуждал, что в достоверных источниках</span><span class="ar">→</span><span class="chip">Предложение дополнено, есть вариант решения</span><span class="ar">→</span><span class="chip you">Уведомление вам — уже с контекстом</span></div>
+      </section>
+
+      <section id="n-digest">
+        <div class="sh"><h2>Сводка «что нового с прошлого раза»</h2></div>
+        <ul class="inv">
+          <li>У каждого пользователя своя отметка просмотренного; сводка — всё после неё.</li>
+          <li>Содержимое: принятое новое знание коротко, что ждёт решения, ближайшие сроки, что устарело, итоги фоновых запусков, сбои, расходы.</li>
+          <li>Джоба <code>digest</code> (<code>llm.complete</code>): по расписанию из конфига или по запросу «что нового?» в любом канале.</li>
+          <li>Просмотр сводки сдвигает отметку.</li>
+        </ul>
+      </section>
+
+      <section id="n-reminders">
+        <div class="sh"><h2>Напоминания из памяти</h2></div>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>В Ledger</th><th>Напоминание</th></tr></thead>
+            <tbody>
+              <tr><td><code>commitment</code> со сроком</td><td>За N дней; в день срока; после — «выполнено или перенести?»</td></tr>
+              <tr><td><code>open_question</code></td><td>Висит дольше N дней — «напомнить человеку или закрыть?»</td></tr>
+              <tr><td><code>review_after</code></td><td>Наступил → reverify → предложение или напоминание</td></tr>
+              <tr><td>Устаревший <code>status</code></td><td>Давно не подтверждался — вопрос</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="caption">Сроки напоминаний пересчитываются при изменении утверждения.</p>
+      </section>
+
+      <section id="n-web">
+        <div class="sh"><h2>Веб-интерфейс — админ-панель</h2><p class="sub">По вашему ответу: админка, отладка, если что-то заглохло, логи (N9′ на подтверждении). Модуль <code>ui.admin</code>, PWA.</p></div>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Экран</th><th>Что</th></tr></thead>
+            <tbody>
+              <tr><td><b>Здоровье</b></td><td>Модули, отставание dispatcher, курсоры источников и их возраст, очередь, бюджеты</td></tr>
+              <tr><td><b>Запуски</b></td><td>Фильтры; зависшие и упавшие — повторить, отменить, написать агенту; шаги и вызовы инструментов</td></tr>
+              <tr><td><b>События</b></td><td>Живая лента журнала; переход к запуску, предложению, источнику</td></tr>
+              <tr><td><b>Логи</b></td><td>Поиск по логам ядра и модулей, связанным по запуску и событию</td></tr>
+              <tr><td><b>Расходы</b></td><td>По аккаунтам, джобам, моделям, дням</td></tr>
+              <tr><td><b>Конфиг</b></td><td>Ревизии с diff, применить, откатить, предложения изменений</td></tr>
+              <tr><td><b>Подключения</b></td><td>Источники, токены и клиенты, каналы, аккаунты провайдеров</td></tr>
+              <tr><td><b>Аудит</b></td><td>Кто что принял, отклонил, поменял</td></tr>
+              <tr><td><b>Inbox и Explorer</b></td><td>То, что неудобно в чате: было и стало, доказательства с переходом к месту в источнике, история</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="caption">Детекторы «заглохло» — курсор не двигается, запуск ждёт слишком долго, растёт список упавших, бюджет на исходе, бэкап не прошёл — создают тревоги в Inbox.</p>
+      </section>
+    </div>
+
+    <!-- ================= INGEST ================= -->
+    <div class="panel" id="ingest" role="tabpanel" aria-labelledby="t-ingest">
+      <section id="i-paths">
+        <div class="sh"><span class="tag ref">фаза 4 · v0.2 · принята</span><h2>Три пути внутрь</h2></div>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Путь</th><th>Кто инициирует</th><th>Примеры</th></tr></thead>
+            <tbody>
+              <tr><td><b>Быстрый сброс</b></td><td>Вы</td><td>Текст, голосовое, файл, запись встречи, ссылка</td></tr>
+              <tr><td><b>Исследование агентом</b></td><td>Расписание или событие</td><td>Ночной проход по Slack через MCP, поиск в Glean</td></tr>
+              <tr><td><b>Поток из источника</b></td><td>Коннектор по курсору или вебхук</td><td>Все изменения Google Drive, события GitHub</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="steps"><span class="chip">Любой путь</span><span class="ar">→</span><span class="chip k">Source + source.captured</span><span class="ar">→</span><span class="chip">transcribe или parse</span><span class="ar">→</span><span class="chip">extract</span><span class="ar">→</span><span class="chip k">Proposals</span></div>
+      </section>
+
+      <section id="i-capture">
+        <div class="sh"><h2>Быстрый сброс</h2></div>
+        <ul class="inv">
+          <li>В ядре одна точка входа: <code>POST /v1/capture</code> и MCP-инструмент <code>capture_note</code>.</li>
+          <li>Каналы — модули: мессенджер-бот (текст, голосовые, файлы), iOS Shortcut и «Поделиться» на Android, веб (текст, запись голоса, файлы), приём по почте, любой AI-клиент через MCP.</li>
+          <li>Ответ сразу, обработка в фоне. Итог может прийти обратно в канал: «сохранено 2 факта, 1 конфликт ждёт решения».</li>
+          <li>Подсказки к заметке по желанию: о каком проекте или человеке, «это решение», язык.</li>
+          <li>Повторная отправка того же не создаёт дубль: у источника хэш содержимого.</li>
+          <li>Ваши факты без конфликта принимаются сами; конфликт — вопрос вам. Ответы на вопросы агентов идут тем же путём.</li>
+        </ul>
+      </section>
+
+      <section id="i-media">
+        <div class="sh"><h2>Распознавание и разбор</h2></div>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Возможность</th><th>Вход</th><th>Выход</th></tr></thead>
+            <tbody>
+              <tr><td class="k">media.transcribe@v1</td><td>Аудио или видео, подсказки языков <code>[ru, en]</code>, нужна ли разметка спикеров, образцы голосов</td><td>Сегменты: начало, конец, спикер, язык, текст, уверенность</td></tr>
+              <tr><td class="k">docs.parse@v1</td><td>PDF, DOCX, PPTX, HTML, изображение</td><td>Текст со структурой и якорями: страница, заголовки, абзац; OCR для сканов</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <h3>Кандидаты для смешанной речи RU/EN</h3>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Реализация</th><th>Где</th><th>Смешанная речь</th><th>Спикеры</th></tr></thead>
+            <tbody>
+              <tr><td>Whisper large-v3 / turbo + pyannote</td><td>VPS</td><td>приемлемо, 99+ языков</td><td>отдельным шагом</td></tr>
+              <tr><td>Deepgram Nova-3 Multilingual</td><td>облако</td><td>русский с переключением на английский без выбора языка<span class="ok">✓</span> (данные вендора)</td><td>да</td></tr>
+              <tr><td>OpenAI gpt-4o-transcribe-diarize</td><td>облако</td><td><span class="unk">?</span></td><td>да, до 4 известных спикеров по образцам<span class="ok">✓</span>; жалобы на лишних спикеров<span class="unk">?</span></td></tr>
+              <tr><td>ElevenLabs Scribe v2</td><td>облако</td><td>лидер самоотчётного бенчмарка<span class="unk">?</span></td><td>да</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="caption">Документы — Docling, MarkItDown, Unstructured. Выбирать распознавание лучше по своим записям: контракт один, реализация меняется в конфиге.</p>
+      </section>
+
+      <section id="i-anchors">
+        <div class="sh"><h2>Якоря доказательств</h2></div>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Источник</th><th>Якорь</th></tr></thead>
+            <tbody>
+              <tr><td>Аудио, видео, встреча</td><td>Диапазон времени и спикер</td></tr>
+              <tr><td>Документ</td><td>Страница, путь заголовков, абзац</td></tr>
+              <tr><td>Сообщение</td><td>id сообщения, ссылка, тред</td></tr>
+              <tr><td>Задача, PR, тикет</td><td>id и поле или комментарий</td></tr>
+              <tr><td>Ваша заметка</td><td>Сама заметка, при необходимости диапазон символов</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="i-sources">
+        <div class="sh"><h2>Источники</h2><p class="sub">Виды источников — возможности модулей (I4′ на подтверждении).</p></div>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Возможность</th><th>Когда</th><th>Модули-примеры</th></tr></thead>
+            <tbody>
+              <tr><td class="k">sources.mcp</td><td>Агенту нужно искать и исследовать</td><td>встроенный <code>mcp</code>: Slack MCP, Glean, YouTrack, Notion, GitHub</td></tr>
+              <tr><td class="k">sources.pull</td><td>Нужна полнота: все изменения по курсору</td><td><code>google-drive</code>, <code>slack-api</code>, <code>youtrack</code>, <code>gmail</code></td></tr>
+              <tr><td class="k">sources.push</td><td>Нужна мгновенная реакция</td><td><code>github-webhooks</code>, <code>slack-events</code>, <code>vexa</code></td></tr>
+              <tr><td class="k">любая новая</td><td>Новый вид — новым модулем</td><td>живой транскрипт, IMAP, RSS, скрейпер</td></tr>
+            </tbody>
+          </table>
+        </div>
+<pre>sources:
+  team-chat:
+    uses: mcp                      # встроенный модуль
+    server: https://mcp.slack.com/mcp
+    connection: user:me            # OAuth пользователя или сервисный аккаунт
+    scope: { channels: ["#team-platform", "#release"] }
+    retain: excerpts
+  adr-repo:
+    uses: github-webhooks          # модуль даёт sources.push
+    scope: { repo: org/architecture, paths: ["adr/**"] }
+    authoritative: true            # решения отсюда может принять политика
+  drive-meetings:
+    uses: google-drive             # модуль даёт sources.pull
+    scope: { folder: "Meet Recordings" }
+    retain: full</pre>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Операция sources.pull@v1</th><th>Смысл</th></tr></thead>
+            <tbody>
+              <tr><td class="k">changes(cursor)</td><td>Новые, изменённые, удалённые элементы с позиции + следующий курсор</td></tr>
+              <tr><td class="k">fetch(item)</td><td>Полное содержимое по запросу</td></tr>
+              <tr><td class="k">describe()</td><td>Какие права нужны, какие якоря даёт, есть ли версии и удаление</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <ul class="inv">
+          <li>Платформа хранит курсор каждого источника и после сбоя продолжает с него.</li>
+          <li>Подключение пользователя: агент и коннектор видят только то, что видит он. Или сервисный аккаунт для общих источников.</li>
+          <li>Всё, что попало в инсталляцию, видят все её пользователи (D9″): личные источники коллег в общую инсталляцию не подключаются.</li>
+          <li>Slack урезает лимиты распространяемым приложениям, поэтому — своё internal app на инсталляцию или официальный Slack MCP.</li>
+        </ul>
+      </section>
+
+      <section id="i-retain">
+        <div class="sh"><h2>Что храним и как живут версии</h2></div>
+        <div class="pillars">
+          <div class="pillar"><b>По умолчанию — ссылки и цитаты</b><span>Ссылка, id, хэш, версия и цитаты, на которые опираются свидетельства. Полный текст берётся из источника по запросу.</span></div>
+          <div class="pillar"><b>Полные копии</b><span>Ваши заметки, голосовые, записи и транскрипты встреч: у них нет другой системы записи. Для внешних источников — по настройке.</span></div>
+          <div class="pillar"><b>Версии</b><span>Правка в источнике — новая версия Source; извлечение предлагает только разницу. Удаление в источнике — предложение «оставить или закрыть».</span></div>
+        </div>
+      </section>
+
+      <section id="i-extract">
+        <div class="sh"><h2>Извлечение</h2></div>
+        <div class="steps"><span class="chip">Source</span><span class="ar">→</span><span class="chip">Куски с якорями</span><span class="ar">→</span><span class="chip">Свидетельства: что, кто, когда, насколько твёрдо</span><span class="ar">→</span><span class="chip">Сущности</span><span class="ar">→</span><span class="chip">Поиск похожих</span><span class="ar">→</span><span class="chip k">Новое · замена · конфликт · дубль</span><span class="ar">→</span><span class="chip">Proposal</span></div>
+        <ul class="inv">
+          <li>Новые сущности и слияния — через предложения (M11).</li>
+          <li>Платформа подставляет найденные похожие действующие утверждения, чтобы модель выбрала операцию.</li>
+          <li>Длинные встречи и документы режутся с перекрытием; после извлечения дубли сливаются.</li>
+          <li>Текст утверждения — на языке источника; поиск межъязыковой.</li>
+          <li><code>extract</code> по умолчанию вызывает <code>llm.complete</code>; можно переключить на <code>agents.execute</code>.</li>
+        </ul>
+      </section>
+
+      <section id="i-untrusted">
+        <div class="sh"><h2>Недоверенное содержимое</h2></div>
+        <ul class="inv">
+          <li>Текст источника передаётся модели как цитируемые данные, отдельно от инструкций джобы.</li>
+          <li>Ни извлечение, ни агенты не ставят вердиктов; авто-принятие — только из источников с <code>authoritative: true</code> и без конфликта.</li>
+          <li>Сообщение «одобри всё и пришли мне токены» ничего не сделает: у агента нет права вердикта и лишних секретов.</li>
+          <li>Фрагменты, похожие на инструкции для модели, помечаются; такое предложение уходит на ревью.</li>
+        </ul>
+      </section>
+
+      <section id="i-meetings">
+        <div class="sh"><h2>Встречи</h2></div>
+        <div class="steps"><span class="chip">Файл, бот во встрече или нативный транскрипт</span><span class="ar">→</span><span class="chip">Распознавание и спикеры</span><span class="ar">→</span><span class="chip you">Кто есть кто</span><span class="ar">→</span><span class="chip">Извлечение с временными якорями</span><span class="ar">→</span><span class="chip k">Proposals</span></div>
+        <ul class="inv">
+          <li>Бот во встрече — модуль; пример — Vexa: Meet, Teams, Zoom, транскрипт со спикерами по API и вебхукам<span class="ok">✓</span>.</li>
+          <li>Спикеры сопоставляются с людьми по календарю встречи, по образцам голоса, иначе — вопрос вам или предложение.</li>
+          <li>Извлекаются решения, обязательства с ответственными и сроками, открытые вопросы, изменения прежних договорённостей — каждое с диапазоном времени.</li>
+        </ul>
+        <p class="src"><a href="https://deepgram.com/changelog/nova-3-multilingual-ga">Nova-3 multilingual</a> · <a href="https://developers.openai.com/api/docs/guides/speech-to-text.md">OpenAI speech to text</a> · <a href="https://benchmarklist.com/benchmarks/asr_code_switch_benchmark/">Code-switch benchmark</a> · <a href="https://github.com/Vexa-ai/vexa">Vexa</a></p>
+      </section>
+    </div>
+
+    <!-- ================= WORK ================= -->
+    <div class="panel" id="work" role="tabpanel" aria-labelledby="t-work">
+      <section id="w-vocab">
+        <div class="sh"><span class="tag ref">фаза 3 · v0.3 · принята</span><h2>Словарь</h2></div>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Понятие</th><th>Что это</th><th>Пример</th></tr></thead>
+            <tbody>
+              <tr><td class="k">Event</td><td>Всё, что произошло: событие журнала, тик расписания, вебхук, ручной запуск, ответ на вопрос агента</td><td><code>source.captured</code>, <code>question.answered</code></td></tr>
+              <tr><td class="k">Rule</td><td>Правило в конфиге: на такие события запускать такую джобу</td><td>вердикт «исследовать» → <code>investigate</code></td></tr>
+              <tr><td class="k">Dispatcher</td><td>Компонент платформы: читает поток событий со своим checkpoint, применяет правила, создаёт запуски</td><td>—</td></tr>
+              <tr><td class="k">Scheduler</td><td>Источник событий по времени: выпускает тики по cron из конфига</td><td><code>0 3 * * *</code></td></tr>
+              <tr><td class="k">Job</td><td>Описание работы в конфиге: режим, инструкции, инструменты, скиллы, рантайм, аккаунт, права, бюджет, политики</td><td><code>daily-sweep</code></td></tr>
+              <tr><td class="k">Run</td><td>Один запуск джобы: состояние, сессия рантайма, рабочая папка, шаги, стоимость</td><td>запуск #91</td></tr>
+              <tr><td class="k">Question</td><td>Вопрос агента человеку; ответ продолжает запуск</td><td>«Это решение или обсуждение?»</td></tr>
+              <tr><td class="k">Runtime</td><td>Реализация, которая исполняет агентов</td><td>контейнеры на VPS, JetBrains Air</td></tr>
+              <tr><td class="k">Account</td><td>Чем платится запуск</td><td>API-ключ, подписка, кредиты Air</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="w-flow">
+        <div class="sh"><h2>Как запускается работа</h2></div>
+        <div class="steps"><span class="chip">Журнал Ledger</span><span class="chip">Тики расписания</span><span class="chip">Вебхуки</span><span class="chip">Ручной запуск</span><span class="chip">Ответы на вопросы</span><span class="ar">→</span><span class="chip k">Поток событий</span><span class="ar">→</span><span class="chip">Dispatcher + правила</span><span class="ar">→</span><span class="chip">Запуски</span><span class="ar">→</span><span class="chip">Рантайм</span><span class="ar">→</span><span class="chip k">Proposals, вопросы, события</span></div>
+        <ul class="inv">
+          <li>Все источники событий сливаются в один поток. Dispatcher читает его по порядку со своим checkpoint и после простоя догоняет.</li>
+          <li>Scheduler выпускает тики по расписаниям из конфига; пропущенный тик выпускается один раз. Дельту за весь пропущенный период джоба берёт по checkpoint источника.</li>
+          <li>Повтор не плодит дублей: у запуска ключ идемпотентности, предложения тоже идемпотентны.</li>
+          <li>Сбой — повтор с растущей задержкой; после N попыток — список проблемных запусков и уведомление.</li>
+        </ul>
+      </section>
+
+      <section id="w-config">
+        <div class="sh"><h2>Всё в конфиге инсталляции</h2><p class="sub">Расписания, выбор рантайма и бюджеты — настройки конкретной инсталляции, а не платформы.</p></div>
+<pre>accounts:
+  anthropic-key: { kind: api_key, provider: anthropic, secret: ${secret:ANTHROPIC_KEY} }
+  jetbrains-ai:  { kind: platform_credits, provider: jetbrains }
+
+runtimes:
+  local:     { impl: docker, agents: [claude-code, codex, opencode] }
+  air-cloud: { impl: jetbrains-air, org: ${env:AIR_ORG} }
+
+imports:
+  - registry: frood/standard@1.2     # стандартный набор, можно переопределять
+
+jobs:
+  daily-sweep:
+    uses: agents.execute
+    on:
+      - schedule: "0 3 * * *"
+        timezone: Europe/Amsterdam
+        for_each: source
+    instructions: ./agents/daily-sweep.md      # или прямо здесь
+    skills: [./skills/meeting-vs-decision]    # формат Agent Skills
+    tools: [frood, "source:${source}"]        # MCP-серверы
+    runtime: air-cloud
+    account: jetbrains-ai
+    ask_user: { allowed: true, expire_after: 3d, on_expire: skip }
+    auto_accept: { when: authoritative_source, no_conflict: true }
+    budget: { max_usd: 0.50, max_minutes: 15 }
+
+  extract:
+    uses: llm.complete   # agents.execute — одной строкой
+    on: [{ event: source.captured }]
+    account: anthropic-key</pre>
+        <h3>Где лежит конфиг</h3>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Источник</th><th>Как меняется</th></tr></thead>
+            <tbody>
+              <tr><td>Файл на сервере</td><td>Правка файла и <code>frood apply</code></td></tr>
+              <tr><td>Git-репозиторий</td><td>Платформа следит за веткой и применяет изменения; правки — pull request</td></tr>
+              <tr><td>Push через API или вебхук</td><td><code>POST /v1/config</code> с подписью</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="caption">Платформа хранит ревизии применённого конфига с историей и откатом; применение ревизии — тоже событие.</p>
+      </section>
+
+      <section id="w-modes">
+        <div class="sh"><h2>Джоба вызывает возможность модуля</h2><p class="sub">По вашему замечанию к W2: режимов у ядра нет (W2″ на подтверждении).</p></div>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Возможность</th><th>Кто даёт</th><th>Пример джобы</th></tr></thead>
+            <tbody>
+              <tr><td class="k">agents.execute</td><td>модуль рантайма: контейнеры на VPS, Air, Managed Agents</td><td>daily-sweep</td></tr>
+              <tr><td class="k">llm.complete</td><td>модуль LLM gateway: API-ключ или CLI вендора без инструментов</td><td>extract, digest</td></tr>
+              <tr><td class="k">media.transcribe</td><td>модуль распознавания речи</td><td>transcribe</td></tr>
+              <tr><td class="k">docs.parse</td><td>модуль разбора документов</td><td>parse</td></tr>
+              <tr><td class="k">любая другая</td><td>любой установленный модуль</td><td>—</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <ul class="inv">
+          <li>Новый вид работы появляется установкой модуля, ядро не меняется.</li>
+          <li>Агент делает несколько вызовов модели и каждый раз заново отправляет инструкции, описания инструментов и контекст. На простой задаче это в разы дороже одного вызова, поэтому выбор между llm.complete и agents.execute — вопрос цены.</li>
+          <li>extract по умолчанию — llm.complete с подстановкой похожих утверждений.</li>
+        </ul>
+      </section>
+
+      <section id="w-interactive">
+        <div class="sh"><h2>Интерактивные запуски</h2></div>
+        <div class="life">
+          <div class="s"><b>queued</b><span>В очереди</span></div>
+          <div class="s k"><b>running</b><span>Агент работает; ему можно писать</span></div>
+          <div class="s"><b>waiting_for_input</b><span>Агент задал вопрос; процесс может завершиться</span></div>
+          <div class="s end"><b>succeeded · failed · cancelled</b><span>Итог и отчёт</span></div>
+        </div>
+        <h3>Вопрос агента</h3>
+        <div class="steps"><span class="chip">Агент вызывает ask_user</span><span class="ar">→</span><span class="chip">Вопрос в Inbox и уведомлениях</span><span class="ar">→</span><span class="chip you">Вы отвечаете: Inbox, мессенджер, чат</span><span class="ar">→</span><span class="chip">question.answered</span><span class="ar">→</span><span class="chip k">Продолжение той же сессии или перезапуск с контекстом</span></div>
+        <ul class="inv">
+          <li>Если рантайм умеет продолжать сессию, продолжается та же сессия. Иначе — новый запуск с кратким итогом прошлого и парой «вопрос — ответ».</li>
+          <li>У вопроса есть срок; по истечении — действие из конфига джобы: пропустить, отменить или взять ответ по умолчанию.</li>
+          <li>Если в ответе есть новое знание, он сохраняется как ваша заметка и проходит обычное извлечение.</li>
+        </ul>
+        <h3>Управление на ходу и окружение</h3>
+        <ul class="inv">
+          <li><code>POST /v1/runs/{id}/messages</code> — сообщение работающему или ожидающему агенту: «сфокусируйся на X», «вот ещё ссылка».</li>
+          <li>Если рантайм принимает ввод на ходу, сообщение доставляется сразу; иначе уходит при продолжении.</li>
+          <li>Прервать текущий шаг и остановить запуск — отдельные операции.</li>
+          <li>Рабочая папка запуска сохраняется между шагами. Где — решает реализация: том на VPS, ветка у Air, состояние на стороне Managed Agents.</li>
+        </ul>
+      </section>
+
+      <section id="w-memory">
+        <div class="sh"><h2>Что агент может делать с памятью</h2></div>
+        <ul class="inv">
+          <li>Через MCP Frood токеном запуска: читать, вводить, предлагать, задавать вопросы (<code>ask_user</code>), сообщать о прогрессе.</li>
+          <li>Вердикт по достоверным источникам — политикой джобы: <code>auto_accept: { when: authoritative_source, no_conflict: true }</code>. Достоверные источники помечаются в конфиге.</li>
+          <li>Права ставить вердикт напрямую у агента нет; в аудите видно «принято политикой джобы daily-sweep».</li>
+          <li>Каждое предложение ссылается на запуск, джобу и ревизию конфига.</li>
+        </ul>
+      </section>
+
+      <section id="w-runtime">
+        <div class="sh"><h2>Контракт рантайма</h2><p class="sub"><code>agents.execute@v1</code>. Изоляция и место запуска — ответственность реализации.</p></div>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Операция</th><th>Смысл</th></tr></thead>
+            <tbody>
+              <tr><td class="k">capabilities()</td><td>Что умеет: ввод на ходу, продолжение, MCP, скиллы, сохранение окружения, контроль сети, модели, где запускает</td></tr>
+              <tr><td class="k">start(spec)</td><td>Инструкции, скиллы, MCP-серверы со ссылками на секреты, модель, аккаунт, токен запуска, бюджет, рабочая папка</td></tr>
+              <tr><td class="k">send(run, message)</td><td>Сообщение агенту: управление или ответ на вопрос</td></tr>
+              <tr><td class="k">resume(run, session)</td><td>Продолжить сохранённую сессию</td></tr>
+              <tr><td class="k">cancel_turn / stop</td><td>Прервать шаг / остановить запуск</td></tr>
+              <tr><td class="k">status / events</td><td>Состояние; шаги, вызовы инструментов, токены, стоимость</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Реализация</th><th>Где</th><th>Ввод на ходу</th><th>Продолжение</th><th>Заметки</th></tr></thead>
+            <tbody>
+              <tr><td>Контейнеры + Claude Code <span class="st act">первая</span></td><td>этот VPS</td><td>да<span class="ok">✓</span></td><td>по id сессии<span class="unk">?</span></td><td>Streaming input в Agent SDK; изоляцию задаём сами</td></tr>
+              <tr><td>Контейнеры + Codex <span class="st act">первая</span></td><td>этот VPS</td><td><span class="unk">?</span></td><td><code>codex exec resume</code><span class="ok">✓</span></td><td>MCP да</td></tr>
+              <tr><td>OpenCode serve</td><td>свой сервер</td><td><span class="unk">?</span></td><td><span class="unk">?</span></td><td>Бесплатный; разные модели; подписку Claude через него нельзя</td></tr>
+              <tr><td>ACP-агенты</td><td>где угодно</td><td>session/prompt</td><td>session/load</td><td>Общий протокол</td></tr>
+              <tr><td>Claude Managed Agents</td><td>облако Anthropic</td><td><span class="unk">?</span></td><td>сессии на сервере<span class="ok">✓</span></td><td>MCP по URL, секреты через vault<span class="ok">✓</span></td></tr>
+              <tr><td>JetBrains Air, облачные задачи</td><td>облако JetBrains</td><td>продолжение задачи<span class="ok">✓</span></td><td>до архивации через 24 ч<span class="ok">✓</span></td><td><code>aircli cloud run</code>; результат в ветку; кредиты JetBrains AI; автоматизации по расписанию и событиям<span class="ok">✓</span>; MCP в доках не описан<span class="unk">?</span></td></tr>
+              <tr><td>JetBrains Air, сессии на машине</td><td>ваша машина</td><td><code>aircli remote prompt</code><span class="ok">✓</span></td><td>сессия в демоне<span class="ok">✓</span></td><td>Пока только echo-сессии, ACP и PTY не реализованы<span class="unk">?</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="w-accounts">
+        <div class="sh"><h2>Аккаунты и подписки</h2></div>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Аккаунт</th><th>Для чего</th><th>Ограничения</th></tr></thead>
+            <tbody>
+              <tr><td>Anthropic API-ключ</td><td>все режимы</td><td>оплата по использованию</td></tr>
+              <tr><td>Подписка Claude Pro / Max</td><td>агент через Claude Code CLI</td><td>С 15.06.2026 фоновое использование идёт из отдельного месячного лимита (около $20 Pro, $100 / $200 Max)<span class="unk">?</span>. Agent SDK требует API-ключ<span class="unk">?</span>. Нельзя пускать чужие запросы<span class="unk">?</span></td></tr>
+              <tr><td>OpenAI API-ключ</td><td>все режимы</td><td>оплата по использованию</td></tr>
+              <tr><td>Подписка ChatGPT</td><td>агент через Codex CLI со входом через ChatGPT</td><td>лимиты плана; вход без браузера через device auth<span class="unk">?</span></td></tr>
+              <tr><td>JetBrains AI</td><td>агенты в Air</td><td>Облачные задачи и автоматизации тратят кредиты; свои ключи — только локально<span class="ok">✓</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <ul class="inv">
+          <li>API-ключ принадлежит инсталляции; подписка — пользователю и используется только для запусков от его имени.</li>
+          <li>Джоба выбирает аккаунт; можно задать запасной.</li>
+          <li>Бюджеты на джобу и аккаунт с консервативными значениями по умолчанию; траты видны в Activity.</li>
+          <li>Подписки — тип аккаунта уже в v1 (раунд 5).</li>
+          <li>Подписку Claude можно тратить только через Claude Code, ChatGPT — через Codex. OpenCode — для API-ключей и локальных моделей.</li>
+        </ul>
+      </section>
+
+      <section id="w-evolve">
+        <div class="sh"><h2>Как развиваются инструкции</h2></div>
+        <div class="steps"><span class="chip">Вы отклоняете предложение с причиной</span><span class="ar">→</span><span class="chip">Причина копится как обратная связь к джобе</span><span class="ar">→</span><span class="chip">Правка инструкции: PR в git или предложение изменения конфига</span><span class="ar">→</span><span class="chip k">Прогон примеров</span><span class="ar">→</span><span class="chip you">Вы принимаете</span></div>
+        <p class="caption">Позже агент-настройщик сможет сам предлагать такие правки тем же путём.</p>
+      </section>
+
+      <section id="w-bundle">
+        <div class="sh"><span class="tag ref">W8 · принято</span><h2>Стандартный набор</h2><p class="sub">Импортируется бандлом <code>frood/standard</code>; каждую джобу можно переопределить.</p></div>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Джоба</th><th>Возможность</th><th>Событие</th><th>Делает</th></tr></thead>
+            <tbody>
+              <tr><td class="k">transcribe</td><td>media.transcribe</td><td>поступило аудио</td><td>Распознавание речи</td></tr>
+              <tr><td class="k">extract</td><td>llm.complete</td><td>текст или итог распознавания</td><td>Observations → Proposals</td></tr>
+              <tr><td class="k">daily-sweep</td><td>agents.execute</td><td>тик расписания, по источнику</td><td>Новое, изменения, конфликты</td></tr>
+              <tr><td class="k">investigate</td><td>agents.execute</td><td>вердикт «исследовать»</td><td>Дособрать контекст</td></tr>
+              <tr><td class="k">lifecycle-review</td><td>agents.execute</td><td>merge или закрытие</td><td>Поштучно: в историю или оставить</td></tr>
+              <tr><td class="k">reverify</td><td>agents.execute</td><td>срок перепроверки</td><td>Проверить актуальность</td></tr>
+              <tr><td class="k">digest</td><td>llm.complete</td><td>тик расписания</td><td>Утренняя сводка</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="w-facts">
+        <div class="sh"><span class="tag ref">справка</span><h2>Проверенные факты</h2><p class="sub">На 18 октября 2026.</p></div>
+        <ul class="inv">
+          <li><b>JetBrains Air:</b> облачные агенты в контейнерах; автоматизации по расписанию и событиям без вашей машины; кредиты JetBrains AI, свои ключи только локально; результат в ветку после каждого хода; продолжение задачи до архивации через 24 ч<span class="ok">✓</span>. Агенты: Claude Agent, Codex, Gemini CLI, Junie<span class="ok">✓</span>. Air CLI: <code>cloud run/status/cancel</code>, <code>remote prompt/resolve/cancel/stop</code><span class="ok">✓</span>.</li>
+          <li><b>Подписка Claude:</b> <code>claude setup-token</code> для headless; отдельный лимит на фон с 15.06.2026; Agent SDK — только API-ключ; чужие запросы нельзя<span class="unk">?</span> — сторонние источники, проверить по официальным.</li>
+          <li><b>Codex:</b> <code>codex exec resume</code> сохраняет транскрипт<span class="ok">✓</span>; вход через ChatGPT и device auth<span class="unk">?</span>.</li>
+          <li><b>Claude Agent SDK:</b> streaming input — прерывания и очередь сообщений<span class="ok">✓</span>.</li>
+        </ul>
+        <p class="src"><a href="https://www.jetbrains.com/help/air/cloud-agents.html">Air: Cloud agents</a> · <a href="https://www.jetbrains.com/help/air/supported-agents.html">Air: Supported agents</a> · <a href="https://developers.openai.com/codex/cli/features">Codex CLI</a> · <a href="https://code.claude.com/docs/en/agent-sdk/streaming-vs-single-mode">Agent SDK streaming</a> · <a href="https://autonomee.ai/blog/claude-code-terms-of-service-explained/">ToS (сторонний разбор)</a> · <a href="https://techsy.io/en/blog/claude-agent-sdk-credit">кредиты Agent SDK</a></p>
+      </section>
+    </div>
+
+    <!-- ================= API ================= -->
+    <div class="panel" id="api" role="tabpanel" aria-labelledby="t-api">
+      <section id="a2-principles">
+        <div class="sh"><span class="tag ref">фаза 2 · v0.2 · принята</span><h2>Принципы</h2></div>
+        <div class="pillars">
+          <div class="pillar"><b>Один адрес</b><span><code>/v1</code> — API, <code>/mcp</code> — MCP, <code>/oauth</code> и <code>/.well-known</code> — вход, <code>/app</code> — веб-интерфейс.</span></div>
+          <div class="pillar"><b>OpenAPI — источник истины</b><span>MCP-инструменты, CLI и SDK — тонкие обёртки над теми же операциями.</span></div>
+          <div class="pillar"><b>Ядро без LLM</b><span>API отвечает на структурные запросы. Вопросы на естественном языке — опциональный модуль.</span></div>
+          <div class="pillar"><b>Только добавления</b><span>Внутри <code>/v1</code> ничего не ломаем; несовместимое — <code>/v2</code> рядом. Для MCP то же: ChatGPT замораживает список инструментов.</span></div>
+        </div>
+        <p class="sub">Соглашения: ошибки по RFC 9457, повтор команд по <code>Idempotency-Key</code>, конкурентные правки по версиям, пагинация курсорами, время в UTC, у чтения есть <code>as_of</code> и <code>valid_at</code>.</p>
+      </section>
+
+      <section id="a2-style">
+        <div class="sh"><h2>Почему REST</h2><p class="sub">По вопросу из раунда 3 (A2′ на подтверждении).</p></div>
+        <div class="prose"><p>REST с описанием OpenAPI понимают все клиенты: curl, iOS Shortcuts, боты, AI-клиенты, генераторы SDK. Главный плюс GraphQL — вложенные данные одним запросом — закрывают <code>/v1/context</code> и <code>/v1/entities/{id}</code>. GraphQL можно добавить позже модулем только для чтения, если понадобится веб-интерфейсу. gRPC неудобен из браузера и AI-клиентов, а JSON-RPC у нас уже есть: это MCP.</p></div>
+      </section>
+
+      <section id="a2-resources">
+        <div class="sh"><h2>Ресурсы</h2></div>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Ресурс</th><th>Эндпоинты</th><th>Кто вызывает</th></tr></thead>
+            <tbody>
+              <tr><td class="k">capture</td><td><code>POST /v1/capture</code> — текст, аудио, файл или ссылка. Возвращает источник и задачу; извлечение идёт в фоне</td><td>любой клиент</td></tr>
+              <tr><td class="k">sources</td><td><code>GET /v1/sources</code>, <code>/{id}</code>, <code>/{id}/content</code></td><td>чтение</td></tr>
+              <tr><td class="k">observations</td><td><code>POST</code> и <code>GET /v1/observations</code></td><td>агенты, модули извлечения</td></tr>
+              <tr><td class="k">assertions</td><td><code>GET /v1/assertions</code> с фильтрами, <code>/{id}</code>, <code>/{id}/history</code></td><td>чтение</td></tr>
+              <tr><td class="k">entities</td><td><code>GET /v1/entities</code>, <code>/{id}</code>, <code>/{id}/timeline</code></td><td>чтение</td></tr>
+              <tr><td class="k">proposals</td><td><code>POST</code>, <code>GET</code>, <code>PATCH /v1/proposals</code>, <code>/{id}/rebase</code>, <code>/{id}/verdicts</code></td><td>агенты, пользователи</td></tr>
+              <tr><td class="k">inbox</td><td><code>GET /v1/inbox</code> — что ждёт решения у текущего пользователя</td><td>пользователь</td></tr>
+              <tr><td class="k">search</td><td><code>GET /v1/search?q=…</code> — модуль проекции</td><td>чтение</td></tr>
+              <tr><td class="k">context</td><td><code>GET /v1/context?entity=…</code> — сводка по проекту или человеку</td><td>чтение</td></tr>
+              <tr><td class="k">ask</td><td><code>POST /v1/ask</code> — ответ с источниками, опциональный модуль с LLM</td><td>чтение</td></tr>
+              <tr><td class="k">journal</td><td><code>GET /v1/journal?after=…</code>, <code>/stream</code> (SSE), <code>POST /v1/subscriptions</code></td><td>модули, интеграции</td></tr>
+              <tr><td class="k">users, tokens</td><td><code>/v1/me</code>, <code>/v1/users</code>, <code>/v1/tokens</code>, <code>/v1/clients</code></td><td>пользователь</td></tr>
+              <tr><td class="k">runs</td><td><code>GET /v1/runs</code>, <code>/{id}</code>, <code>POST /v1/runs</code>, <code>/{id}/messages</code>, <code>/{id}/cancel</code> — фаза 3</td><td>пользователь, модули</td></tr>
+              <tr><td class="k">questions</td><td><code>GET /v1/questions</code>, <code>POST /v1/questions/{id}/answer</code> — фаза 3</td><td>пользователь</td></tr>
+              <tr><td class="k">config</td><td><code>GET /v1/config/revisions</code>, <code>POST /v1/config</code>, <code>/rollback</code> — фаза 3</td><td>пользователь, CI</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <h3>«Какие сроки на этой неделе»</h3>
+<pre>GET /v1/assertions?kind=commitment&amp;status=active
+    &amp;slot.due.gte=2026-10-19&amp;slot.due.lt=2026-10-26</pre>
+        <p class="caption">Фильтры по полям вида: <code>slot.&lt;имя&gt;.&lt;оператор&gt;</code>, операторы eq, gte, lt, in.</p>
+      </section>
+
+      <section id="a2-auth">
+        <div class="sh"><h2>Кто выдаёт токены</h2><p class="sub">Инсталляция сама является OAuth 2.1 / OIDC-сервером (тип модуля identity, в v1 встроен в ядро).</p></div>
+        <div class="pillars">
+          <div class="pillar"><b>Почему токены выдаём сами</b><span>AI-клиентам нужны CIMD или DCR, refresh-токены и адреса возврата вроде claude.ai/api/mcp/auth_callback. Keycloak умеет CIMD экспериментально, Pocket ID — не подтверждено.</span></div>
+          <div class="pillar"><b>Только внешние провайдеры</b><span>Google, Apple, Microsoft, GitHub, корпоративный SSO. Своих паролей и логинов нет: человек входит у провайдера, токены клиентам выдаёт наша инсталляция.</span></div>
+          <div class="pillar"><b>Кто может войти</b><span>Список адресов и доменов в <code>frood.yaml</code>. Пригласить = добавить адрес. Рабочая инсталляция — по домену через корпоративный SSO.</span></div>
+          <div class="pillar"><b>Оговорка про Apple</b><span>Вход через Apple на сайте требует платного Apple Developer Program (около $99 в год). Google, Microsoft и GitHub бесплатны.</span></div>
+        </div>
+      </section>
+
+      <section id="a2-clients">
+        <div class="sh"><h2>Клиенты и токены</h2></div>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Клиент</th><th>Как получает доступ</th><th>Токен</th></tr></thead>
+            <tbody>
+              <tr><td>AI-клиенты: ChatGPT, Claude, Claude Code, Codex, Cursor</td><td>OAuth с PKCE; регистрация CIMD, запасной вариант DCR</td><td>access ~1 ч + refresh</td></tr>
+              <tr><td>Веб-интерфейс</td><td>Тот же OAuth как свой клиент</td><td>сессия</td></tr>
+              <tr><td>CLI</td><td>Device flow: код на экране, подтверждение в браузере</td><td>access + refresh</td></tr>
+              <tr><td>Скрипты, iOS Shortcut, Telegram-бот</td><td>Личный токен с выбранными правами и сроком</td><td>PAT, в базе только хэш</td></tr>
+              <tr><td>Агенты, запускаемые системой</td><td>Ядро выпускает токен на запуск от имени пользователя: права агента ∩ права пользователя</td><td>живёт на время запуска</td></tr>
+              <tr><td>Модули в отдельных процессах</td><td>Client credentials по манифесту модуля</td><td>сервисный, права из манифеста</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <h3>Что требуют ChatGPT и Claude</h3>
+        <ul class="inv">
+          <li>В метаданных сервера: <code>client_id_metadata_document_supported: true</code>, методы <code>none</code> (условие Claude для CIMD) и <code>private_key_jwt</code> (ChatGPT), адрес регистрации для DCR, PKCE S256.</li>
+          <li>Метаданные защищённого ресурса по RFC 9728 и заголовок <code>WWW-Authenticate</code> при 401.</li>
+          <li>Параметр <code>iss</code> в ответе авторизации (RFC 9207), параметр <code>resource</code> (RFC 8707).</li>
+          <li>Адреса возврата: <code>https://claude.ai/api/mcp/auth_callback</code>; loopback с любым портом для Claude Code; client_id ChatGPT — URL на chatgpt.com.</li>
+          <li>CIMD-документы загружаются с защитой от SSRF: только https, лимит размера, без приватных адресов, с кэшем.</li>
+        </ul>
+      </section>
+
+      <section id="a2-scopes">
+        <div class="sh"><h2>Права токена</h2><p class="sub">Не роли: у пользователя все права, а токену клиента — только то, что разрешили при подключении.</p></div>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Scope</th><th>Даёт</th><th>AI-клиенту по умолчанию</th></tr></thead>
+            <tbody>
+              <tr><td class="k">knowledge:read</td><td>Читать утверждения, сущности, источники, историю, поиск, сводки, Inbox</td><td><span class="st act">да</span></td></tr>
+              <tr><td class="k">knowledge:capture</td><td>Отправлять заметки и файлы</td><td><span class="st act">да</span></td></tr>
+              <tr><td class="k">knowledge:propose</td><td>Создавать и править предложения</td><td><span class="st act">да</span></td></tr>
+              <tr><td class="k">knowledge:decide</td><td>Ставить вердикты</td><td><span class="st wait">галочка</span></td></tr>
+              <tr><td class="k">journal:read</td><td>Читать журнал и подписываться</td><td>нет</td></tr>
+              <tr><td class="k">admin</td><td>Пользователи, токены, клиенты, настройки, redaction</td><td>нет</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="a2-public">
+        <div class="sh"><h2>Что доступно из интернета</h2></div>
+        <ul class="inv">
+          <li>Публично по HTTPS: <code>/v1</code>, <code>/mcp</code>, <code>/oauth</code>, <code>/.well-known</code>, <code>/app</code>. Облачные AI-клиенты не ходят в приватные сети.</li>
+          <li>Только через приватную сеть (Tailscale): доступ к серверу, метрики, база.</li>
+          <li>Лимиты запросов на токен и IP; аудит входов и выданных токенов; отзыв клиента или токена в интерфейсе.</li>
+        </ul>
+      </section>
+
+      <section id="a2-mcp">
+        <div class="sh"><h2>MCP-адаптер</h2><p class="sub">Streamable HTTP без сессий (спека 2026-07-28) + совместимость с клиентами на 2025-11-25. Список инструментов зависит от прав токена. Вебсокетов в спеке нет (SEP-1288 не принят), и они не нужны.</p></div>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Инструмент</th><th>Право</th><th>Для чего</th></tr></thead>
+            <tbody>
+              <tr><td class="k">search_knowledge</td><td>read</td><td>Поиск по смыслу и словам</td></tr>
+              <tr><td class="k">list_assertions</td><td>read</td><td>Структурные вопросы: «сроки на этой неделе», «за что отвечает Оля»</td></tr>
+              <tr><td class="k">get_context</td><td>read</td><td>Сводка по проекту или человеку</td></tr>
+              <tr><td class="k">get_entity</td><td>read</td><td>Сущность и её текущие утверждения</td></tr>
+              <tr><td class="k">get_history</td><td>read</td><td>Как менялось утверждение или сущность</td></tr>
+              <tr><td class="k">capture_note</td><td>capture</td><td>«Запомни: …»</td></tr>
+              <tr><td class="k">propose_change</td><td>propose</td><td>Структурное предложение изменения</td></tr>
+              <tr><td class="k">list_inbox</td><td>read</td><td>Что ждёт решения</td></tr>
+              <tr><td class="k">get_proposal</td><td>read</td><td>Детали предложения</td></tr>
+              <tr><td class="k">submit_verdict</td><td>decide</td><td>Вердикт; виден только с этим правом</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="pillars">
+          <div class="pillar"><b>Карточки в чате</b><span><code>get_proposal</code> и <code>list_inbox</code> показывают карточку MCP Apps: старое и новое, доказательства, кнопки. Где UI нет — текст и ссылка в веб-Inbox.</span></div>
+          <div class="pillar"><b>Долгие операции</b><span><code>capture_note</code> и «исследовать» сразу возвращают id; клиент перечитывает предложение или Inbox. Расширение Tasks — позже.</span></div>
+          <div class="pillar"><b>Инструкции для модели</b><span>Сначала искать, цитировать id утверждений и источников, новое — через capture или propose, ничего не выдавать за известное без источника.</span></div>
+        </div>
+      </section>
+
+      <section id="a2-journal">
+        <div class="sh"><h2>Журнал для модулей</h2></div>
+        <ul class="inv">
+          <li>Страницы событий по позиции, поток SSE, вебхуки с подписью HMAC.</li>
+          <li>Конверт CloudEvents + позиция и автор события.</li>
+          <li>Доставка «хотя бы раз»: потребитель хранит свой checkpoint и обрабатывает событие повторно без вреда.</li>
+        </ul>
+      </section>
+
+      <section id="a2-matrix">
+        <div class="sh"><h2>Какой клиент что может</h2><p class="sub">У пользователя может быть любой набор клиентов, поэтому ввод не зависит от AI-клиента.</p></div>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Клиент</th><th>Чтение</th><th>Ввод, предложения</th><th>Вердикт</th><th>Примечание</th></tr></thead>
+            <tbody>
+              <tr><td>Claude web, desktop</td><td>да</td><td>да</td><td>если разрешено</td><td>карточки MCP Apps; на Free один коннектор</td></tr>
+              <tr><td>Claude mobile</td><td>да</td><td>да</td><td>если разрешено</td><td>коннектор добавляется в вебе</td></tr>
+              <tr><td>ChatGPT web, Business / Enterprise</td><td>да</td><td>да</td><td>если разрешено</td><td>в Enterprise подключение может требовать админа; карточки без кнопок<span class="unk">?</span></td></tr>
+              <tr><td>ChatGPT Pro</td><td>да</td><td>—</td><td>—</td><td>только чтение</td></tr>
+              <tr><td>ChatGPT mobile</td><td><span class="unk">?</span></td><td>—</td><td>—</td><td>подключение только в вебе</td></tr>
+              <tr><td>Claude Code, Codex, Cursor</td><td>да</td><td>да</td><td>если разрешено</td><td>MCP или HTTP</td></tr>
+              <tr><td>OpenClaw, Hermes</td><td>да</td><td>да</td><td>если разрешено</td><td>готовые проактивные каналы</td></tr>
+              <tr><td>Telegram-бот</td><td>да</td><td>голос, текст</td><td>кнопки</td><td>модуль, личный токен</td></tr>
+              <tr><td>iOS Shortcut</td><td>—</td><td>да</td><td>—</td><td>ввод одной кнопкой</td></tr>
+              <tr><td>Веб-интерфейс</td><td>да</td><td>да</td><td>да</td><td>полный доступ</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="a2-examples">
+        <div class="sh"><h2>Примеры</h2></div>
+        <div class="flows">
+          <div class="flow"><h3><span class="k">1</span>«Какие сроки на этой неделе?» в Claude mobile</h3><div class="steps"><span class="chip">Вопрос в чате</span><span class="ar">→</span><span class="chip">list_assertions(kind=commitment, due_from, due_to)</span><span class="ar">→</span><span class="chip">GET /v1/assertions</span><span class="ar">→</span><span class="chip k">Ответ со ссылками на утверждения и источники</span></div></div>
+          <div class="flow"><h3><span class="k">2</span>Быстрый ввод с iPhone</h3><div class="steps"><span class="chip">Shortcut «Запомнить»</span><span class="ar">→</span><span class="chip">Диктовка</span><span class="ar">→</span><span class="chip">POST /v1/capture с личным токеном</span><span class="ar">→</span><span class="chip">Извлечение</span><span class="ar">→</span><span class="chip k">Свой факт без конфликта принят политикой</span></div></div>
+          <div class="flow"><h3><span class="k">3</span>Подключение ChatGPT Enterprise</h3><div class="steps"><span class="chip">URL …/mcp</span><span class="ar">→</span><span class="chip">Метаданные ресурса и сервера</span><span class="ar">→</span><span class="chip">CIMD</span><span class="ar">→</span><span class="chip you">Вход через SSO и согласие</span><span class="ar">→</span><span class="chip k">Токены: read, capture, propose</span></div></div>
+        </div>
+      </section>
+
+      <section id="a2-facts">
+        <div class="sh"><span class="tag ref">справка</span><h2>Проверенные факты</h2><p class="sub">На 17 октября 2026.</p></div>
+        <ul class="inv">
+          <li><b>ChatGPT</b> поддерживает CIMD (по умолчанию, если сервер объявил), DCR, заранее заданных клиентов и PKCE; для CIMD — <code>none</code> или <code>private_key_jwt</code><span class="ok">✓</span>. client_id — URL на chatgpt.com, передаёт <code>resource</code><span class="unk">?</span>.</li>
+          <li><b>Claude</b>: DCR и CIMD из коробки; CIMD выбирается при <code>client_id_metadata_document_supported: true</code> и <code>none</code>; адрес возврата claude.ai/api/mcp/auth_callback; Claude Code — loopback с любым портом; PKCE S256 всегда<span class="ok">✓</span>.</li>
+          <li><b>Self-hosted серверы с CIMD</b>: Better Auth (плагин), Clerk (beta), Ping, ServiceNow<span class="unk">?</span>. Pocket ID — DCR не подтверждён<span class="unk">?</span>. Ory Hydra — данных не нашёл<span class="unk">?</span>.</li>
+          <li><b>Rust</b>: паттерн проверки токенов и прав для MCP есть в tower-mcp<span class="unk">?</span>; что именно покрывает <code>auth</code> в rmcp, проверить<span class="unk">?</span>.</li>
+        </ul>
+        <p class="src"><a href="https://developers.openai.com/apps-sdk/build/auth">OpenAI: Authentication</a> · <a href="https://zuplo.com/learn/mcp/compatibility/clients/chatgpt-connectors">Zuplo: ChatGPT</a> · <a href="https://claude.com/docs/connectors/building/authentication">Claude: authentication</a> · <a href="https://better-auth.com/docs/plugins/cimd">Better Auth CIMD</a> · <a href="https://docs.rs/crate/tower-mcp/0.20.1/source/src/oauth/mod.rs">tower-mcp</a></p>
+      </section>
+    </div>
+
+    <!-- ================= MODEL ================= -->
+    <div class="panel" id="model" role="tabpanel" aria-labelledby="t-model">
+      <section id="m-vocab">
+        <div class="sh"><span class="tag ref">фаза 1 · v0.2 · принята с правками</span><h2>Словарь</h2><p class="sub">Логическая модель без привязки к СУБД. Идеи взяты из модели утверждений Wikidata, W3C PROV, двухвременных таблиц SQL:2011 и pull request.</p></div>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Понятие</th><th>Что это</th><th>Пример</th></tr></thead>
+            <tbody>
+              <tr><td class="k">Installation</td><td>Одна развёрнутая система. Инсталляции независимы, видимость делится только ими</td><td>«личная», «рабочая»</td></tr>
+              <tr><td class="k">User</td><td>Человек с учётной записью. Все пользователи инсталляции видят всё</td><td>Алиса, Боб</td></tr>
+              <tr><td class="k">Principal</td><td>Кто действует в системе: пользователь, агент от чьего-то имени, интеграция, политика</td><td><code>agent:daily-sweep</code> от имени Алисы</td></tr>
+              <tr><td class="k">Source</td><td>Внешний артефакт: стабильная ссылка, хэш, время</td><td>сообщение в Slack, голосовая заметка</td></tr>
+              <tr><td class="k">Evidence</td><td>Конкретное место внутри источника</td><td>аудио 12:40–13:05, абзац 3</td></tr>
+              <tr><td class="k">Observation</td><td>Извлечённое свидетельство, ещё не знание</td><td>«Оля пишет, что релиз сдвигается»</td></tr>
+              <tr><td class="k">Entity</td><td>О чём знание: человек, проект, команда, компонент, встреча, тема</td><td><code>Project: Orion</code></td></tr>
+              <tr><td class="k">Assertion</td><td>Единица знания с видом, сущностями, временем, статусом, доказательствами</td><td>«Релиз Orion 2.4 — 28 ноября»</td></tr>
+              <tr><td class="k">Proposal</td><td>Предложенное изменение знаний, аналог pull request</td><td>«Заменить срок 14.11 на 28.11»</td></tr>
+              <tr><td class="k">Verdict</td><td>Решение по предложению: принять, с правкой, отклонить, отложить, исследовать</td><td>«принят вариант A, Алиса, 11.10»</td></tr>
+              <tr><td class="k">Event</td><td>Неизменяемая запись журнала о любом изменении</td><td><code>assertion.superseded</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <h3>Как понятия связаны</h3>
+        <div class="life">
+          <div class="s"><span class="rel">начало</span><b>Source</b><span>Откуда пришло</span></div>
+          <div class="s"><span class="rel">1:N</span><b>Evidence</b><span>Место в источнике</span></div>
+          <div class="s"><span class="rel">N:1</span><b>Observation</b><span>Что там сказано</span></div>
+          <div class="s"><span class="rel">N:N</span><b>Proposal</b><span>Что предлагается изменить</span></div>
+          <div class="s"><span class="rel">1:N</span><b>Verdict</b><span>Кто и как решил</span></div>
+          <div class="s k"><span class="rel">создаёт версии</span><b>Assertion</b><span>Ссылается на Entity и Evidence, связана с другими Assertion</span></div>
+        </div>
+        <p class="caption">Связи между утверждениями: contradicts, depends_on, part_of, derived_from, relates_to. Principal действует через Source, Proposal, Verdict и Event.</p>
+      </section>
+
+      <section id="m-assertion">
+        <div class="sh"><h2>Утверждение</h2><p class="sub">Текст + вид + поля по виду. Поля нужны, чтобы работали вопросы вроде «какие сроки на этой неделе» или «за что отвечает Оля»: это фильтры по виду, полям и времени.</p></div>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Поле</th><th>Смысл</th></tr></thead>
+            <tbody>
+              <tr><td class="k">id, version</td><td>Стабильный id и номер неизменяемой версии</td></tr>
+              <tr><td class="k">kind</td><td>Вид: задаёт схему полей и жизненный цикл</td></tr>
+              <tr><td class="k">text</td><td>Каноническая формулировка для человека и LLM</td></tr>
+              <tr><td class="k">subjects</td><td>Сущности, о которых утверждение</td></tr>
+              <tr><td class="k">slots</td><td>Поля по виду: срок, ответственный, условие, область (JSON Schema вида)</td></tr>
+              <tr><td class="k">modality</td><td>Статус достоверности: mentioned, proposed, agreed, decided, reported, observed, inferred</td></tr>
+              <tr><td class="k">authority</td><td>Кто решил или утверждал в реальности и где это зафиксировано</td></tr>
+              <tr><td class="k">said_at</td><td>Когда сказано в источнике</td></tr>
+              <tr><td class="k">valid</td><td>[from, to) — когда действует в реальности</td></tr>
+              <tr><td class="k">recorded</td><td>[from, to) — когда эта версия была текущей в памяти</td></tr>
+              <tr><td class="k">status</td><td>Жизненный цикл</td></tr>
+              <tr><td class="k">review_after</td><td>Когда перепроверить; может ставиться политикой по виду</td></tr>
+              <tr><td class="k">evidence</td><td>Доказательства. Для ваших собственных фактов — ваша заметка как источник</td></tr>
+              <tr><td class="k">links</td><td>Связи с другими утверждениями</td></tr>
+              <tr><td class="k">origin</td><td>Proposal и Verdict, создавшие эту версию</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="m-kinds">
+        <div class="sh"><h2>Виды утверждений</h2><p class="sub">Восемь в v1. Модуль может зарегистрировать свой вид со схемой полей.</p></div>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Вид</th><th>Что</th><th>Поля</th><th>Жизненный цикл</th></tr></thead>
+            <tbody>
+              <tr><td class="k">decision</td><td>Договорённость, принятое решение</td><td>decided_by, rationale, alternatives, scope</td><td>Живёт долго, закрывается новым решением</td></tr>
+              <tr><td class="k">commitment</td><td>Обязательство, срок, план</td><td>owner, due, deliverable</td><td>completed при выполнении; напоминания по due</td></tr>
+              <tr><td class="k">rule</td><td>Правило, инструкция, политика</td><td>scope, applies_when</td><td>Перепроверка по review_after</td></tr>
+              <tr><td class="k">responsibility</td><td>Кто за что отвечает</td><td>person, area, role</td><td>Важна история «кто отвечал на дату»</td></tr>
+              <tr><td class="k">fact</td><td>Факт о проекте, системе, людях</td><td>—</td><td>Общий случай</td></tr>
+              <tr><td class="k">status</td><td>Текущее состояние: проект на паузе, блокер</td><td>state</td><td>Быстро устаревает, короткий review_after</td></tr>
+              <tr><td class="k">event</td><td>Произошедшее: релиз вышел, PR смержен</td><td>occurred_at</td><td>Не устаревает, запускает переоценку связанного</td></tr>
+              <tr><td class="k">open_question</td><td>Нерешённый вопрос, кто-то чего-то ждёт</td><td>waiting_on, asked_at</td><td>Основа для напоминаний «зависло»</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="m-time">
+        <div class="sh"><h2>Три времени</h2><p class="sub">На примере переноса срока релиза (выдуманные данные). Шкала: 1 сентября – 1 декабря 2026.</p></div>
+        <div class="tl" role="img" aria-label="Версия 1 действует со 2 сентября по 10 октября и была в памяти до 11 октября. Версия 2 действует с 10 октября и в памяти с 11 октября.">
+          <div class="tl-row"><span class="tl-l">v1 действует</span><div class="tl-track"><div class="tl-bar old" style="left:1.1%;width:41.8%">срок 14.11</div></div></div>
+          <div class="tl-row"><span class="tl-l">v1 в памяти</span><div class="tl-track"><div class="tl-bar mem" style="left:1.1%;width:42.9%">02.09 → 11.10</div></div></div>
+          <div class="tl-row"><span class="tl-l">v2 действует</span><div class="tl-track"><div class="tl-bar new" style="left:42.9%;width:57.1%">срок 28.11 · сказано 10.10</div></div></div>
+          <div class="tl-row"><span class="tl-l">v2 в памяти</span><div class="tl-track"><div class="tl-bar mem new" style="left:44%;width:56%">с 11.10</div></div></div>
+          <div class="tl-row"><span class="tl-l"></span><div class="tl-axis"><span style="left:0">01.09</span><span style="left:33%">01.10</span><span style="left:67%">01.11</span><span style="left:100%">01.12</span></div></div>
+          <div class="tl-legend"><span><i style="background:var(--rule-strong)"></i>старая версия действует</span><span><i style="background:var(--accent)"></i>новая версия действует</span><span><i style="border:1.5px solid var(--rule-strong)"></i>версия считалась текущей в памяти</span></div>
+        </div>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Вопрос</th><th>Как отвечаем</th><th>Ответ в примере</th></tr></thead>
+            <tbody>
+              <tr><td>Что верно сейчас?</td><td>valid содержит «сейчас», recorded открыт</td><td>28.11</td></tr>
+              <tr><td>Какой срок действовал 1 октября?</td><td>valid содержит 1 октября, по текущему знанию</td><td>14.11</td></tr>
+              <tr><td>Что мы думали 10 октября вечером?</td><td>recorded содержит 10 октября</td><td>14.11: перенос ещё не был записан</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="m-life">
+        <div class="sh"><h2>Жизненный цикл утверждения</h2><p class="sub">Переходы только через принятый Proposal.</p></div>
+        <div class="life">
+          <div class="s"><b>Нет в памяти</b><span>Живёт только в Proposal</span></div>
+          <div class="s k"><b>active</b><span>Действующее знание. Флаги: contested (открыт конфликт), needs_verification (пора перепроверить)</span></div>
+          <div class="s end"><b>superseded</b><span>Заменено новой версией</span></div>
+          <div class="s end"><b>completed</b><span>Обязательство выполнено</span></div>
+          <div class="s end"><b>historical</b><span>Контекст закрыт: проект завершён</span></div>
+          <div class="s end"><b>retired</b><span>Признано неверным или ненужным</span></div>
+        </div>
+        <p class="caption">Флаги не меняют статус: утверждение остаётся действующим, пока вы не решили. Закрытие проекта ничего не закрывает автоматически: агент открывает Proposal с поштучными вариантами.</p>
+      </section>
+
+      <section id="m-proposal">
+        <div class="sh"><h2>Proposal и Verdict</h2><p class="sub">Как pull request: изменения, база, обсуждение, решение.</p></div>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Поле Proposal</th><th>Смысл</th></tr></thead>
+            <tbody>
+              <tr><td class="k">operations</td><td>create, supersede, close, link, unlink, merge_entities, split_entity, reclassify, reverify</td></tr>
+              <tr><td class="k">base</td><td>Версии, против которых составлено предложение</td></tr>
+              <tr><td class="k">alternatives</td><td>Варианты для конфликта: оставить старое, принять новое, оба верны в разных областях</td></tr>
+              <tr><td class="k">rationale, evidence</td><td>Почему и на основании чего</td></tr>
+              <tr><td class="k">author</td><td>Пользователь, агент от чьего-то имени, интеграция</td></tr>
+              <tr><td class="k">risk</td><td>новое, изменение, конфликт, устаревание, слияние сущностей</td></tr>
+              <tr><td class="k">state</td><td>open → accepted, rejected, deferred, stale</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="pillars">
+          <div class="pillar"><b>Вердикты</b><span>accept (вариант), accept_with_edits, reject, defer (до даты), investigate (агент дособирает контекст). У каждого есть автор: человек или правило политики.</span></div>
+          <div class="pillar"><b>Атомарность</b><span>Принятие применяет все операции разом или ни одной.</span></div>
+          <div class="pillar"><b>Устаревшая база</b><span>Если утверждение из base успело измениться, предложение становится stale и его надо пересобрать, как PR с конфликтом.</span></div>
+        </div>
+      </section>
+
+      <section id="m-authority">
+        <div class="sh"><h2>Кто решил в реальности и кто принял в память</h2><p class="sub">По вашему комментарию к D2.</p></div>
+        <div class="pillars">
+          <div class="pillar"><b>authority</b><span>Кто принял решение в мире: «архитектурный комитет решил», «Оля назначила срок». Хранится в утверждении вместе с источником: протокол, ADR, документ.</span></div>
+          <div class="pillar"><b>verdict</b><span>Кто согласился, что это верно попало в память: вы, куратор пространства или политика.</span></div>
+          <div class="pillar"><b>Авторитетные источники</b><span>Источник можно пометить авторитетным (репозиторий ADR, утверждённые протоколы). Тогда решения из него принимает политика, и это видно в аудите.</span></div>
+        </div>
+      </section>
+
+      <section id="m-policy">
+        <div class="sh"><h2>Политики авто-вердикта</h2><p class="sub">Правило = условие → действие. Условия: вид, источник и его авторитетность, автор, пространство, конфликт, риск. Действия: принять, отправить на ревью роли, только уведомить.</p></div>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Случай</th><th>По умолчанию</th></tr></thead>
+            <tbody>
+              <tr><td>Вы сами сообщили факт, конфликта нет (в любой инсталляции)</td><td><span class="st act">авто-принятие</span></td></tr>
+              <tr><td>То же, но есть конфликт</td><td><span class="st wait">ревью</span></td></tr>
+              <tr><td>Предложение от агента</td><td><span class="st wait">ревью</span></td></tr>
+              <tr><td>Авторитетный источник, вид decision или rule, без конфликта</td><td><span class="st act">авто-принятие</span> (настраивается)</td></tr>
+              <tr><td>Слияние дублей сущностей, уверенность выше порога</td><td><span class="st act">авто-принятие</span>, обратимо (M11)</td></tr>
+              <tr><td>Слияние дублей, уверенность ниже порога</td><td><span class="st wait">ревью</span></td></tr>
+              <tr><td>Пометка needs_verification</td><td>без ревью, это флаг</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="m-users">
+        <div class="sh"><h2>Пользователи без пространств</h2><p class="sub">По раунду 2: пространства и роли убраны, видимость делится инсталляциями (D9″ принято).</p></div>
+        <div class="spaces">
+          <div class="space personal"><b>Личная инсталляция</b><span class="who">пользователь: вы</span><span>Личные заметки, голосовые, личные сервисы.</span></div>
+          <div class="space"><b>Рабочая инсталляция</b><span class="who">пользователи: вы и, возможно, коллеги</span><span>Рабочие источники, договорённости, сроки. Всё видят все её пользователи.</span></div>
+        </div>
+        <ul class="inv">
+          <li>Инсталляции полностью независимы: своя база, свои токены, свои источники.</li>
+          <li>Внутри инсталляции все видят всё и могут ставить вердикты. Ролей нет.</li>
+          <li>Пользователь всё равно нужен: авторство в аудите, свой Inbox и профиль внимания, агенты от имени конкретного человека с его доступами к источникам.</li>
+          <li>Права токенов — не роли: клиенту выдаётся только то, что пользователь разрешил при подключении (фаза 2).</li>
+          <li>Всё, что попало в инсталляцию, видно всем её пользователям. Личные источники коллег в общую рабочую инсталляцию не подключаются.</li>
+          <li>Пространства можно добавить позже миграцией: всем записям проставится одно пространство по умолчанию.</li>
+        </ul>
+      </section>
+
+      <section id="m-journal">
+        <div class="sh"><h2>Журнал, хранение, удаление</h2></div>
+        <div class="pillars">
+          <div class="pillar"><b>Журнал событий</b><span>Любое изменение → неизменяемое событие с монотонной позицией: source.captured, proposal.opened, proposal.verdict, assertion.superseded, content.redacted и т.д. Конверт CloudEvents + space, actor, position. Состояние и событие пишутся атомарно.</span></div>
+          <div class="pillar"><b>Версии + журнал</b><span>Каноническое состояние — неизменяемые версии записей; журнал — для аудита, триггеров и проекций. Чистый event sourcing сложнее в миграциях и ничего не даёт при неизменяемых версиях.</span></div>
+          <div class="pillar"><b>Redaction</b><span>«Забудь это» и корпоративное удаление: содержимое стирается, остаются скелет, связи и факт удаления. Проекции обязаны вычищать копии. Вариант сильнее — ключ шифрования на запись; в v1 не нужен, корпоративных требований к удалению нет.</span></div>
+        </div>
+      </section>
+
+      <section id="m-storage">
+        <div class="sh"><h2>Контракт хранилища</h2><p class="sub">Что должно уметь любое хранилище под Ledger (D1′). Технология выбирается при реализации.</p></div>
+        <ol class="inv">
+          <li>Атомарная запись нескольких записей: Proposal применяется целиком.</li>
+          <li>Согласованное чтение снимка.</li>
+          <li>Упорядоченный журнал с монотонной позицией; состояние и событие пишутся атомарно.</li>
+          <li>Ограничения уникальности: одна текущая версия утверждения.</li>
+          <li>Запросы по диапазонам времени и вторичным индексам.</li>
+        </ol>
+        <p class="sub">Подходят: SQL-СУБД с транзакциями, документные СУБД с многодокументными транзакциями, версионируемые СУБД. Не подходят как канон: KV без транзакций, векторные БД, графовые движки со своей LLM-экстракцией. Поиск, граф и сводки — проекции из журнала.</p>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Команды контракта knowledge.ledger@v1</th><th>Запросы</th></tr></thead>
+            <tbody>
+              <tr><td><code>capture_source</code></td><td><code>get_assertion(id, as_of?, valid_at?)</code></td></tr>
+              <tr><td><code>add_observation</code></td><td><code>list_assertions(filter, as_of?, valid_at?)</code></td></tr>
+              <tr><td><code>open_proposal</code> · <code>amend_proposal</code> · <code>rebase_proposal</code></td><td><code>get_entity(id)</code> с текущими утверждениями</td></tr>
+              <tr><td><code>submit_verdict</code></td><td><code>history(assertion | entity)</code></td></tr>
+              <tr><td><code>redact(record, reason)</code></td><td><code>list_proposals(filter)</code> · <code>inbox(user)</code></td></tr>
+              <tr><td><code>upsert_user</code></td><td><code>journal(from_position)</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="caption">search и get_context — не часть Ledger, а модули проекций поверх журнала.</p>
+      </section>
+
+      <section id="m-example">
+        <div class="sh"><h2>Сквозной пример</h2><p class="sub">Перенос срока релиза. Выдуманные данные.</p></div>
+        <div class="scroll">
+          <table class="ledger boxed">
+            <thead><tr><th>Когда</th><th>Что происходит</th><th>Записи</th></tr></thead>
+            <tbody>
+              <tr><td class="dt">02.09</td><td>Оля пишет в Slack: «Релиз 2.4 — 14 ноября». Ночной агент находит, Алиса принимает</td><td><span class="id">A-17 v1</span> commitment, due 14.11, authority Оля, agreed</td></tr>
+              <tr><td class="dt">10.10</td><td>На встрече решают перенести на 28.11. Запись встречи → распознавание → Observation</td><td><span class="id">S-204</span> запись встречи, <span class="id">O-881</span> «перенос, решили Оля и Пётр»</td></tr>
+              <tr><td class="dt">10.10</td><td>Агент находит A-17 и открывает конфликт: (a) заменить на 28.11, (b) оставить 14.11</td><td><span class="id">P-63</span> risk конфликт, base A-17 v1, <span class="st wait">open</span></td></tr>
+              <tr><td class="dt">11.10</td><td>Алиса выбирает (a). Всё применяется одной транзакцией</td><td><span class="id">A-17 v1</span> <span class="st sup">superseded</span> · <span class="id">A-17 v2</span> due 28.11 <span class="st act">active</span></td></tr>
+              <tr><td class="dt">11.10</td><td>Журнал: proposal.verdict, assertion.superseded, assertion.created. Проекции обновляются; attention проверяет, не задеты ли другие сроки</td><td>позиции 1041–1043</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <!-- ================= ARCH ================= -->
+    <div class="panel" id="arch" role="tabpanel" aria-labelledby="t-arch">
+      <section id="a-core">
+        <div class="sh"><span class="tag ref">v0.2 · принята</span><h2>Суть</h2></div>
+        <div class="prose">
+          <p>В центре своё небольшое <b>ядро знаний (Knowledge Ledger)</b>, единственный источник истины. Это журнал утверждений, их источников, предложений об изменении и вердиктов. У каждого утверждения есть время действия в реальности и время, когда система о нём узнала.</p>
+          <p>Всё остальное — заменяемые модули: ввод, агенты, фоновые задачи, проекции для поиска и графа, поверхности доступа. Агенты не пишут в знания напрямую, а создают предложения, как pull request.</p>
+          <p>На этом уровне описываются типы модулей и их контракты. Технологии в таблицах — примеры реализаций; выбор делается в фазе компонента.</p>
+        </div>
+        <div class="pillars">
+          <div class="pillar"><b>Ledger — единственная истина</b><span>Индексы, графы и сводки перестраиваются из него. Ядро запускается без LLM, графа и чата.</span></div>
+          <div class="pillar"><b>Агенты только предлагают</b><span>У агента права read + propose. Вердикт ставит человек или политика.</span></div>
+          <div class="pillar"><b>Модули заменяемы</b><span>Хранилище, задачи, агент, модель, клиент меняются за контрактом.</span></div>
+        </div>
+      </section>
+
+      <section id="a-layers">
+        <div class="sh"><h2>Схема слоёв</h2></div>
+        <div class="stack" role="img" aria-label="Слои: поверхности, доступ, ядро, работа, агенты, ввод, чтение, платформа">
+          <div class="layer"><div class="lname">Поверхности</div><div class="chips"><span class="chip">AI-чаты с MCP</span><span class="chip">агенты в IDE и терминале</span><span class="chip">свои ассистенты</span><span class="chip">Web Inbox</span><span class="chip">мессенджеры</span><span class="chip">push</span><span class="chip">CLI</span></div></div>
+          <div class="link"><span>HTTP API (основной)</span><span>MCP (адаптер)</span></div>
+          <div class="layer"><div class="lname">Доступ</div><div>OAuth · пользователи · права токенов read / capture / propose / decide</div></div>
+          <div class="link"><span>единый доменный сервис</span></div>
+          <div class="layer core"><div class="lname">Ядро · Ledger</div><div>
+            <div class="pipe"><span class="chip">Sources</span><span class="ar">→</span><span class="chip">Observations</span><span class="ar">→</span><span class="chip">Proposals</span><span class="dec">вердикт →</span><span class="chip k">Assertions</span></div>
+            <div class="corefoot">любое хранилище по контракту · три времени · происхождение · пространства · Verdicts · журнал событий</div>
+          </div></div>
+          <div class="link up"><span>↓ события</span><span>↑ только proposals</span></div>
+          <div class="layer"><div class="lname">Работа</div><div class="chips"><span class="chip">очередь с повторами</span><span class="chip">расписание с догоном</span><span class="chip">триггеры по событиям</span><span class="chip">история запусков</span></div></div>
+          <div class="link"><span>запуск</span></div>
+          <div class="layer"><div class="lname">Агенты</div><div class="chips"><span class="chip">определения: Agent Skills + манифест</span><span class="chip">×</span><span class="chip">рантаймы: SDK, ACP, облако</span><span class="chip soft">от имени пользователя</span></div></div>
+          <div class="link"><span>наполнение</span></div>
+          <div class="layer"><div class="lname">Ввод</div><div class="chips"><span class="chip">текст · голос · файлы · встречи</span><span class="chip">коннекторы источников</span><span class="chip">распознавание и парсинг</span></div></div>
+          <div class="link"><span>проекции из журнала</span></div>
+          <div class="layer"><div class="lname">Чтение</div><div class="chips"><span class="chip">текущее состояние</span><span class="chip">поиск</span><span class="chip">граф</span><span class="chip">сводка по теме</span><span class="chip">экспорт</span></div></div>
+          <div class="link"><span>под всем</span></div>
+          <div class="layer"><div class="lname">Платформа</div><div class="chips"><span class="chip">манифесты и capabilities</span><span class="chip">git-реестр модулей</span><span class="chip">frood.yaml → деплой</span><span class="chip">секреты</span><span class="chip">LLM gateway</span><span class="chip">attention</span><span class="chip">бэкапы</span></div></div>
+        </div>
+      </section>
+
+      <section id="a-components">
+        <div class="sh"><h2>Типы модулей</h2><p class="sub">Примеры реализаций — для ориентира, не решение.</p></div>
+        <div class="scroll">
+          <table class="ctable">
+            <thead><tr><th>Модуль</th><th>Роль</th><th>Примеры реализаций</th><th>Ещё варианты</th></tr></thead>
+            <tbody>
+              <tr class="hl"><td class="name"><span class="num mono">01</span>Knowledge Ledger</td><td data-l="Роль">Канонические знания, история, вердикты</td><td data-l="Примеры">Свой модуль поверх транзакционного хранилища</td><td class="alt" data-l="Ещё">Doltgres как эксперимент</td></tr>
+              <tr><td class="name"><span class="num mono">02</span>Object store</td><td data-l="Роль">Сырые файлы, аудио</td><td data-l="Примеры">Локальная FS, S3-совместимое</td><td class="alt" data-l="Ещё">Garage, R2, B2</td></tr>
+              <tr><td class="name"><span class="num mono">03</span>Search projection</td><td data-l="Роль">Поиск</td><td data-l="Примеры">Векторный + полнотекстовый в той же БД</td><td class="alt" data-l="Ещё">Qdrant и др.</td></tr>
+              <tr><td class="name"><span class="num mono">04</span>Graph projection</td><td data-l="Роль">Связи сущностей</td><td data-l="Примеры">Таблица рёбер</td><td class="alt" data-l="Ещё">Graphiti, AGE и др.</td></tr>
+              <tr><td class="name"><span class="num mono">05</span>Work engine</td><td data-l="Роль">Очередь, расписание, триггеры, история</td><td data-l="Примеры">Своя таблица задач; apalis</td><td class="alt" data-l="Ещё">DBOS, Hatchet, Absurd</td></tr>
+              <tr><td class="name"><span class="num mono">06</span>Agent runtime</td><td data-l="Роль">Выполнение агента</td><td data-l="Примеры">Claude Agent SDK, Codex, OpenCode serve</td><td class="alt" data-l="Ещё">ACP, облачные</td></tr>
+              <tr><td class="name"><span class="num mono">07</span>Agent definitions</td><td data-l="Роль">Инструкции, триггеры, контракт результата</td><td data-l="Примеры">Agent Skills + манифест в git</td><td class="alt" data-l="Ещё">—</td></tr>
+              <tr><td class="name"><span class="num mono">08</span>LLM gateway</td><td data-l="Роль">Модели вне агентов</td><td data-l="Примеры">Тонкий свой адаптер</td><td class="alt" data-l="Ещё">LiteLLM (образ), OpenRouter, локальные</td></tr>
+              <tr><td class="name"><span class="num mono">09</span>Capture</td><td data-l="Роль">Быстрый ввод</td><td data-l="Примеры">HTTP endpoint, мессенджер-бот, iOS Shortcut</td><td class="alt" data-l="Ещё">PWA</td></tr>
+              <tr><td class="name"><span class="num mono">10</span>Media processing</td><td data-l="Роль">Аудио и документы → текст</td><td data-l="Примеры">Whisper-семейство или облачный STT; Docling</td><td class="alt" data-l="Ещё">pyannote</td></tr>
+              <tr><td class="name"><span class="num mono">11</span>Meetings</td><td data-l="Роль">Записи встреч</td><td data-l="Примеры">Загрузка файла, нативные транскрипты</td><td class="alt" data-l="Ещё">Vexa</td></tr>
+              <tr><td class="name"><span class="num mono">12</span>Source connectors</td><td data-l="Роль">Slack, документы, трекеры</td><td data-l="Примеры">Готовые MCP + свои коннекторы с курсором</td><td class="alt" data-l="Ещё">—</td></tr>
+              <tr><td class="name"><span class="num mono">13</span>API surfaces</td><td data-l="Роль">Доступ клиентов</td><td data-l="Примеры">HTTP API + MCP-адаптер</td><td class="alt" data-l="Ещё">MCP Apps</td></tr>
+              <tr><td class="name"><span class="num mono">14</span>Decision Inbox UI</td><td data-l="Роль">Ревью предложений</td><td data-l="Примеры">Веб / PWA: Inbox, Explorer, Activity</td><td class="alt" data-l="Ещё">—</td></tr>
+              <tr><td class="name"><span class="num mono">15</span>Notify / ask</td><td data-l="Роль">Вопросы и дайджесты</td><td data-l="Примеры">Telegram, ntfy, Slack</td><td class="alt" data-l="Ещё">email, Apprise</td></tr>
+              <tr><td class="name"><span class="num mono">16</span>Attention</td><td data-l="Роль">Беспокоить сейчас или в дайджест</td><td data-l="Примеры">Правила + профиль + классификатор</td><td class="alt" data-l="Ещё">—</td></tr>
+              <tr><td class="name"><span class="num mono">17</span>Identity &amp; policy</td><td data-l="Роль">Вход, права токенов, политики</td><td data-l="Примеры">Встроенный OAuth-сервер, вход через Google, Apple, Microsoft, корп. SSO</td><td class="alt" data-l="Ещё">OPA, Cedar</td></tr>
+              <tr><td class="name"><span class="num mono">18</span>Kernel</td><td data-l="Роль">Манифесты, реестр, конфиг, миграции</td><td data-l="Примеры">Свой код</td><td class="alt" data-l="Ещё">—</td></tr>
+              <tr><td class="name"><span class="num mono">19</span>Deploy</td><td data-l="Роль">Установка, апгрейд</td><td data-l="Примеры">frood.yaml → Docker Compose</td><td class="alt" data-l="Ещё">Helm, OpenTofu</td></tr>
+              <tr><td class="name"><span class="num mono">20</span>Backup / export</td><td data-l="Роль">Сохранность</td><td data-l="Примеры">Бэкап в 2 независимых хранилища + экспорт в git</td><td class="alt" data-l="Ещё">PITR</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="a-flows">
+        <div class="sh"><h2>Сквозные потоки</h2><p class="sub">Жёлтым отмечен шаг, где участвует человек.</p></div>
+        <div class="flows">
+          <div class="flow"><h3><span class="k">A</span>Быстрый ввод голосом</h3><div class="steps"><span class="chip">Голосовое</span><span class="ar">→</span><span class="chip">Распознавание</span><span class="ar">→</span><span class="chip">Observation</span><span class="ar">→</span><span class="chip">Proposal</span><span class="ar">→</span><span class="chip k">Политика: свой факт без конфликта</span><span class="ar">→</span><span class="chip">Assertion</span></div><p class="note">При конфликте авто-принятия нет: вопрос уходит вам.</p></div>
+          <div class="flow"><h3><span class="k">B</span>Ночной проход</h3><div class="steps"><span class="chip">Расписание</span><span class="ar">→</span><span class="chip">Checkpoint источника</span><span class="ar">→</span><span class="chip">Дельта</span><span class="ar">→</span><span class="chip">Агент</span><span class="ar">→</span><span class="chip">Proposals</span><span class="ar">→</span><span class="chip k">Attention</span><span class="ar">→</span><span class="chip you">Вердикт</span></div></div>
+          <div class="flow"><h3><span class="k">C</span>Доступ из любого клиента</h3><div class="steps"><span class="chip">AI-чат или приложение</span><span class="ar">→</span><span class="chip">HTTP API или MCP</span><span class="ar">→</span><span class="chip">поиск, сводка</span><span class="ar">→</span><span class="chip k">propose, не approve</span></div></div>
+          <div class="flow"><h3><span class="k">D</span>Завершение проекта</h3><div class="steps"><span class="chip">PR смержен</span><span class="ar">→</span><span class="chip">Агент переоценки</span><span class="ar">→</span><span class="chip">Proposals поштучно</span><span class="ar">→</span><span class="chip you">Inbox</span></div></div>
+          <div class="flow"><h3><span class="k">E</span>Перепроверка</h3><div class="steps"><span class="chip">review_after</span><span class="ar">→</span><span class="chip">Агент проверяет</span><span class="ar">→</span><span class="chip">Proposal: оставить или устарело</span><span class="ar">→</span><span class="chip you">Inbox</span></div></div>
+        </div>
+      </section>
+
+      <section id="a-decisions">
+        <div class="sh"><h2>Решения</h2></div>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>ID</th><th>Решение</th><th>Статус</th></tr></thead>
+            <tbody>
+              <tr><td class="k">D1′</td><td>Свой Ledger поверх любого хранилища по контракту; memory-движки и графы — проекции</td><td><span class="st act">принято</span></td></tr>
+              <tr><td class="k">D2</td><td>Все записи агентов — Proposals; authority отдельно от verdict</td><td><span class="st act">принято</span></td></tr>
+              <tr><td class="k">D3</td><td>HTTP API основной, MCP — адаптер</td><td><span class="st act">принято</span></td></tr>
+              <tr><td class="k">D4</td><td>Источники через готовые MCP + свои коннекторы с курсором</td><td><span class="st act">принято</span></td></tr>
+              <tr><td class="k">D5</td><td>Определение агента отдельно от рантайма</td><td><span class="st act">принято</span></td></tr>
+              <tr><td class="k">D6′</td><td>Очередь + расписание + триггеры, без тяжёлого движка и брокера</td><td><span class="st act">принято</span></td></tr>
+              <tr><td class="k">D7′</td><td>Git-реестр модулей, установка через frood.yaml</td><td><span class="st act">принято</span></td></tr>
+              <tr><td class="k">D8</td><td>frood.yaml → Compose; личная и рабочая — отдельные инсталляции</td><td><span class="st act">принято</span></td></tr>
+              <tr><td class="k">D9″</td><td>Несколько пользователей без пространств и ролей; видимость делится инсталляциями</td><td><span class="st act">принято</span></td></tr>
+              <tr><td class="k">D10</td><td>Ядро на Rust, модули на любом языке через протоколы</td><td><span class="st act">принято</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="a-next">
+        <div class="sh"><h2>Границы v1 и фазы</h2></div>
+        <div class="twocol">
+          <div>
+            <h3>Не делаем в v1</h3>
+            <ul>
+              <li>Пространства и роли внутри инсталляции</li>
+              <li>Загрузку стороннего кода в работающий процесс</li>
+              <li>Брокер сообщений, Kubernetes</li>
+              <li>Собственный чат</li>
+              <li>Внешние действия ассистента: только ищет, предлагает, спрашивает</li>
+            </ul>
+          </div>
+          <div>
+            <h3>Фазы детализации</h3>
+            <ol class="phases">
+              <li>Модель знаний — принята</li>
+              <li>HTTP API, MCP и вход — приняты</li>
+              <li>Фоновые задачи и агенты — приняты</li>
+              <li>Ввод и источники — приняты</li>
+              <li>Inbox, уведомления, внимание — приняты</li>
+              <li>Ядро, реестр, деплой, бэкапы, версии — приняты</li>
+              <li class="cur">План реализации MVP — на ревью</li>
+            </ol>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ================= REF ================= -->
+    <div class="panel" id="ref" role="tabpanel" aria-labelledby="t-ref">
+      <section id="r-history">
+        <div class="sh"><span class="tag ref">справка</span><h2>История ревью</h2></div>
+        <div class="scroll"><table>
+          <thead><tr><th>Раунд</th><th>Что ревьюили</th><th>Итог</th></tr></thead>
+          <tbody>
+            <tr><td class="k">1</td><td>Архитектура v0.1: D1–D9, Q1–Q7</td><td>Апрув с правками: без технологий на верхнем уровне, объяснить фоновые задачи, git-реестр, многопользовательскость, Rust</td></tr>
+            <tr><td class="k">2</td><td>Подтверждения D1′, D6′, D7′, D9′, D10; модель знаний M1–M10, P1–P5</td><td>Подтверждения приняты; модель — апрув с правками: без пространств и ролей</td></tr>
+            <tr><td class="k">3</td><td>D9″, M11; API, MCP и вход A1–A8, QA1–QA4</td><td>Подтверждения приняты; фаза 2 — апрув. Вход только через внешних провайдеров; вопросы про REST и вебсокеты</td></tr>
+            <tr><td class="k">4</td><td>A2′, A6 после пояснений; фоновые задачи и агенты W1–W8, QW1–QW4</td><td>Фаза 2 закрыта. Фаза 3 — переделать: триггер это событие, всё в конфиге, интерактивные запуски, место запуска у реализации, подписки</td></tr>
+            <tr><td class="k">5</td><td>Фаза 3 v0.2: W1′–W7′, W9, QS1–QS2</td><td>Апрув; W2 — режимы как возможности модулей; подписки в v1; первыми контейнеры на VPS</td></tr>
+            <tr><td class="k">6</td><td>W2″; ввод и источники I1–I9, QI1–QI2</td><td>W2″ принят; фаза 4 — апрув с правкой: расширяемые виды источников</td></tr>
+            <tr><td class="k">7</td><td>I4′; Inbox, уведомления, внимание N1–N9, QN1–QN2</td><td>Апрув; кнопки ставят вердикт; веб — как админ-панель с отладкой и логами</td></tr>
+            <tr><td class="k">8</td><td>N9′; платформа K1–K9, QK1–QK2</td><td>Апрув с правками: сторонние реестры сразу; лицензия — нужен выбор</td></tr>
+            <tr><td class="k">9</td><td>Лицензия L1; план MVP P1–P6, QP1</td><td><span class="st wait">идёт</span></td></tr>
+          </tbody>
+        </table></div>
+        <p class="caption">Все отметки хранятся в странице и продублированы в docs/README.md.</p>
+      </section>
+      <section id="r-gotchas">
+        <div class="sh"><span class="tag ref">справка</span><h2>Ловушки</h2><p class="sub">Факты внешнего мира, которые меняют дизайн.</p></div>
+        <div class="legend"><span><i style="background:var(--red)"></i>меняет архитектуру</span><span><i style="background:var(--amber)"></i>меняет реализацию</span><span><i style="background:var(--rule-strong)"></i>учесть</span></div>
+        <div class="gl">
+          <div class="g hi"><span class="id">G1</span><p class="fact"><b>ChatGPT:</b> свой MCP подключается только в вебе; на Pro только чтение; запись на Business / Enterprise / Edu. В Enterprise права на коннекторы задаёт админ (RBAC).</p><p class="imp">Ввод не должен зависеть от AI-клиента. Проектируем под любой набор клиентов у пользователя.</p></div>
+          <div class="g mid"><span class="id">G2</span><p class="fact"><b>Claude:</b> свои коннекторы на Free и Pro, добавляются в вебе, работают и с телефона.</p><p class="imp">Хороший мобильный клиент с записью через MCP.</p></div>
+          <div class="g hi"><span class="id">G3</span><p class="fact"><b>MCP 2026-07-28:</b> без сессий, DCR устарел в пользу CIMD, долгие задачи — в расширении, MRTR вместо запросов от сервера.</p><p class="imp">MCP-адаптер без сессий; вход поддерживает CIMD и DCR.</p></div>
+          <div class="g mid"><span class="id">G4</span><p class="fact">ChatGPT замораживает список инструментов до ручного обновления.</p><p class="imp">Схемы инструментов меняем только добавлением.</p></div>
+          <div class="g mid"><span class="id">G5</span><p class="fact"><b>MCP Apps:</b> ChatGPT пока не умеет вызывать инструменты из UI-карточки (по сторонним данным).</p><p class="imp">Карточки в чате — бонус, решение через обычный вызов.</p></div>
+          <div class="g hi"><span class="id">G6</span><p class="fact">Облачные AI-клиенты не ходят в приватную сеть.</p><p class="imp">Публичный HTTPS для API, MCP и OAuth; админка за VPN.</p></div>
+          <div class="g hi"><span class="id">G7</span><p class="fact"><b>Slack:</b> распространяемые вне Marketplace приложения — 1 запрос в минуту на историю канала.</p><p class="imp">Каждый создаёт своё internal app по инструкции или использует официальный Slack MCP.</p></div>
+          <div class="g mid"><span class="id">G8</span><p class="fact"><b>LiteLLM</b> скомпрометирован на PyPI 24 марта 2026.</p><p class="imp">Фиксированные версии и хэши, образы, минимум зависимостей; реестр модулей с хэшами (D7′).</p></div>
+          <div class="g"><span class="id">G9</span><p class="fact">UI у DBOS проприетарный.</p><p class="imp">После D6′ неактуально: тяжёлый движок не нужен.</p></div>
+          <div class="g mid"><span class="id">G10</span><p class="fact">Graphiti сам правит граф через LLM; поведение add_triplet при противоречии не документировано.</p><p class="imp">Графовые движки — только проекции одобренного.</p></div>
+          <div class="g"><span class="id">G11</span><p class="fact">Бенчмарки памяти насыщены и спорны.</p><p class="imp">Выбираем по своим сценариям.</p></div>
+          <div class="g"><span class="id">G12</span><p class="fact">Claude Managed Agents хранит сессии у Anthropic, ZDR не действует.</p><p class="imp">Для вашей рабочей инсталляции не блокер (Q5); строгие политики поддерживаем для других.</p></div>
+          <div class="g"><span class="id">G13</span><p class="fact">Self-host на VPS не прячет данные от провайдера; внешние LLM видят отправленное.</p><p class="imp">Правило «какие данные в какие модели» — часть конфига.</p></div>
+        </div>
+      </section>
+
+      <section id="r-rec">
+        <div class="sh"><span class="tag ref">справка</span><h2>Сверка с 02_findings_and_proposals</h2><p class="sub">02 попал в контекст сразу вместе с 01 через @-упоминание, поэтому полностью «не видеть» его до ресерча не получилось. Компоненты я ресерчил сам.</p></div>
+        <div class="rec">
+          <div class="rbox same"><span class="lbl">совпало</span><h3>Пришли к тому же</h3><ul><li>Своё ядро, memory-движки как проекции</li><li>Observation → Proposal → вердикт → Assertion</li><li>Две оси времени, supersede вместо удаления</li><li>Без Kafka и k8s</li><li>Capability-контракты, ядро без LLM</li><li>Отдельные личная и рабочая инсталляции</li><li>Агент отдельно от рантайма; checkpoint вместо «за вчера»</li></ul></div>
+          <div class="rbox took"><span class="lbl">взято из 02</span><h3>Добавил в дизайн</h3><ul><li>Attention-модель → модуль 16</li><li>Статус достоверности → поле modality</li><li>Bundles → git-реестр (D7′)</li><li>Три триггера переоценки → потоки B, D, E</li><li>Детали бэкапов → фаза 6</li><li>Сквозной тест как критерий приёмки</li><li>CloudEvents → конверт журнала</li></ul></div>
+          <div class="rbox new"><span class="lbl">новое</span><h3>Из моего ресерча</h3><ul><li>Ограничения ChatGPT, спека MCP 2026-07-28</li><li>MCP Apps, Agent Skills, ACP, OpenCode serve</li><li>Готовые MCP источников, лимит Slack</li><li>Durable execution на Postgres, Doltgres, Vexa, ntfy</li><li>Инцидент LiteLLM</li><li>OpenClaw и Hermes как клиенты</li><li>Модель утверждений Wikidata</li></ul></div>
+        </div>
+      </section>
+
+      <section id="r-landscape">
+        <div class="sh"><span class="tag ref">справка</span><h2>Ландшафт готовых компонентов</h2><p class="sub"><span class="ok">✓</span> подтверждено первичным источником, <span class="unk">?</span> только вторичные, перепроверить в фазе компонента.</p></div>
+        <div>
+          <details class="area"><summary><b>Хранилище под Ledger</b><span class="tw">›</span><span class="gist">Любая транзакционная СУБД; Doltgres как эксперимент «proposal = ветка»</span></summary><div class="adet"><ul>
+            <li><b>SQL-СУБД с транзакциями</b> (Postgres, SQLite, MySQL): всё из контракта есть. В PG 18 есть темпоральные ограничения WITHOUT OVERLAPS<span class="unk">?</span>.</li>
+            <li><b>Doltgres:</b> Postgres-совместимая СУБД с branch / merge / diff. 1.0 вышел 6 августа 2026<span class="ok">✓</span>; примерно в 2.7 раза медленнее Postgres<span class="unk">?</span>.</li>
+            <li><b>XTDB v2</b> — двухвременная SQL-база, референс. <b>Wikidata</b> — референс модели утверждений.</li>
+          </ul><p class="src"><a href="https://dolthub.com/blog/2026-08-06-doltgres-1-0/">Doltgres 1.0</a></p></div></details>
+
+          <details class="area"><summary><b>Memory-движки</b><span class="tw">›</span><span class="gist">Кандидаты в проекции: Graphiti, Cognee, Hindsight</span></summary><div class="adet"><ul>
+            <li><b>Graphiti:</b> MCP Server 1.0, FalkorDB по умолчанию, Streamable HTTP<span class="ok">✓</span>; add_triplet с дедупликацией<span class="ok">✓</span>, поведение при противоречиях не описано<span class="unk">?</span>.</li>
+            <li><b>Mem0:</b> быстрая память с MCP, плохо подходит под жизненный цикл; бенчмарки спорны<span class="unk">?</span>.</li>
+            <li><b>Cognee</b> (open core), <b>Letta</b> (уровни памяти, фоновые агенты), <b>Hindsight</b> (MIT), <b>Basic Memory</b> (Markdown + MCP).</li>
+          </ul><p class="src"><a href="https://blog.getzep.com/graphiti-hits-20k-stars-mcp-server-1-0/">Graphiti MCP 1.0</a> · <a href="https://help.getzep.com/graphiti/working-with-data/adding-fact-triples">fact triples</a> · <a href="https://hindsight.vectorize.io/blog/2026/08/11/open-source-agent-memory-systems">обзор 2026</a></p></div></details>
+
+          <details class="area"><summary><b>Фоновые задачи</b><span class="tw">›</span><span class="gist">После D6′ хватает очереди с cron; движки durable execution — запасной вариант</span></summary><div class="adet"><ul>
+            <li><b>apalis</b> (Rust): Postgres / MySQL / SQLite, персистентный cron, 1.0-rc.4<span class="ok">✓</span>.</li>
+            <li><b>DBOS:</b> библиотека, чекпоинты в Postgres, cron с догоном, ожидание событий с таймаутом<span class="ok">✓</span>; UI проприетарный<span class="ok">✓</span>; SDK Python / TS / Java.</li>
+            <li><b>Hatchet:</b> MIT, отдельный сервис с UI, v0.100.2<span class="ok">✓</span>. <b>Absurd:</b> один SQL-файл<span class="ok">✓</span>. <b>Restate:</b> Rust SDK, лицензия сервера BUSL<span class="unk">?</span>. <b>Temporal</b> тяжёл для VPS.</li>
+          </ul><p class="src"><a href="https://lib.rs/crates/apalis">apalis</a> · <a href="https://docs.dbos.dev/why-dbos">DBOS</a> · <a href="https://docs.dbos.dev/production/hosting-conductor">Conductor</a> · <a href="https://pkg.go.dev/github.com/hatchet-dev/hatchet@v0.100.2">Hatchet</a></p></div></details>
+
+          <details class="area"><summary><b>Агенты: рантаймы и определения</b><span class="tw">›</span><span class="gist">SDK, OpenCode serve, ACP, Claude Managed Agents; Agent Skills</span></summary><div class="adet"><ul>
+            <li><b>Claude Agent SDK</b> (Python / TS), <b>Codex</b> (CLI на Rust, SDK на TS).</li>
+            <li><b>OpenCode serve:</b> HTTP-сервер с OpenAPI 3.1, SSE, SDK JS / Go<span class="ok">✓</span>, разные модели<span class="unk">?</span>.</li>
+            <li><b>ACP:</b> Gemini CLI нативно, Claude Code и Codex через адаптеры<span class="unk">?</span>.</li>
+            <li><b>Claude Managed Agents:</b> облачный API в beta, свой сэндбокс возможен<span class="ok">✓</span>, ZDR не действует<span class="ok">✓</span>.</li>
+            <li><b>Agent Skills</b> (SKILL.md): открытый стандарт, 30–40+ инструментов<span class="unk">?</span>.</li>
+          </ul><p class="src"><a href="https://opencode.ai/docs/de/server">OpenCode server</a> · <a href="https://zed.dev/docs/ai/external-agents">Zed external agents</a> · <a href="https://platform.claude.com/docs/en/managed-agents/overview">Managed Agents</a> · <a href="https://www.cursor.com/docs/context/skills">Agent Skills</a></p></div></details>
+
+          <details class="area"><summary><b>Rust для ядра</b><span class="tw">›</span><span class="gist">rmcp 3.x, axum, sqlx, apalis; ML-модули отдельно на Python</span></summary><div class="adet"><ul>
+            <li><b>rmcp</b> — официальный Rust SDK для MCP, линейка 3.x (до 3.5.1): feature auth, Streamable HTTP, спека 2026-07-28<span class="ok">✓</span>.</li>
+            <li><b>axum, sqlx</b> — зрелые библиотеки для API и БД.</li>
+            <li><b>apalis</b> — очередь и cron (см. фоновые задачи).</li>
+            <li>STT, парсинг документов, Graphiti — нет Rust-аналогов, отдельные процессы.</li>
+          </ul><p class="src"><a href="https://docs.rs/crate/rmcp/3.1.0/source/README.md">rmcp 3.1.0</a> · <a href="https://docs.rs/crate/rmcp/3.5.1">rmcp 3.5.1</a></p></div></details>
+
+          <details class="area"><summary><b>MCP-клиенты, спека, вход</b><span class="tw">›</span><span class="gist">ChatGPT только веб; Claude везде; спека без сессий; OAuth с CIMD</span></summary><div class="adet"><ul>
+            <li><b>ChatGPT:</b> подключение только в вебе<span class="ok">✓</span>; Pro — чтение<span class="ok">✓</span>; Business / Enterprise / Edu — запись<span class="ok">✓</span>; публичный HTTPS или Secure MCP Tunnel<span class="ok">✓</span>.</li>
+            <li><b>Claude:</b> Free (1) / Pro / Max / Team / Enterprise<span class="ok">✓</span>; с телефона работают добавленные в вебе<span class="unk">?</span>.</li>
+            <li><b>MCP Apps</b> с 26 января 2026: Claude, ChatGPT, Goose, VS Code<span class="ok">✓</span>.</li>
+            <li><b>Спека 2026-07-28:</b> без сессий, server/discover, Tasks как расширение, MRTR, DCR устарел<span class="ok">✓</span>.</li>
+            <li><b>Вход:</b> FastMCP OAuthProxy с CIMD<span class="unk">?</span>; Keycloak — экспериментальный CIMD<span class="unk">?</span>.</li>
+          </ul><p class="src"><a href="https://help.openai.com/en/articles/12584461-developer-mode-and-full-mcp-connectors-in-chatgpt-beta">OpenAI</a> · <a href="https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp">Claude</a> · <a href="https://modelcontextprotocol.io/specification/2026-07-28/changelog">MCP changelog</a> · <a href="https://blog.modelcontextprotocol.io/posts/2026-01-26-mcp-apps/">MCP Apps</a></p></div></details>
+
+          <details class="area"><summary><b>Источники</b><span class="tw">›</span><span class="gist">Официальный Slack MCP, Glean, YouTrack, Notion; лимиты Slack</span></summary><div class="adet"><ul>
+            <li><b>Slack MCP</b> (mcp.slack.com): поиск, история, треды; подключение одобряет админ<span class="unk">?</span>.</li>
+            <li><b>Slack API:</b> internal-приложения с прежними лимитами; распространяемые вне Marketplace — 1 запрос / мин<span class="ok">✓</span>.</li>
+            <li><b>Glean</b> разрешён в вашей рабочей инсталляции (Q5) — закрывает много источников.</li>
+          </ul><p class="src"><a href="https://docs.slack.dev/ai/slack-mcp-server/">Slack MCP</a> · <a href="https://docs.slack.dev/changelog/2025/05/29/rate-limit-changes-for-non-marketplace-apps">лимиты Slack</a></p></div></details>
+
+          <details class="area"><summary><b>Голос и встречи</b><span class="tw">›</span><span class="gist">Смешанная речь RU/EN → Whisper-семейство или облачный STT</span></summary><div class="adet"><ul>
+            <li><b>Whisper large-v3 / turbo:</b> 99+ языков; лучший кандидат для смешанной речи (Q2).</li>
+            <li><b>Parakeet v3:</b> быстрый, 25 европейских языков, русский и смешанная речь под вопросом<span class="unk">?</span>.</li>
+            <li><b>Облачные:</b> OpenAI, Deepgram, AssemblyAI, ElevenLabs. Диаризация в self-host — отдельный шаг.</li>
+            <li><b>Vexa</b> (Apache 2.0): бот для Meet / Teams / Zoom, транскрипт со спикерами, MCP<span class="ok">✓</span>.</li>
+          </ul><p class="src"><a href="https://northflank.com/blog/best-open-source-speech-to-text-stt-model-in-2026-benchmarks">STT 2026</a> · <a href="https://github.com/Vexa-ai/vexa">Vexa</a></p></div></details>
+
+          <details class="area"><summary><b>Уведомления, LLM gateway, деплой, бэкапы</b><span class="tw">›</span><span class="gist">ntfy-кнопки, свой адаптер к LLM, Compose, два независимых хранилища бэкапов</span></summary><div class="adet"><ul>
+            <li><b>ntfy:</b> до 3 кнопок, http-кнопка может вызвать «принять»<span class="ok">✓</span>; iOS не проверял<span class="unk">?</span>. <b>Telegram</b>, <b>Slack</b>, <b>Apprise</b>.</li>
+            <li><b>LiteLLM:</b> версии 1.82.7 / 1.82.8 на PyPI были вредоносными, Docker-образ не пострадал<span class="ok">✓</span>.</li>
+            <li><b>Деплой:</b> Compose, Caddy, Tailscale; позже Helm, OpenTofu.</li>
+            <li><b>Бэкапы:</b> restic или Kopia в два независимых S3 + экспорт в git; детали в 02, раздел 11.</li>
+          </ul><p class="src"><a href="https://docs.ntfy.sh/publish/">ntfy</a> · <a href="https://bleepingcomputer.com/news/security/popular-litellm-pypi-package-compromised-in-teampcp-supply-chain-attack">LiteLLM</a></p></div></details>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<div class="bar" role="region" aria-label="Итог ревью">
+  <div class="bar-in">
+    <div class="tally"><span>Решения <b id="n-model">0</b>/6</span><span>Вопросы <b id="n-q">0</b>/2</span><span>Вердикт <b id="n-all">—</b></span></div>
+    <div class="status" id="status" aria-live="polite">Подключаюсь к хранилищу страницы…</div>
+    <button class="btn" id="copy" type="button">Скопировать ответ</button>
+  </div>
+  <textarea id="out" hidden readonly aria-label="Текст ответа для копирования"></textarea>
+</div>
+
+<script>
+(function(){
+  /* ---------- tabs ---------- */
+  var TABS = ["now","mvp","platform","notify","ingest","work","api","model","arch","ref"];
+  var panels = {}, tabs = {};
+  TABS.forEach(function(t){ panels[t] = document.getElementById(t); tabs[t] = document.querySelector('[data-tab="' + t + '"]'); });
+  function buildRail(t){
+    var list = document.getElementById("rail-list"); list.textContent = "";
+    panels[t].querySelectorAll(":scope > section").forEach(function(s){
+      var h = s.querySelector("h2"); if (!h || !s.id) return;
+      var li = document.createElement("li"), a = document.createElement("a");
+      a.href = "#" + s.id; a.textContent = h.textContent; li.appendChild(a); list.appendChild(li);
+    });
+  }
+  function show(t, scrollTo){
+    TABS.forEach(function(x){ panels[x].hidden = x !== t; tabs[x].setAttribute("aria-selected", String(x === t)); tabs[x].tabIndex = x === t ? 0 : -1; });
+    buildRail(t);
+    if (scrollTo) { scrollTo.scrollIntoView({block:"start"}); } else { window.scrollTo(0, 0); }
+  }
+  function route(hash){
+    var id = (hash || "").replace(/^#/, "");
+    if (TABS.indexOf(id) >= 0) { show(id); return; }
+    var el = id && document.getElementById(id);
+    if (el) { var p = el.closest(".panel"); if (p) { show(p.id, el); return; } }
+    show("now");
+  }
+  TABS.forEach(function(t){
+    tabs[t].addEventListener("click", function(){ try { history.replaceState(null, "", "#" + t); } catch(e){} show(t); });
+    tabs[t].addEventListener("keydown", function(e){
+      var i = TABS.indexOf(t);
+      if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+        var n = TABS[(i + (e.key === "ArrowRight" ? 1 : TABS.length - 1)) % TABS.length];
+        tabs[n].focus(); tabs[n].click(); e.preventDefault();
+      }
+    });
+  });
+  document.addEventListener("click", function(e){
+    var a = e.target.closest && e.target.closest('a[href^="#"]');
+    if (!a) return;
+    var id = a.getAttribute("href").slice(1), el = document.getElementById(id);
+    if (!el) return;
+    e.preventDefault();
+    try { history.replaceState(null, "", "#" + id); } catch(err){}
+    var p = el.closest(".panel");
+    if (p && p.hidden) show(p.id, el); else el.scrollIntoView({block:"start"});
+  });
+  window.addEventListener("hashchange", function(){ route(location.hash); });
+  route(location.hash);
+
+  /* ---------- review items ---------- */
+  var VERDICTS = {
+    decision: [["ok","Принять"],["discuss","Обсудить"],["no","Против"]],
+    overall: [["approve","Апрув"],["approve_changes","С правками"],["redo","Переделать"]]
+  };
+  var LABEL = {ok:"принять",discuss:"обсудить",no:"против",approve:"апрув",approve_changes:"апрув с правками",redo:"переделать"};
+  var LKEY = "frood-review-v9";
+  var items = Array.prototype.slice.call(document.querySelectorAll("[data-id]"));
+  var ids = {}; items.forEach(function(el){ ids[el.dataset.id] = true; });
+  var state = {}, db = null, canWrite = true;
+  var timers = {}, inflight = {}, dirty = {}, pending = {};
+
+  function loadLocal(){ try { return JSON.parse(localStorage.getItem(LKEY) || "{}") || {}; } catch(e){ return {}; } }
+  function saveLocal(){ try { localStorage.setItem(LKEY, JSON.stringify(state)); } catch(e){} }
+  state = loadLocal();
+
+  function setStatus(kind, extra){
+    var el = document.getElementById("status");
+    el.classList.toggle("err", kind === "error" || kind === "readonly");
+    el.textContent = {
+      connecting: "Подключаюсь к хранилищу страницы…",
+      synced: "Ответы сохраняются в странице. Напишите в чат «готово», и я их прочитаю.",
+      saving: "Сохраняю…",
+      local: "Хранилище страницы недоступно: ответы живут только в этом браузере. Нажмите «Скопировать ответ» и вставьте в чат.",
+      readonly: "У вас нет прав на запись в эту страницу. Скопируйте ответ и вставьте в чат.",
+      error: "Не удалось сохранить" + (extra ? " (" + extra + ")" : "") + ". Скопируйте ответ вручную."
+    }[kind];
+  }
+
+  function build(){
+    items.forEach(function(el){
+      var id = el.dataset.id, kind = el.dataset.kind, ctl = el.querySelector(".ctl");
+      if (VERDICTS[kind]) {
+        var seg = document.createElement("div");
+        seg.className = "seg"; seg.setAttribute("role","group"); seg.setAttribute("aria-label","Вердикт: " + el.dataset.label);
+        VERDICTS[kind].forEach(function(v){
+          var b = document.createElement("button");
+          b.type = "button"; b.dataset.v = v[0]; b.textContent = v[1]; b.setAttribute("aria-pressed","false");
+          b.addEventListener("click", function(){
+            var cur = state[id] || {};
+            state[id] = {verdict: cur.verdict === v[0] ? null : v[0], comment: cur.comment || ""};
+            render(); queueWrite(id, 0);
+          });
+          seg.appendChild(b);
+        });
+        ctl.appendChild(seg);
+      }
+      var ta = document.createElement("textarea");
+      ta.id = "c-" + id; ta.rows = kind === "question" ? 2 : 1;
+      ta.placeholder = kind === "question" ? "Ваш ответ" : (kind === "overall" ? "Что поправить или учесть дальше" : "Комментарий, если нужен");
+      ta.setAttribute("aria-label", el.dataset.label + ": " + ta.placeholder);
+      ta.addEventListener("input", function(){
+        var cur = state[id] || {};
+        state[id] = {verdict: cur.verdict || null, comment: ta.value};
+        tally(); saveLocal(); queueWrite(id, 700);
+      });
+      ctl.appendChild(ta);
+    });
+  }
+
+  function render(){
+    items.forEach(function(el){
+      var id = el.dataset.id, s = state[id] || {};
+      el.querySelectorAll(".seg button").forEach(function(b){ b.setAttribute("aria-pressed", String(s.verdict === b.dataset.v)); });
+      var ta = document.getElementById("c-" + id);
+      if (ta && document.activeElement !== ta && ta.value !== (s.comment || "")) ta.value = s.comment || "";
+    });
+    tally(); saveLocal();
+  }
+
+  function tally(){
+    var a = 0, m = 0, q = 0;
+    items.forEach(function(el){
+      var id = el.dataset.id, s = state[id] || {};
+      if (el.dataset.kind === "decision" && s.verdict) { if (id.indexOf("mvp01_") === 0) m++; else a++; }
+      if (el.dataset.kind === "question" && (s.comment || "").trim()) q++;
+    });
+    var na = document.getElementById("n-arch"); if (na) na.textContent = a;
+    document.getElementById("n-model").textContent = m;
+    document.getElementById("n-q").textContent = q;
+    var o = state.mvp01_overall || {};
+    document.getElementById("n-all").textContent = o.verdict ? LABEL[o.verdict] : "—";
+  }
+
+  function queueWrite(id, delay){
+    if (!db || !canWrite) return;
+    pending[id] = true;
+    clearTimeout(timers[id]);
+    timers[id] = setTimeout(function(){ flush(id); }, delay);
+  }
+  function flush(id){
+    if (inflight[id]) { dirty[id] = true; return; }
+    inflight[id] = true; setStatus("saving");
+    var s = state[id] || {}, el = document.querySelector('[data-id="' + id + '"]');
+    db.doc("review/" + id).set({
+      item: id, label: el ? el.dataset.label : id, kind: el ? el.dataset.kind : "",
+      verdict: s.verdict || null, comment: s.comment || "", updatedAt: new Date().toISOString()
+    }).then(function(){ setStatus("synced"); }, function(e){
+      var code = e && e.code;
+      if (code === "invalid_argument") { canWrite = false; setStatus("readonly"); } else setStatus("error", code);
+    }).then(function(){
+      inflight[id] = false;
+      if (dirty[id]) { dirty[id] = false; flush(id); } else pending[id] = false;
+    });
+  }
+
+  function compose(){
+    var lines = ["Ревью Frood, раунд 9: лицензия и план MVP"];
+    var o = state.mvp01_overall || {};
+    lines.push("Общее по плану MVP: " + (o.verdict ? LABEL[o.verdict] : "без вердикта") + (o.comment ? ". " + o.comment.trim() : ""));
+    items.forEach(function(el){
+      var k = el.dataset.kind, s = state[el.dataset.id] || {}, c = (s.comment || "").trim();
+      if (k === "decision") lines.push(el.dataset.label + ": " + (s.verdict ? LABEL[s.verdict] : "без отметки") + (c ? ". " + c : ""));
+      if (k === "question" && c) lines.push(el.dataset.label + ": " + c);
+    });
+    return lines.join("\n");
+  }
+
+  document.getElementById("copy").addEventListener("click", function(){
+    var text = compose(), out = document.getElementById("out"), btn = this;
+    function fallback(){ out.hidden = false; out.value = text; out.focus(); out.select(); btn.textContent = "Выделено, скопируйте вручную"; }
+    try {
+      navigator.clipboard.writeText(text).then(function(){ out.hidden = true; btn.textContent = "Скопировано"; setTimeout(function(){ btn.textContent = "Скопировать ответ"; }, 2000); }, fallback);
+    } catch(e){ fallback(); }
+  });
+
+  build(); render();
+
+  (async function(){
+    if (!window.claude || typeof window.claude.use !== "function") { setStatus("local"); return; }
+    try { db = await window.claude.use("db"); } catch(e){ db = null; }
+    if (!db) { setStatus("local"); return; }
+    setStatus("synced");
+    var first = true;
+    db.collection("review").onSnapshot(function(snap){
+      var changed = false, seen = {};
+      snap.docs.forEach(function(d){
+        var v = d.data(); if (!v || !ids[d.id]) return;
+        seen[d.id] = true;
+        if (pending[d.id]) return;
+        var cur = state[d.id] || {};
+        if ((cur.verdict || null) !== (v.verdict || null) || (cur.comment || "") !== (v.comment || "")) {
+          state[d.id] = {verdict: v.verdict || null, comment: v.comment || ""}; changed = true;
+        }
+      });
+      if (first && !snap.metadata.fromCache) {
+        first = false;
+        Object.keys(state).forEach(function(id){
+          var s = state[id] || {};
+          if (ids[id] && !seen[id] && (s.verdict || (s.comment || "").trim())) queueWrite(id, 0);
+        });
+      }
+      if (changed) render();
+    }, function(e){ setStatus("error", e && e.code); });
+  })();
+})();
+</script>
