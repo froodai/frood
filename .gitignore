@@ -1,0 +1,10 @@
+# Rust build output
+/core/target/
+
+# Local installation state: secrets, rendered deploy files
+.frood/
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store

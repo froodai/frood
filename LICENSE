@@ -1,0 +1,13 @@
+Frood is distributed under two licenses, depending on the directory:
+
+  core/                      GNU Affero General Public License v3.0 only (AGPL-3.0-only)
+  contracts/, modules/,      Apache License 2.0 (Apache-2.0)
+  bundles/, deploy/
+
+SPDX identifiers are set in each Cargo.toml / package manifest.
+
+The full license texts:
+  core/LICENSE               GNU Affero General Public License v3.0
+  contracts/LICENSE          Apache License 2.0
+
+Copyright (C) 2026 Frood contributors.
