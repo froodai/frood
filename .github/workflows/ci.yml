@@ -45,7 +45,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        module: [stt-openai, telegram]
+        module: [stt-openai, telegram, runtime-docker]
     defaults:
       run:
         working-directory: modules/${{ matrix.module }}
@@ -60,3 +60,10 @@ jobs:
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo test --locked
       - run: docker build .
+      # The runtime against real Docker, with a fake agent: no model calls.
+      - if: matrix.module == 'runtime-docker'
+        run: |
+          docker build -t frood-agent-fake:test images/agent-fake
+          cargo test --locked -- --ignored
+          docker build images/agent-claude-code
+          docker build images/agent-codex

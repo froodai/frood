@@ -1,0 +1,30 @@
+name: runtime-docker
+version: 0.0.1
+description: Runs agents (Claude Code, Codex) for Frood jobs, one Docker container per turn, and resumes their sessions after people answer.
+license: Apache-2.0
+provides:
+  - agents.execute@1
+frood_api: []
+config:
+  type: object
+  properties:
+    agents:
+      type: object
+      description: "Agents offered, with their images, e.g. { claude-code: { image: ghcr.io/froodai/agent-claude-code:2.1.302 } }"
+      additionalProperties:
+        type: object
+        properties:
+          image: { type: string }
+        required: [image]
+    network: { type: string, description: "Docker network for agent containers; the deployment's by default" }
+    cpus: { type: number, description: "CPU limit of an agent container" }
+    memory_mb: { type: integer, description: "Memory limit of an agent container" }
+    builtin_tools: { type: string, description: "Claude Code built-in tools agents may use, e.g. Read,Grep; none by default" }
+  required: [agents]
+permissions:
+  # The host's Docker: root on that machine (A2).
+  host_docker: true
+  egress: [api.anthropic.com, api.openai.com]
+runtime:
+  form: container
+  health: /healthz

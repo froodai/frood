@@ -357,6 +357,10 @@ pub struct Module {
     /// Module settings, checked against the schema in its manifest.
     #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
     pub config: serde_json::Map<String, serde_json::Value>,
+    /// Give the module the host's Docker, as agent runtimes need. That is root on the host
+    /// (A2): only for modules you trust.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub host_docker: bool,
 }
 
 /// A job: what capability to call, on which events, with which inputs (docs/13 §3–4).
