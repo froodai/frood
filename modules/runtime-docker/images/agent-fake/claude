@@ -1,0 +1,24 @@
+#!/bin/sh
+prompt="$2"
+session=""; resume=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --session-id) session="$2"; shift ;;
+    --resume) resume="$2"; session="$2"; shift ;;
+  esac
+  shift
+done
+mkdir -p "$HOME/.claude"
+if [ -n "$resume" ] && [ ! -f "$HOME/.claude/$resume" ]; then
+  echo "No conversation found with session ID: $resume" >&2; exit 1
+fi
+echo "$prompt" >> "$HOME/.claude/$session"
+echo "key=${ANTHROPIC_API_KEY:-none} turns=$(wc -l < "$HOME/.claude/$session" | tr -d ' ')" > "$HOME/last-env"
+echo '{"type":"system","subtype":"init","session_id":"'"$session"'","model":"claude-haiku-5-5","mcp_servers":[{"name":"frood","status":"connected"}]}'
+case "$prompt" in
+  *crash*) echo "boom" >&2; exit 3 ;;
+  *ASK*) echo '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"mcp__frood__ask_user","input":{}}]}}'
+         echo '{"type":"result","subtype":"success","is_error":false,"result":"Asked.","total_cost_usd":0.01}' ;;
+  *) echo '{"type":"assistant","message":{"content":[{"type":"text","text":"Done: proposed 1 change"}]}}'
+     echo '{"type":"result","subtype":"success","is_error":false,"result":"Proposed 1 change","total_cost_usd":0.02}' ;;
+esac

@@ -50,6 +50,11 @@ pub async fn plan(paths: &Paths) -> anyhow::Result<()> {
             .filter(|s| secrets.get(s).is_none())
             .map(String::as_str)
             .collect();
+        if module.host_docker {
+            println!(
+                "module {name}: gets the host's Docker, which is root on this machine (host_docker: true)"
+            );
+        }
         if missing.is_empty() {
             println!("module {name}: {source}");
         } else {

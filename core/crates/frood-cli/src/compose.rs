@@ -101,6 +101,7 @@ pub fn render(
         ));
     }
 
+    let mut volumes = vec!["pgdata".to_owned()];
     for (name, module) in crate::modules::containers(loaded) {
         let source = match (&module.build, &module.image) {
             (Some(build), _) => {
@@ -121,6 +122,17 @@ pub fn render(
             service = frood_modhost::service_name(name),
             env = quote(&env.display().to_string()),
         ));
+        if module.host_docker {
+            // The host's Docker (root on the host, A2), a volume for the module's state, and
+            // the deployment's network for the containers it starts.
+            let data = format!("{}-data", frood_modhost::service_name(name));
+            out.push_str(&format!(
+                "    environment:\n      FROOD_DOCKER_NETWORK: {network}\n      FROOD_DATA: /data\n\
+                 \x20   volumes:\n      - /var/run/docker.sock:/var/run/docker.sock\n      - {data}:/data\n",
+                network = quote(&format!("{}_default", project_name(loaded))),
+            ));
+            volumes.push(data);
+        }
         if deploy.server == ServerPlacement::Host {
             out.push_str(&format!(
                 "    ports:\n      - \"127.0.0.1:{}:{}\"\n    extra_hosts:\n      - \"host.docker.internal:host-gateway\"\n",
@@ -130,7 +142,10 @@ pub fn render(
         }
     }
 
-    out.push_str("volumes:\n  pgdata:\n");
+    out.push_str("volumes:\n");
+    for volume in volumes {
+        out.push_str(&format!("  {volume}:\n"));
+    }
     out
 }
 
@@ -186,6 +201,19 @@ mod tests {
                 port: None,
                 secrets: vec!["OPENAI_API_KEY".into()],
                 config: Default::default(),
+                host_docker: false,
+            },
+        );
+        loaded.config.modules.insert(
+            "agents".into(),
+            frood_config::Module {
+                image: Some("ghcr.io/froodai/runtime-docker:0.0.1".into()),
+                build: None,
+                url: None,
+                port: None,
+                secrets: Vec::new(),
+                config: Default::default(),
+                host_docker: true,
             },
         );
         let out = render(
@@ -201,6 +229,22 @@ mod tests {
             !stt.contains("secrets.env"),
             "a module never gets the whole secrets file"
         );
+        assert!(
+            !stt.contains("docker.sock"),
+            "only modules given host_docker"
+        );
+        let agents = out
+            .split("  module-agents:")
+            .nth(1)
+            .unwrap()
+            .split("  module-stt:")
+            .next()
+            .unwrap();
+        assert!(agents.contains("/var/run/docker.sock:/var/run/docker.sock"));
+        assert!(agents.contains("FROOD_DOCKER_NETWORK: \"frood-personal_default\""));
+        assert!(out.ends_with("volumes:\n  pgdata:\n  module-agents-data:\n"));
+        let parsed: serde_yaml_ng::Value = serde_yaml_ng::from_str(&out).unwrap();
+        assert!(parsed["services"]["module-agents"]["volumes"].is_sequence());
     }
 
     #[test]

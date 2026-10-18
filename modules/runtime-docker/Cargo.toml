@@ -1,0 +1,31 @@
+[package]
+name = "frood-runtime-docker"
+description = "Frood module: agents.execute@1, one Docker container per agent turn (Claude Code, Codex)"
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.99"
+license = "Apache-2.0"
+repository = "https://github.com/froodai/frood"
+publish = false
+
+[dependencies]
+axum = "0.8"
+bollard = "0.21"
+futures-util = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml_ng = "0.10"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "process", "io-util", "fs", "sync", "time"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+tempfile = "3"
