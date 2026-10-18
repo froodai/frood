@@ -60,8 +60,9 @@ pub fn assemble(
     let gateway = frood_llm::Gateway::new(&config.accounts);
     let searcher = frood_search::Searcher::new(ledger.clone(), gateway.clone(), &config.search);
     let modules = frood_modhost::Modules::new(config, token_of);
+    let api_accounts = gateway.api_accounts();
     let caps = frood_dispatch::Capabilities {
-        default_account: gateway.default_account(),
+        api_accounts: &api_accounts,
         embeddings: searcher.embedding_model().is_some(),
         modules: config.modules.len(),
         base_dir,

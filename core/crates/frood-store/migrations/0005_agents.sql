@@ -7,9 +7,11 @@ ALTER TABLE runs ADD CONSTRAINT runs_status_check
 ALTER TABLE runs ADD COLUMN on_behalf_of UUID REFERENCES users (id);
 ALTER TABLE runs ADD COLUMN runtime TEXT;            -- module running the agent
 ALTER TABLE runs ADD COLUMN session_ref TEXT;        -- runtime session, to resume it
+ALTER TABLE runs ADD COLUMN account TEXT;            -- account the agent pays with
 ALTER TABLE runs ADD COLUMN cost_usd DOUBLE PRECISION NOT NULL DEFAULT 0;
 ALTER TABLE runs ADD COLUMN pending_messages JSONB NOT NULL DEFAULT '[]';  -- delivered on resume
 CREATE INDEX runs_active_idx ON runs (status) WHERE status IN ('running', 'waiting_for_input');
+CREATE INDEX runs_account_idx ON runs (account, created_at) WHERE account IS NOT NULL;
 
 -- What happened inside a run: progress notes, tool calls, model usage, the runtime's events.
 CREATE TABLE run_events (

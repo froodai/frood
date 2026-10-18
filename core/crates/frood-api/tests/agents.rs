@@ -565,7 +565,7 @@ async fn schedules_tick_once_per_source() {
          jobs:\n  extract: { enabled: false }\n  nightly:\n    uses: agents.execute\n    \
          on: [{ schedule: '0 3 * * *', timezone: Europe/Amsterdam, for_each: source }]\n    \
          runtime: runtime\n    agent: claude-code\n    model: claude-haiku-5-5\n    account: claude\n    \
-         instructions: Sweep the source.\n\
+         instructions: Sweep the source.\n    budget: { max_usd: 0.5 }\n\
          modules:\n  runtime: { url: 'http://127.0.0.1:1' }\n";
     let config = frood_config::parse(
         raw,
@@ -623,5 +623,112 @@ async fn schedules_tick_once_per_source() {
             .as_deref()
             .map(|s| s.starts_with("schedule/nightly/")),
         Some(true)
+    );
+}
+
+#[tokio::test]
+async fn subscriptions_and_monthly_budgets() {
+    let Some(url) = frood_store::testing::database_url() else {
+        eprintln!("FROOD_TEST_DATABASE_URL is not set; skipping");
+        return;
+    };
+    let pool = frood_store::testing::fresh_database(&url, "agent_accounts")
+        .await
+        .expect("test database");
+    let runtime = Shared::default();
+    let fake = fake_runtime(runtime.clone()).await;
+    let job = |name: &str, account: &str| {
+        format!(
+            "  {name}:\n    uses: agents.execute\n    runtime: runtime\n    agent: claude-code\n    \
+             model: claude-sonnet-5-5\n    account: {account}\n    instructions: Work.\n    \
+             on_behalf_of: alice@example.com\n    budget: {{ max_usd: 1 }}\n"
+        )
+    };
+    let raw = format!(
+        "version: 1\ninstallation: {{name: test}}\nstorage: {{uses: postgres, url: 'postgres://unused'}}\n\
+         deploy: {{server: host}}\n\
+         accounts:\n  team: {{ kind: api_key, provider: anthropic, secret: sk-team, budget: {{ monthly_usd: 0.05 }} }}\n  \
+         alice-max: {{ kind: subscription, provider: anthropic, owner: alice@example.com, secret: oauth-alice }}\n\
+         jobs:\n  extract: {{ enabled: false }}\n{}{}\
+         modules:\n  runtime: {{ url: '{fake}' }}\n",
+        job("mine", "alice-max"),
+        job("capped", "team"),
+    );
+    let config = frood_config::parse(
+        &raw,
+        &frood_config::Secrets::from_pairs(Vec::<(String, String)>::new()),
+    )
+    .unwrap()
+    .config;
+    let assembly = frood_api::assemble(&config, std::path::Path::new("."), pool, |name| {
+        (name == "FROOD_MODULE_TOKEN_RUNTIME").then(|| "rt-token".to_owned())
+    });
+    assert!(assembly.warnings.is_empty(), "{:?}", assembly.warnings);
+    let auth = assembly.state.auth.clone();
+    let alice = auth
+        .user_id_by_email("alice@example.com", true)
+        .await
+        .unwrap();
+    let scopes = vec!["knowledge:read".to_owned(), "admin".to_owned()];
+    let (_, pat) = auth
+        .create_personal_token(alice, "test", &scopes, None)
+        .await
+        .unwrap();
+    let dispatch = assembly.state.dispatch.clone();
+    let app = frood_api::router(assembly.state);
+    let start = |job: &'static str| {
+        let app = app.clone();
+        let pat = pat.clone();
+        async move {
+            let (status, run) =
+                call(&app, post_json("/v1/runs", &pat, json!({ "job": job }))).await;
+            assert_eq!(status, StatusCode::ACCEPTED, "{run}");
+            run["id"].as_str().unwrap().to_owned()
+        }
+    };
+
+    // Alice's subscription goes to the runtime as a subscription token for her own run.
+    let mine = start("mine").await;
+    dispatch.drain().await.unwrap();
+    let credentials = runtime.lock().unwrap().last("start")["credentials"].clone();
+    assert_eq!(
+        credentials,
+        json!({ "provider": "anthropic", "kind": "subscription", "token": "oauth-alice" })
+    );
+    let (_, now) = call(&app, get_json(&format!("/v1/runs/{mine}"), &pat)).await;
+    assert_eq!(now["account"], "alice-max");
+
+    // The team key has $0.05 a month: a run that goes over is stopped, the next one never starts.
+    let first = start("capped").await;
+    dispatch.drain().await.unwrap();
+    assert_eq!(
+        runtime.lock().unwrap().last("start")["credentials"]["kind"],
+        "api_key"
+    );
+    runtime.lock().unwrap().run(&first).cost = 0.06;
+    dispatch.watch_once().await.unwrap();
+    let (_, now) = call(&app, get_json(&format!("/v1/runs/{first}"), &pat)).await;
+    assert_eq!(now["status"], "failed", "{now}");
+    assert!(
+        now["error"]
+            .as_str()
+            .unwrap()
+            .contains("account team went over its monthly budget"),
+        "{now}"
+    );
+    let second = start("capped").await;
+    dispatch.drain().await.unwrap();
+    let (_, now) = call(&app, get_json(&format!("/v1/runs/{second}"), &pat)).await;
+    assert_eq!(now["status"], "failed", "{now}");
+    assert!(
+        now["error"]
+            .as_str()
+            .unwrap()
+            .contains("account team reached its monthly budget: $0.06 of $0.05"),
+        "{now}"
+    );
+    assert!(
+        runtime.lock().unwrap().ops_for(&second).is_empty(),
+        "never started"
     );
 }

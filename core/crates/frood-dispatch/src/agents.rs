@@ -83,19 +83,58 @@ impl Ctx {
         Ok(Value::Array(servers))
     }
 
-    fn credentials(&self, settings: &AgentSettings) -> Result<Value, JobError> {
+    /// The account's credentials for the runtime, after checking that this run may use it and
+    /// that the account is within its monthly budget.
+    async fn credentials(
+        &self,
+        settings: &AgentSettings,
+        on_behalf_of: Option<Uuid>,
+    ) -> Result<Value, JobError> {
+        let account = &settings.account;
         let credential = self
             .gateway
-            .credential(&settings.account)
-            .ok_or_else(|| JobError::permanent(format!("no account {}", settings.account)))?;
-        Ok(json!({
-            "provider": match credential.provider {
-                frood_config::ModelProvider::Anthropic => "anthropic",
-                frood_config::ModelProvider::Openai => "openai",
-            },
-            "api_key": credential.key,
-            "workspace": credential.workspace,
-        }))
+            .credential(account)
+            .ok_or_else(|| JobError::permanent(format!("no account {account}")))?;
+        if let Some(max) = credential.monthly_usd {
+            let spent = runs::spent_this_month(&self.pool, account).await?;
+            if spent >= max {
+                return Err(JobError::permanent(format!(
+                    "account {account} reached its monthly budget: ${spent:.2} of ${max:.2}"
+                )));
+            }
+        }
+        let provider = match credential.provider {
+            frood_config::ModelProvider::Anthropic => "anthropic",
+            frood_config::ModelProvider::Openai => "openai",
+        };
+        if !credential.subscription {
+            return Ok(json!({
+                "provider": provider,
+                "kind": "api_key",
+                "api_key": credential.key,
+                "workspace": credential.workspace,
+            }));
+        }
+        // A subscription is its owner's, and only inside the vendor's own agent.
+        let owner = credential.owner.unwrap_or_default();
+        if settings.agent != credential.provider.own_agent() {
+            return Err(JobError::permanent(format!(
+                "account {account} is a subscription, usable only inside {}",
+                credential.provider.own_agent()
+            )));
+        }
+        let runs_for = match on_behalf_of {
+            Some(id) => Some(self.auth.user_email(id).await.map_err(|e| {
+                JobError::transient(format!("cannot look up the run's person: {e}"))
+            })?),
+            None => None,
+        };
+        if !runs_for.is_some_and(|email| email.eq_ignore_ascii_case(&owner)) {
+            return Err(JobError::permanent(format!(
+                "account {account} is {owner}'s subscription; only runs on their behalf may use it"
+            )));
+        }
+        Ok(json!({ "provider": provider, "kind": "subscription", "token": credential.key }))
     }
 }
 
@@ -116,9 +155,10 @@ pub(crate) async fn start_or_resume(
         ),
         (None, None) => None,
     };
+    let credentials = ctx.credentials(settings, on_behalf_of).await?;
     let mut body = capability_input(spec, settings, run);
     body["mcp_servers"] = ctx.mcp_servers(spec, settings, run, on_behalf_of).await?;
-    body["credentials"] = ctx.credentials(settings)?;
+    body["credentials"] = credentials;
     let resuming = run.runtime.is_some() && run.session_ref.is_some();
     if resuming {
         let qs = questions::for_run(&ctx.pool, run.id).await?;
@@ -140,7 +180,17 @@ pub(crate) async fn start_or_resume(
         .call(&settings.runtime, "agents.execute", &body)
         .await?;
     let session = out.get("session_ref").and_then(Value::as_str);
-    runs::set_started(&ctx.pool, run.id, &settings.runtime, session, on_behalf_of).await?;
+    runs::set_started(
+        &ctx.pool,
+        run.id,
+        runs::Started {
+            runtime: &settings.runtime,
+            account: &settings.account,
+            session_ref: session,
+            on_behalf_of,
+        },
+    )
+    .await?;
     runs::add_event(
         &ctx.pool,
         run.id,
@@ -265,6 +315,23 @@ impl Dispatch {
             .agent_settings(&run.job)
             .map(|(_, a)| a.budget.clone())
             .unwrap_or_default();
+        let account_over = match (
+            &run.account,
+            run.account
+                .as_deref()
+                .and_then(|a| self.ctx.gateway.credential(a))
+                .and_then(|c| c.monthly_usd),
+        ) {
+            (Some(account), Some(max)) => {
+                let spent = runs::spent_this_month(&self.ctx.pool, account).await?;
+                (spent > max).then(|| {
+                    format!(
+                        "account {account} went over its monthly budget: ${spent:.2} of ${max:.2}"
+                    )
+                })
+            }
+            _ => None,
+        };
         let minutes = run
             .started_at
             .map(|t| (Utc::now() - t).num_seconds() as f64 / 60.0)
@@ -274,7 +341,7 @@ impl Dispatch {
             (_, Some(max)) if minutes > f64::from(max) => Some(format!(
                 "time budget exceeded: {minutes:.0} of {max} minutes"
             )),
-            _ => None,
+            _ => account_over,
         };
         if let Some(reason) = over {
             self.runtime_call(&runtime, json!({ "op": "stop", "run_id": run.id }))

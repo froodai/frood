@@ -90,8 +90,14 @@ pub struct Embeddings {
 #[derive(Debug, Clone)]
 pub struct Credential {
     pub provider: ModelProvider,
+    /// A subscription's token works only inside the vendor's own agent, for its owner.
+    pub subscription: bool,
+    /// The API key, or the subscription's token.
     pub key: String,
     pub workspace: Option<String>,
+    /// The subscriber, for a subscription.
+    pub owner: Option<String>,
+    pub monthly_usd: Option<f64>,
 }
 
 #[derive(Clone)]
@@ -107,7 +113,10 @@ struct Endpoint {
 #[derive(Clone)]
 pub struct Gateway {
     http: reqwest::Client,
+    /// Accounts the core may call models with directly: API keys.
     accounts: BTreeMap<String, Endpoint>,
+    /// Every account, for agent runtimes.
+    credentials: BTreeMap<String, Credential>,
 }
 
 impl Gateway {
@@ -116,58 +125,75 @@ impl Gateway {
             .timeout(Duration::from_secs(600))
             .build()
             .expect("HTTP client builds");
-        let accounts = accounts
-            .iter()
-            .map(|(name, account)| {
-                let Account::ApiKey {
+        let mut endpoints = BTreeMap::new();
+        let mut credentials = BTreeMap::new();
+        for (name, account) in accounts {
+            let credential = match account {
+                Account::ApiKey {
                     provider,
                     secret,
                     base_url,
                     workspace,
-                } = account;
-                let default = match provider {
-                    ModelProvider::Anthropic => ANTHROPIC_URL,
-                    ModelProvider::Openai => OPENAI_URL,
-                };
-                let endpoint = Endpoint {
+                    budget,
+                } => {
+                    let default = match provider {
+                        ModelProvider::Anthropic => ANTHROPIC_URL,
+                        ModelProvider::Openai => OPENAI_URL,
+                    };
+                    endpoints.insert(
+                        name.clone(),
+                        Endpoint {
+                            provider: *provider,
+                            key: secret.clone(),
+                            workspace: workspace.clone(),
+                            base_url: base_url
+                                .as_deref()
+                                .unwrap_or(default)
+                                .trim_end_matches('/')
+                                .to_owned(),
+                        },
+                    );
+                    Credential {
+                        provider: *provider,
+                        subscription: false,
+                        key: secret.clone(),
+                        workspace: workspace.clone(),
+                        owner: None,
+                        monthly_usd: budget.as_ref().map(|b| b.monthly_usd),
+                    }
+                }
+                Account::Subscription {
+                    provider,
+                    owner,
+                    secret,
+                    budget,
+                } => Credential {
                     provider: *provider,
+                    subscription: true,
                     key: secret.clone(),
-                    workspace: workspace.clone(),
-                    base_url: base_url
-                        .as_deref()
-                        .unwrap_or(default)
-                        .trim_end_matches('/')
-                        .to_owned(),
-                };
-                (name.clone(), endpoint)
-            })
-            .collect();
-        Self { http, accounts }
-    }
-
-    /// The account a job uses when it names none: the only account, or the first Anthropic one.
-    pub fn default_account(&self) -> Option<&str> {
-        if self.accounts.len() == 1 {
-            return self.accounts.keys().next().map(String::as_str);
+                    workspace: None,
+                    owner: Some(owner.clone()),
+                    monthly_usd: budget.as_ref().map(|b| b.monthly_usd),
+                },
+            };
+            credentials.insert(name.clone(), credential);
         }
-        self.accounts
-            .iter()
-            .find(|(_, e)| e.provider == ModelProvider::Anthropic)
-            .map(|(name, _)| name.as_str())
+        Self {
+            http,
+            accounts: endpoints,
+            credentials,
+        }
     }
 
-    pub fn has_account(&self, name: &str) -> bool {
-        self.accounts.contains_key(name)
+    /// Accounts the core can call models with directly (API keys; subscriptions only work
+    /// inside their vendor's agent).
+    pub fn api_accounts(&self) -> Vec<String> {
+        self.accounts.keys().cloned().collect()
     }
 
-    /// What an agent runtime needs to pay with this account: the provider, the key, and the
-    /// Anthropic workspace for organization keys. Goes only to runtime modules.
+    /// What an agent runtime needs to pay with this account. Goes only to runtime modules.
     pub fn credential(&self, account: &str) -> Option<Credential> {
-        self.accounts.get(account).map(|e| Credential {
-            provider: e.provider,
-            key: e.key.clone(),
-            workspace: e.workspace.clone(),
-        })
+        self.credentials.get(account).cloned()
     }
 
     fn endpoint(&self, account: &str) -> Result<&Endpoint> {
@@ -460,6 +486,7 @@ mod tests {
             secret: "test-key".into(),
             base_url: Some(url.to_owned()),
             workspace: None,
+            budget: None,
         };
         Gateway::new(&BTreeMap::from([("main".to_owned(), account)]))
     }
@@ -517,6 +544,7 @@ mod tests {
             secret: "org-key".into(),
             base_url: Some(url),
             workspace: Some("wrkspc_01abc".into()),
+            budget: None,
         };
         let gateway = Gateway::new(&BTreeMap::from([("main".to_owned(), account)]));
         gateway.complete("main", &request()).await.unwrap();
@@ -623,6 +651,7 @@ mod tests {
                 secret: "k".into(),
                 base_url: None,
                 workspace: None,
+                budget: None,
             },
         )]));
         assert!(matches!(
@@ -632,23 +661,32 @@ mod tests {
     }
 
     #[test]
-    fn default_account_prefers_the_only_one_then_anthropic() {
-        let key = |provider| Account::ApiKey {
-            provider,
-            secret: "k".into(),
-            base_url: None,
-            workspace: None,
-        };
-        let one = Gateway::new(&BTreeMap::from([(
-            "o".to_owned(),
-            key(ModelProvider::Openai),
-        )]));
-        assert_eq!(one.default_account(), Some("o"));
-        let two = Gateway::new(&BTreeMap::from([
-            ("a-openai".to_owned(), key(ModelProvider::Openai)),
-            ("b-claude".to_owned(), key(ModelProvider::Anthropic)),
+    fn subscriptions_are_for_runtimes_only() {
+        let gateway = Gateway::new(&BTreeMap::from([
+            (
+                "api".to_owned(),
+                Account::ApiKey {
+                    provider: ModelProvider::Anthropic,
+                    secret: "k".into(),
+                    base_url: None,
+                    workspace: None,
+                    budget: None,
+                },
+            ),
+            (
+                "max".to_owned(),
+                Account::Subscription {
+                    provider: ModelProvider::Anthropic,
+                    owner: "alice@example.com".into(),
+                    secret: "oauth".into(),
+                    budget: Some(frood_config::AccountBudget { monthly_usd: 20.0 }),
+                },
+            ),
         ]));
-        assert_eq!(two.default_account(), Some("b-claude"));
-        assert_eq!(Gateway::new(&BTreeMap::new()).default_account(), None);
+        assert_eq!(gateway.api_accounts(), ["api"]);
+        let max = gateway.credential("max").unwrap();
+        assert!(max.subscription);
+        assert_eq!(max.owner.as_deref(), Some("alice@example.com"));
+        assert_eq!(max.monthly_usd, Some(20.0));
     }
 }

@@ -12,8 +12,9 @@ use sha2::{Digest, Sha256};
 
 pub use interpolate::Secrets;
 pub use model::{
-    Account, AskUser, Auth, Budget, Config, Deploy, Embeddings, Installation, Job, ModelProvider,
-    Module, OnExpire, Policies, Provider, Search, Server, ServerPlacement, Storage, Trigger,
+    Account, AccountBudget, AskUser, Auth, Budget, Config, Deploy, Embeddings, Installation, Job,
+    ModelProvider, Module, OnExpire, Policies, Provider, Search, Server, ServerPlacement, Storage,
+    Trigger,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -228,26 +229,47 @@ fn validate_work(config: &Config, problems: &mut Vec<String>) {
                 "account name {name:?} must be lowercase letters, digits or dashes"
             ));
         }
-        let Account::ApiKey {
-            provider,
-            secret,
-            base_url,
-            workspace,
-        } = account;
-        if secret.trim().is_empty() {
-            problems.push(format!("account {name}: secret is empty"));
+        match account {
+            Account::ApiKey {
+                provider,
+                secret,
+                base_url,
+                workspace,
+                ..
+            } => {
+                if secret.trim().is_empty() {
+                    problems.push(format!("account {name}: secret is empty"));
+                }
+                if let Some(workspace) = workspace
+                    && (*provider != ModelProvider::Anthropic || !workspace.starts_with("wrkspc_"))
+                {
+                    problems.push(format!(
+                        "account {name}: workspace is an Anthropic workspace id like wrkspc_…, got {workspace:?}"
+                    ));
+                }
+                if let Some(url) = base_url
+                    && !(url.starts_with("https://") || is_loopback_http(url))
+                {
+                    problems.push(format!("account {name}: base_url must be an https:// URL"));
+                }
+            }
+            Account::Subscription { owner, secret, .. } => {
+                if secret.trim().is_empty() {
+                    problems.push(format!("account {name}: secret is empty"));
+                }
+                if !owner.contains('@') {
+                    problems.push(format!(
+                        "account {name}: owner is the subscriber's email, got {owner:?}"
+                    ));
+                }
+            }
         }
-        if let Some(workspace) = workspace
-            && (*provider != ModelProvider::Anthropic || !workspace.starts_with("wrkspc_"))
+        if let Some(budget) = account.budget()
+            && !(budget.monthly_usd.is_finite() && budget.monthly_usd >= 0.0)
         {
             problems.push(format!(
-                "account {name}: workspace is an Anthropic workspace id like wrkspc_…, got {workspace:?}"
+                "account {name}: budget.monthly_usd must be a sum in dollars"
             ));
-        }
-        if let Some(url) = base_url
-            && !(url.starts_with("https://") || is_loopback_http(url))
-        {
-            problems.push(format!("account {name}: base_url must be an https:// URL"));
         }
     }
     let mut ports = BTreeSet::new();
@@ -295,9 +317,12 @@ fn validate_work(config: &Config, problems: &mut Vec<String>) {
             ));
         }
         if let Some(account) = job.with.get("account") {
-            match account.as_str() {
-                Some(account) if config.accounts.contains_key(account) => {}
-                _ => problems.push(format!("job {name}: account {account} is not in accounts")),
+            match account.as_str().and_then(|a| config.accounts.get(a)) {
+                Some(Account::ApiKey { .. }) => {}
+                Some(Account::Subscription { .. }) => problems.push(format!(
+                    "job {name}: account {account} is a subscription, which only agent jobs may use; use an api_key account"
+                )),
+                None => problems.push(format!("job {name}: account {account} is not in accounts")),
             }
         }
         if let Some(module) = job.with.get("module") {
@@ -309,10 +334,14 @@ fn validate_work(config: &Config, problems: &mut Vec<String>) {
         for trigger in job.on.iter().flatten() {
             validate_trigger(name, trigger, problems);
         }
-        if let Some(account) = &job.account
-            && !config.accounts.contains_key(account)
-        {
-            problems.push(format!("job {name}: account {account} is not in accounts"));
+        match job.account.as_ref().map(|a| (a, config.accounts.get(a))) {
+            Some((account, None)) => {
+                problems.push(format!("job {name}: account {account} is not in accounts"));
+            }
+            Some((account, Some(subscription @ Account::Subscription { .. }))) => {
+                validate_subscription_use(name, job, account, subscription, problems);
+            }
+            _ => {}
         }
         if let Some(runtime) = &job.runtime
             && !config.modules.contains_key(runtime)
@@ -354,8 +383,52 @@ fn validate_work(config: &Config, problems: &mut Vec<String>) {
                 "search.embeddings: Anthropic has no embeddings API; use an openai account"
                     .to_owned(),
             ),
+            Some(Account::Subscription { .. }) => problems.push(
+                "search.embeddings: a subscription cannot be used for embeddings; use an api_key account"
+                    .to_owned(),
+            ),
             Some(_) => {}
         }
+    }
+}
+
+/// A subscription is the owner's: only an agent job that runs the vendor's own agent on the
+/// owner's behalf may use it.
+fn validate_subscription_use(
+    name: &str,
+    job: &Job,
+    account: &str,
+    subscription: &Account,
+    problems: &mut Vec<String>,
+) {
+    let provider = subscription.provider();
+    let owner = subscription.owner().unwrap_or_default();
+    // Standard jobs leave `uses` out; the dispatcher refuses a subscription for non-agent ones.
+    if job
+        .uses
+        .as_deref()
+        .is_some_and(|uses| uses != "agents.execute")
+    {
+        problems.push(format!(
+            "job {name}: account {account} is a subscription, which only agent jobs may use"
+        ));
+    }
+    if let Some(agent) = &job.agent
+        && agent != provider.own_agent()
+    {
+        problems.push(format!(
+            "job {name}: account {account} is a subscription, usable only inside {}, not {agent}",
+            provider.own_agent()
+        ));
+    }
+    if !job
+        .on_behalf_of
+        .as_deref()
+        .is_some_and(|who| who.eq_ignore_ascii_case(owner))
+    {
+        problems.push(format!(
+            "job {name}: account {account} is {owner}'s subscription; set on_behalf_of: {owner}"
+        ));
     }
 }
 
@@ -561,6 +634,7 @@ search:
                 secret: "pw".into(),
                 base_url: None,
                 workspace: Some("wrkspc_01test".into()),
+                budget: None,
             }
         );
         assert_eq!(config.modules["stt"].secrets, ["OPENAI_API_KEY"]);
@@ -616,6 +690,46 @@ jobs:
                     "not knowledge:decide",
                     "duration like",
                     "needs a timezone",
+                ] {
+                    assert!(
+                        problems.iter().any(|p| p.contains(needle)),
+                        "{needle}: {problems:?}"
+                    );
+                }
+            }
+            other => panic!("expected Invalid, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn subscriptions_serve_only_their_owner_inside_the_vendor_agent() {
+        let raw = format!("{}{WORK}", template_for(ServerPlacement::Host))
+            .replace(
+                "  openai: { kind: api_key",
+                "  max: { kind: subscription, provider: anthropic, owner: alice@example.com, secret: oauth, budget: { monthly_usd: 20 } }\n  openai: { kind: api_key",
+            )
+            .replace(
+                "  embed: { enabled: false }\n",
+                "  embed: { enabled: false }\n  mine:\n    uses: agents.execute\n    runtime: stt\n    agent: claude-code\n    \
+                 model: claude-sonnet-5-5\n    account: max\n    instructions: Do my weekly review.\n    on_behalf_of: Alice@Example.com\n",
+            );
+        let config = parse(&raw, &secrets()).unwrap().config;
+        assert_eq!(config.accounts["max"].owner(), Some("alice@example.com"));
+        assert_eq!(config.accounts["max"].budget().unwrap().monthly_usd, 20.0);
+
+        let bad = raw
+            .replace("agent: claude-code", "agent: codex")
+            .replace(
+                "on_behalf_of: Alice@Example.com",
+                "on_behalf_of: bob@example.com",
+            )
+            .replace("account: anthropic, model", "account: max, model");
+        match parse(&bad, &secrets()) {
+            Err(ConfigError::Invalid(problems)) => {
+                for needle in [
+                    "usable only inside claude-code, not codex",
+                    "alice@example.com's subscription; set on_behalf_of",
+                    "only agent jobs may use; use an api_key account",
                 ] {
                     assert!(
                         problems.iter().any(|p| p.contains(needle)),

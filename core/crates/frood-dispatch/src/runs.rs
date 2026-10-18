@@ -26,6 +26,7 @@ pub struct Run {
     /// Agent runs: the module running it, its session, what it cost so far.
     pub runtime: Option<String>,
     pub session_ref: Option<String>,
+    pub account: Option<String>,
     pub cost_usd: f64,
     pub on_behalf_of: Option<Uuid>,
     pub pending_messages: Value,
@@ -34,7 +35,7 @@ pub struct Run {
 macro_rules! columns {
     () => {
         "id, job, subject, status, attempts, input, output, error, created_at, started_at, finished_at, \
-         runtime, session_ref, cost_usd, on_behalf_of, pending_messages"
+         runtime, session_ref, account, cost_usd, on_behalf_of, pending_messages"
     };
 }
 
@@ -53,6 +54,7 @@ fn run(row: &sqlx::postgres::PgRow) -> sqlx::Result<Run> {
         finished_at: row.try_get("finished_at")?,
         runtime: row.try_get("runtime")?,
         session_ref: row.try_get("session_ref")?,
+        account: row.try_get("account")?,
         cost_usd: row.try_get("cost_usd")?,
         on_behalf_of: row.try_get("on_behalf_of")?,
         pending_messages: row.try_get("pending_messages")?,
@@ -143,21 +145,23 @@ pub(crate) async fn requeue_interrupted(pool: &PgPool) -> sqlx::Result<u64> {
 }
 
 /// An agent run handed to its runtime: it stays `running` until the watcher sees it end.
-pub(crate) async fn set_started(
-    pool: &PgPool,
-    id: Uuid,
-    runtime: &str,
-    session_ref: Option<&str>,
-    on_behalf_of: Option<Uuid>,
-) -> sqlx::Result<()> {
+pub(crate) struct Started<'a> {
+    pub runtime: &'a str,
+    pub account: &'a str,
+    pub session_ref: Option<&'a str>,
+    pub on_behalf_of: Option<Uuid>,
+}
+
+pub(crate) async fn set_started(pool: &PgPool, id: Uuid, started: Started<'_>) -> sqlx::Result<()> {
     sqlx::query(
-        "UPDATE runs SET runtime = $2, session_ref = coalesce($3, session_ref), \
-         on_behalf_of = coalesce($4, on_behalf_of), pending_messages = '[]', error = NULL WHERE id = $1",
+        "UPDATE runs SET runtime = $2, account = $3, session_ref = coalesce($4, session_ref), \
+         on_behalf_of = coalesce($5, on_behalf_of), pending_messages = '[]', error = NULL WHERE id = $1",
     )
     .bind(id)
-    .bind(runtime)
-    .bind(session_ref)
-    .bind(on_behalf_of)
+    .bind(started.runtime)
+    .bind(started.account)
+    .bind(started.session_ref)
+    .bind(started.on_behalf_of)
     .execute(pool)
     .await?;
     Ok(())
@@ -200,6 +204,17 @@ pub(crate) async fn set_progress(
     .execute(pool)
     .await?;
     Ok(())
+}
+
+/// What agent runs on an account cost in this calendar month (UTC).
+pub(crate) async fn spent_this_month(pool: &PgPool, account: &str) -> sqlx::Result<f64> {
+    sqlx::query_scalar(
+        "SELECT coalesce(sum(cost_usd), 0) FROM runs WHERE account = $1 \
+         AND created_at >= date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'",
+    )
+    .bind(account)
+    .fetch_one(pool)
+    .await
 }
 
 /// A steering message for a run that cannot take it now; delivered when it resumes.
