@@ -294,13 +294,14 @@ details.area[open] summary .tw{transform:rotate(90deg)}
         <span class="pill done">ввод и источники v0.2</span>
         <span class="pill done">Inbox и уведомления v0.2</span>
         <span class="pill done">платформа v0.2</span>
-        <span class="pill wait">план MVP · на ревью</span>
+        <span class="pill done">план MVP</span>
+        <span class="pill wait">реализация · M2 готов</span>
         <span class="pill">исходники: docs/*.md</span>
       </div>
     </header>
 
     <div class="tabs" role="tablist" aria-label="Этапы ревью">
-      <button class="tab" role="tab" id="t-now" data-tab="now" aria-controls="now" aria-selected="true">Сейчас на ревью <span class="n">8</span></button>
+      <button class="tab" role="tab" id="t-now" data-tab="now" aria-controls="now" aria-selected="true">Сейчас на ревью <span class="n">4</span></button>
       <button class="tab" role="tab" id="t-mvp" data-tab="mvp" aria-controls="mvp" aria-selected="false">План MVP</button>
       <button class="tab" role="tab" id="t-platform" data-tab="platform" aria-controls="platform" aria-selected="false">Платформа</button>
       <button class="tab" role="tab" id="t-notify" data-tab="notify" aria-controls="notify" aria-selected="false">Inbox и уведомления</button>
@@ -317,69 +318,64 @@ details.area[open] summary .tw{transform:rotate(90deg)}
       <section id="now-intro">
         <div class="sh"><h2>Что нужно от вас</h2></div>
         <div class="prose">
-          <p>Раунд 8: фаза 6 одобрена, сторонние реестры разрешены сразу. <b>Детализация по всем шести фазам закончена.</b></p>
-          <p>Осталось два шага: выбрать лицензию (ваше условие в одну стандартную лицензию целиком не ложится, разбор ниже) и посмотреть план реализации MVP — 6 решений и 1 вопрос.</p>
+          <p>Раунд 10: идёт реализация. <b>Готовы этапы M0–M2</b>: скелет и деплой, Ledger и API, вход и MCP. Проверено тестами и вживую; кроме подключения настоящих ChatGPT и Claude — что для этого нужно, объяснено ниже (это пункт 5).</p>
+          <p>На ревью 2 решения, которые появились при реализации, и 2 вопроса.</p>
           <p>Отметки сохраняются в странице. Напишите в чат «готово», и я их прочитаю.</p>
         </div>
-        <div class="locked"><span class="caption">Принято:</span><span class="chip">Архитектура D1′–D10</span><span class="chip">Модель M1–M11</span><span class="chip">API A1–A8</span><span class="chip">Агенты W1′–W9</span><span class="chip">Ввод I1–I9</span><span class="chip">Inbox N1–N9′</span><span class="chip">Платформа K1–K9</span></div>
+        <div class="locked"><span class="caption">Принято:</span><span class="chip">Фазы 1–6</span><span class="chip">Лицензия: AGPL-3.0 + CLA</span><span class="chip">План MVP P1–P6</span><span class="chip">Репозиторий приватный</span></div>
       </section>
 
-      <section id="now-license">
-        <div class="sh"><span class="tag need">нужно ваше решение</span><h2>Лицензия</h2><p class="sub">Ваше условие: брать можно, но при коммерческом использовании — публиковать все исходники; нельзя просто взять, развернуть и начать продавать.</p></div>
+      <section id="now-done">
+        <div class="sh"><span class="tag ref">сделано</span><h2>Этапы M0–M2</h2><p class="sub">Подробно — в docs/18_implementation_log.md. Всё закоммичено локально от вашего имени, никуда не отправлено.</p></div>
         <div class="scroll">
           <table>
-            <thead><tr><th>Вариант</th><th>Что разрешает</th><th>Что запрещает или требует</th><th>Open source?</th></tr></thead>
+            <thead><tr><th>Этап</th><th>Что работает</th><th>Как проверено</th></tr></thead>
             <tbody>
-              <tr><td><b>A. AGPL-3.0 + CLA</b></td><td>Любое использование, в том числе коммерческое</td><td>Кто <b>изменил</b> код и даёт им пользоваться по сети, обязан открыть изменения. Развернуть <b>без изменений</b> и продавать хостинг — можно. CLA позволяет вам продавать коммерческую лицензию тем, кто не хочет открывать изменения</td><td><span class="st act">да</span></td></tr>
-              <tr><td><b>B. FSL-1.1</b></td><td>Всё, кроме конкурирующего коммерческого: компании могут пользоваться внутри, люди — лично</td><td>Нельзя продавать как продукт или сервис, заменяющий ваш. Каждый релиз через 2 года становится Apache-2.0 или MIT<span class="ok">✓</span></td><td><span class="st wait">нет, fair source</span></td></tr>
+              <tr><td><b>M0. Скелет</b></td><td><code>frood init | plan | apply | serve | status</code>: конфиг с секретами, Docker Compose с Postgres 18 и сервером, миграции, ревизии конфига. CI: fmt, clippy, тесты, сборка образа</td><td>Полный <code>apply</code> в Docker с образом из исходников. Нашлись и исправлены две ошибки: в образе не было корневых сертификатов (не работал health-check), миграции не пересобирались</td></tr>
+              <tr><td><b>M1. Ledger + API</b></td><td>Источники и доказательства, утверждения с двумя осями времени, предложения с альтернативами, вердикты, политики автопринятия, журнал. REST <code>/v1</code></td><td>Интеграционные тесты; сценарий «срок 14.11 → конфликт → 28.11» с вопросами «что действовало 1 октября» и «что знали 10 октября»</td></tr>
+              <tr><td><b>M2. Вход + MCP</b></td><td>Свой OAuth-сервер для AI-клиентов (CIMD и DCR, PKCE, ротация refresh), вход людей только через Google или корпоративный SSO по списку адресов, страница согласия (<code>decide</code> выключен), токены на <code>/v1</code> и <code>/mcp</code>, 10 MCP-инструментов по правам токена, личные токены через <code>frood token create</code></td><td>Сквозной тест: моковый OIDC-провайдер → регистрация клиента → вход → согласие → токены → вызовы MCP → ротация и отзыв. Вживую: Frood скачал настоящий документ клиента Claude с claude.ai и принял его redirect</td></tr>
             </tbody>
           </table>
         </div>
+        <p class="caption">48 тестов, clippy без предупреждений. Дальше по плану — M3: ввод, распознавание, извлечение, поиск.</p>
+      </section>
+
+      <section id="now-item5">
+        <div class="sh"><span class="tag ref">пояснение</span><h2>Пункт 5: что нужно, чтобы подключить ChatGPT и Claude</h2></div>
         <div class="explain">
-          <p>«Коммерческое использование → публикуй исходники» — это AGPL, но она не мешает развернуть вашу версию как есть и продавать хостинг. «Нельзя просто взять и продавать» — это FSL, но она не open source в строгом смысле, а в требованиях был «открытый проект».</p>
-          <p><b>Рекомендую A:</b> ядро под AGPL-3.0, контракты, SDK и официальные модули — под Apache-2.0, плюс CLA. Это настоящий open source; сторонние модули могут быть под любой лицензией; CLA оставляет возможность двойной лицензии или смены лицензии позже. Если важнее запретить перепродажу совсем — B.</p>
-        </div>
-        <div class="rv-list">
-          <div class="rv q" data-id="platform02_L1" data-kind="question" data-label="L1 Лицензия ядра">
-            <div class="txt"><span class="id">L1</span><h3>Какую лицензию берём для ядра: A (AGPL-3.0 + CLA) или B (FSL-1.1)?</h3><p class="affects">Напишите букву и, если нужно, оговорки.</p></div>
-            <div class="ctl"></div>
-          </div>
+          <p>Claude и ChatGPT обращаются к MCP-серверу <b>из своего облака</b>, а не с вашего компьютера. При подключении коннектора вы входите во Frood в браузере. Отсюда два условия:</p>
+          <ol>
+            <li><b>Публичный адрес по HTTPS.</b> Домен, например <code>mem.example.com</code>, направленный на VPS с Frood за обратным прокси; Caddy получает сертификат сам. Адрес <code>127.0.0.1</code> из облака Anthropic или OpenAI не виден.</li>
+            <li><b>OAuth-клиент у провайдера входа.</b> Через него Frood узнаёт у Google (или корпоративного SSO), кто входит. В Google Cloud Console: APIs &amp; Services → Credentials → Create OAuth client ID → Web application, redirect URI <code>https://&lt;домен&gt;/oauth/callback/google</code>. Полученные client ID и secret идут в <code>frood.yaml</code> и <code>.frood/secrets.env</code>.</li>
+          </ol>
+          <p>Когда будут домен с VPS и OAuth-клиент, проверю подключение настоящих Claude и ChatGPT. <b>Claude Code ничего из этого не нужно:</b> он работает с Frood на <code>127.0.0.1</code>.</p>
         </div>
       </section>
 
-      <section id="now-mvp">
-        <div class="sh"><span class="tag need">нужно ваше решение</span><h2>План MVP: 6 решений</h2><p class="sub">Подробности на вкладке «План MVP».</p></div>
+      <section id="now-decisions">
+        <div class="sh"><span class="tag need">нужно ваше решение</span><h2>Решения, появившиеся при реализации</h2></div>
         <div class="rv-list">
-          <div class="rv" data-id="mvp01_P1" data-kind="decision" data-label="P1 Критерий готовности — сквозной сценарий">
-            <div class="txt"><span class="id">P1</span><h3>MVP готов, когда сквозной сценарий проходит автоматически в CI и вручную на VPS</h3><p class="why">Голосовое в Telegram → вопрос в Claude или ChatGPT → ночной агент находит противоречие → перезапуск → вопрос на месте → вердикт кнопкой → бэкап и восстановление.</p><p class="more"><a href="#v-done">Сценарий по шагам</a></p></div><div class="ctl"></div>
+          <div class="rv" data-id="impl01_R1" data-kind="decision" data-label="R1 От чьего имени пишет AI-клиент">
+            <div class="txt"><span class="id">R1</span><h3>Запись через Claude или ChatGPT подписана как «клиент от имени человека», а не как сам человек</h3><p class="why">Личный токен (скрипт, Shortcut, бот) действует как вы: <code>user:…</code>. Токен AI-клиента — как <code>agent:claude.ai@…</code>. Поэтому политика «свои новые факты принимаются сами» не принимает молча то, что записала модель: такие предложения ждут вашего вердикта в Inbox. Иначе выключенный по умолчанию <code>decide</code> обходился бы. Плюс в истории видно, какой клиент что записал.</p><p class="affects">Если хотите, чтобы «запомни: …» в чате с Claude принималось сразу, напишите — добавлю настройку политики «доверять выбранным клиентам».</p></div><div class="ctl"></div>
           </div>
-          <div class="rv" data-id="mvp01_P2" data-kind="decision" data-label="P2 Объём MVP">
-            <div class="txt"><span class="id">P2</span><h3>Объём MVP: Postgres, вход через Google и OIDC, MCP, поиск, агенты в контейнерах на VPS (Claude Code, Codex), Telegram, один MCP-источник, облачное распознавание, минимальная админка, бэкапы</h3><p class="why">Air, Managed Agents, разбор документов, встречи, pull-коннекторы, Slack, ntfy, графы — после MVP.</p><p class="more"><a href="#v-scope">Таблица «в MVP / позже»</a></p></div><div class="ctl"></div>
-          </div>
-          <div class="rv" data-id="mvp01_P3" data-kind="decision" data-label="P3 Этапы M0–M7">
-            <div class="txt"><span class="id">P3</span><h3>Этапы M0–M7 в этом порядке, каждый с демонстрируемым результатом: скелет → Ledger и API → вход и MCP → ввод → агенты → Inbox и Telegram → эксплуатация → приёмка</h3><p class="more"><a href="#v-stages">Этапы</a></p></div><div class="ctl"></div>
-          </div>
-          <div class="rv" data-id="mvp01_P4" data-kind="decision" data-label="P4 Монорепозиторий">
-            <div class="txt"><span class="id">P4</span><h3>Монорепозиторий: Rust-ядро, контракты с тестами, официальные модули, бандлы, деплой, документация. Реестр — отдельный репозиторий</h3><p class="more"><a href="#v-repo">Структура</a></p></div><div class="ctl"></div>
-          </div>
-          <div class="rv" data-id="mvp01_P5" data-kind="decision" data-label="P5 Лицензии частей">
-            <div class="txt"><span class="id">P5</span><h3>Контракты, SDK и официальные модули — Apache-2.0, чтобы сторонние модули могли быть под любой лицензией. Ядро — по решению L1</h3></div><div class="ctl"></div>
-          </div>
-          <div class="rv" data-id="mvp01_P6" data-kind="decision" data-label="P6 Тестирование">
-            <div class="txt"><span class="id">P6</span><h3>Тестирование: тесты соответствия контрактов, property-тесты Ledger, записанные ответы моделей в CI (детерминированно и бесплатно), e2e-сценарий</h3><p class="more"><a href="#v-tests">Подробнее</a></p></div><div class="ctl"></div>
+          <div class="rv" data-id="impl01_R2" data-kind="decision" data-label="R2 Личные токены — только с правом admin">
+            <div class="txt"><span class="id">R2</span><h3>Выпускать и отзывать личные токены через API может только токен с правом <code>admin</code>; первый токен выпускает владелец сервера командой <code>frood token create</code></h3><p class="why">Иначе AI-клиент мог бы выпустить себе бессрочный токен. В админке (M6) это будет кнопка.</p></div><div class="ctl"></div>
           </div>
         </div>
       </section>
 
       <section id="now-questions">
-        <div class="sh"><span class="tag need">нужно ваше решение</span><h2>Вопрос</h2></div>
+        <div class="sh"><span class="tag need">нужно ваше решение</span><h2>Вопросы</h2></div>
         <div class="rv-list">
-          <div class="rv q" data-id="mvp01_Q1" data-kind="question" data-label="QP1 Публичный или приватный репозиторий">
-            <div class="txt"><span class="id">QP1</span><h3>Репозиторий сразу публичный или приватный до готовности MVP?</h3></div><div class="ctl"></div>
+          <div class="rv q" data-id="impl01_Q1" data-kind="question" data-label="QR1 Создать репозиторий на GitHub и запушить">
+            <div class="txt"><span class="id">QR1</span><h3>Создать приватный репозиторий <code>froodai/frood</code> и отправить туда коммиты?</h3><p class="affects">Заработает CI. Ваш <code>gh</code> залогинен как Mervap — этого хватит, если у аккаунта есть право создавать репозитории в froodai.</p></div><div class="ctl"></div>
+          </div>
+          <div class="rv q" data-id="impl01_Q2" data-kind="question" data-label="QR2 Подключить ваш Claude Code к локальному Frood">
+            <div class="txt"><span class="id">QR2</span><h3>Подключить ваш Claude Code к локальному Frood для пробы?</h3><p class="affects">Это добавит MCP-сервер <code>frood</code> в ваш конфиг Claude Code; потом его можно удалить командой <code>claude mcp remove frood</code>.</p></div><div class="ctl"></div>
           </div>
         </div>
-        <div class="overall" data-id="mvp01_overall" data-kind="overall" data-label="Общий вердикт по плану MVP">
-          <h3>Общий вердикт по плану MVP</h3>
+        <div class="overall" data-id="impl01_overall" data-kind="overall" data-label="Общий вердикт по M0–M2">
+          <h3>Общий вердикт по M0–M2</h3>
           <div class="ctl"></div>
         </div>
       </section>
@@ -388,7 +384,7 @@ details.area[open] summary .tw{transform:rotate(90deg)}
     <!-- ================= MVP ================= -->
     <div class="panel" id="mvp" role="tabpanel" aria-labelledby="t-mvp">
       <section id="v-done">
-        <div class="sh"><span class="tag need">план MVP · на ревью</span><h2>Критерий готовности</h2><p class="sub">Сценарий проходит целиком: автоматически (e2e в CI) и вручную на VPS.</p></div>
+        <div class="sh"><span class="tag ref">план MVP · принят</span><h2>Критерий готовности</h2><p class="sub">Сценарий проходит целиком: автоматически (e2e в CI) и вручную на VPS.</p></div>
         <div class="flows">
           <div class="flow"><h3><span class="k">1</span>Записать через один клиент</h3><div class="steps"><span class="chip you">Голосовое в Telegram: «Договорились с Олей: релиз 2.4 — 14 ноября»</span><span class="ar">→</span><span class="chip">распознавание, извлечение</span><span class="ar">→</span><span class="chip k">Утверждение принято политикой</span></div></div>
           <div class="flow"><h3><span class="k">2</span>Прочитать через другой</h3><div class="steps"><span class="chip you">Claude, ChatGPT Enterprise или Claude Code: «какие сроки в ноябре?»</span><span class="ar">→</span><span class="chip k">Ответ со ссылкой на утверждение и источник</span></div></div>
@@ -1711,7 +1707,8 @@ jobs:
               <li>Ввод и источники — приняты</li>
               <li>Inbox, уведомления, внимание — приняты</li>
               <li>Ядро, реестр, деплой, бэкапы, версии — приняты</li>
-              <li class="cur">План реализации MVP — на ревью</li>
+              <li>План реализации MVP — принят</li>
+              <li class="cur">Реализация: M0–M2 готовы, дальше M3</li>
             </ol>
           </div>
         </div>
@@ -1733,7 +1730,8 @@ jobs:
             <tr><td class="k">6</td><td>W2″; ввод и источники I1–I9, QI1–QI2</td><td>W2″ принят; фаза 4 — апрув с правкой: расширяемые виды источников</td></tr>
             <tr><td class="k">7</td><td>I4′; Inbox, уведомления, внимание N1–N9, QN1–QN2</td><td>Апрув; кнопки ставят вердикт; веб — как админ-панель с отладкой и логами</td></tr>
             <tr><td class="k">8</td><td>N9′; платформа K1–K9, QK1–QK2</td><td>Апрув с правками: сторонние реестры сразу; лицензия — нужен выбор</td></tr>
-            <tr><td class="k">9</td><td>Лицензия L1; план MVP P1–P6, QP1</td><td><span class="st wait">идёт</span></td></tr>
+            <tr><td class="k">9</td><td>Лицензия L1; план MVP P1–P6, QP1</td><td>AGPL-3.0 + CLA; план принят; репозиторий приватный до отмашки</td></tr>
+            <tr><td class="k">10</td><td>Реализация M0–M2: R1–R2, QR1–QR2</td><td><span class="st wait">идёт</span></td></tr>
           </tbody>
         </table></div>
         <p class="caption">Все отметки хранятся в странице и продублированы в docs/README.md.</p>
@@ -1838,7 +1836,7 @@ jobs:
 
 <div class="bar" role="region" aria-label="Итог ревью">
   <div class="bar-in">
-    <div class="tally"><span>Решения <b id="n-model">0</b>/6</span><span>Вопросы <b id="n-q">0</b>/2</span><span>Вердикт <b id="n-all">—</b></span></div>
+    <div class="tally"><span>Решения <b id="n-model">0</b>/2</span><span>Вопросы <b id="n-q">0</b>/2</span><span>Вердикт <b id="n-all">—</b></span></div>
     <div class="status" id="status" aria-live="polite">Подключаюсь к хранилищу страницы…</div>
     <button class="btn" id="copy" type="button">Скопировать ответ</button>
   </div>
@@ -1900,7 +1898,7 @@ jobs:
     overall: [["approve","Апрув"],["approve_changes","С правками"],["redo","Переделать"]]
   };
   var LABEL = {ok:"принять",discuss:"обсудить",no:"против",approve:"апрув",approve_changes:"апрув с правками",redo:"переделать"};
-  var LKEY = "frood-review-v9";
+  var LKEY = "frood-review-v10";
   var items = Array.prototype.slice.call(document.querySelectorAll("[data-id]"));
   var ids = {}; items.forEach(function(el){ ids[el.dataset.id] = true; });
   var state = {}, db = null, canWrite = true;
@@ -1968,13 +1966,13 @@ jobs:
     var a = 0, m = 0, q = 0;
     items.forEach(function(el){
       var id = el.dataset.id, s = state[id] || {};
-      if (el.dataset.kind === "decision" && s.verdict) { if (id.indexOf("mvp01_") === 0) m++; else a++; }
+      if (el.dataset.kind === "decision" && s.verdict) { if (id.indexOf("impl01_") === 0) m++; else a++; }
       if (el.dataset.kind === "question" && (s.comment || "").trim()) q++;
     });
     var na = document.getElementById("n-arch"); if (na) na.textContent = a;
     document.getElementById("n-model").textContent = m;
     document.getElementById("n-q").textContent = q;
-    var o = state.mvp01_overall || {};
+    var o = state.impl01_overall || {};
     document.getElementById("n-all").textContent = o.verdict ? LABEL[o.verdict] : "—";
   }
 
@@ -2001,9 +1999,9 @@ jobs:
   }
 
   function compose(){
-    var lines = ["Ревью Frood, раунд 9: лицензия и план MVP"];
-    var o = state.mvp01_overall || {};
-    lines.push("Общее по плану MVP: " + (o.verdict ? LABEL[o.verdict] : "без вердикта") + (o.comment ? ". " + o.comment.trim() : ""));
+    var lines = ["Ревью Frood, раунд 10: реализация M0–M2"];
+    var o = state.impl01_overall || {};
+    lines.push("Общее по M0–M2: " + (o.verdict ? LABEL[o.verdict] : "без вердикта") + (o.comment ? ". " + o.comment.trim() : ""));
     items.forEach(function(el){
       var k = el.dataset.kind, s = state[el.dataset.id] || {}, c = (s.comment || "").trim();
       if (k === "decision") lines.push(el.dataset.label + ": " + (s.verdict ? LABEL[s.verdict] : "без отметки") + (c ? ". " + c : ""));
