@@ -128,15 +128,28 @@ pub async fn apply(paths: &Paths, render_only: bool) -> anyhow::Result<()> {
 
     match loaded.config.deploy.server {
         ServerPlacement::Container => {
-            let url = format!("http://127.0.0.1:{}/readyz", compose::listen_port(&loaded));
-            if wait_ready(&url, Duration::from_secs(60)).await {
-                println!("server is ready: {url}");
-            } else {
+            let port = compose::listen_port(&loaded);
+            let url = format!("http://127.0.0.1:{port}/readyz");
+            if !wait_ready(&url, Duration::from_secs(60)).await {
                 bail!(
                     "server did not become ready at {url}; see `docker compose -p {} logs frood`",
                     compose::project_name(&loaded)
                 );
             }
+            // The server reads frood.yaml at start. Compose recreates it for a new image, but
+            // not when only the mounted config changed: restart it then.
+            let running = loaded_config_sha(port).await;
+            if running.as_deref() != Some(loaded.sha256.as_str()) {
+                docker_compose(&compose_path, &["restart", "frood"]).await?;
+                if !wait_ready(&url, Duration::from_secs(60)).await {
+                    bail!(
+                        "server did not come back after the restart; see `docker compose -p {} logs frood`",
+                        compose::project_name(&loaded)
+                    );
+                }
+                println!("restarted the server to load the new config");
+            }
+            println!("server is ready: {url}");
         }
         ServerPlacement::Host => {
             println!(
@@ -213,6 +226,32 @@ fn print_summary(loaded: &Loaded) {
     for warning in &loaded.warnings {
         println!("warning: {warning}");
     }
+}
+
+/// The config hash the running server reports (`/v1/version`).
+async fn loaded_config_sha(port: u16) -> Option<String> {
+    let response = reqwest::Client::new()
+        .get(format!("http://127.0.0.1:{port}/v1/version"))
+        .timeout(Duration::from_secs(3))
+        .send()
+        .await
+        .ok()?;
+    let body: serde_json::Value = response.json().await.ok()?;
+    body.get("config_sha256")?.as_str().map(str::to_owned)
+}
+
+async fn docker_compose(compose_path: &Path, args: &[&str]) -> anyhow::Result<()> {
+    let status = tokio::process::Command::new("docker")
+        .args(["compose", "-f"])
+        .arg(compose_path)
+        .args(args)
+        .status()
+        .await
+        .context("cannot run `docker compose`")?;
+    if !status.success() {
+        bail!("`docker compose {}` failed with {status}", args.join(" "));
+    }
+    Ok(())
 }
 
 async fn docker_compose_up(compose_path: &Path, build: bool) -> anyhow::Result<()> {
