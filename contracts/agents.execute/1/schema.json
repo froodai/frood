@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://frood.dev/contracts/agents.execute/1/schema.json",
+  "title": "agents.execute@1",
+  "$defs": {
+    "request": {
+      "oneOf": [
+        { "$ref": "#/$defs/start" },
+        { "$ref": "#/$defs/resume" },
+        { "$ref": "#/$defs/send" },
+        { "$ref": "#/$defs/stop" },
+        { "$ref": "#/$defs/status" },
+        { "$ref": "#/$defs/events" }
+      ]
+    },
+    "run_id": { "type": "string", "format": "uuid" },
+    "spec": {
+      "type": "object",
+      "required": ["run_id", "job", "agent", "model", "instructions", "mcp_servers", "credentials"],
+      "properties": {
+        "run_id": { "$ref": "#/$defs/run_id" },
+        "job": { "type": "string" },
+        "agent": { "type": "string" },
+        "model": { "type": "string" },
+        "instructions": { "type": "string" },
+        "mcp_servers": { "type": "array", "items": { "$ref": "#/$defs/mcp_server" } },
+        "credentials": { "$ref": "#/$defs/credentials" },
+        "budget": {
+          "type": "object",
+          "properties": {
+            "max_usd": { "type": ["number", "null"] },
+            "max_minutes": { "type": ["integer", "null"] }
+          }
+        },
+        "ask_user": { "type": "boolean" }
+      }
+    },
+    "mcp_server": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string" },
+        "path": { "type": "string", "description": "Relative to FROOD_URL" },
+        "url": { "type": "string", "format": "uri" },
+        "headers": { "type": "object", "additionalProperties": { "type": "string" } }
+      },
+      "oneOf": [{ "required": ["path"] }, { "required": ["url"] }]
+    },
+    "credentials": {
+      "type": "object",
+      "required": ["provider", "api_key"],
+      "properties": {
+        "provider": { "enum": ["anthropic", "openai"] },
+        "api_key": { "type": "string" },
+        "workspace": { "type": ["string", "null"] }
+      }
+    },
+    "start": {
+      "allOf": [
+        { "$ref": "#/$defs/spec" },
+        {
+          "type": "object",
+          "required": ["op", "prompt"],
+          "properties": { "op": { "const": "start" }, "prompt": { "type": "string" } }
+        }
+      ]
+    },
+    "resume": {
+      "allOf": [
+        { "$ref": "#/$defs/spec" },
+        {
+          "type": "object",
+          "required": ["op", "session_ref", "message"],
+          "properties": {
+            "op": { "const": "resume" },
+            "session_ref": { "type": "string" },
+            "message": { "type": "string" }
+          }
+        }
+      ]
+    },
+    "send": {
+      "type": "object",
+      "required": ["op", "run_id", "message"],
+      "properties": {
+        "op": { "const": "send" },
+        "run_id": { "$ref": "#/$defs/run_id" },
+        "message": { "type": "string" }
+      }
+    },
+    "stop": {
+      "type": "object",
+      "required": ["op", "run_id"],
+      "properties": { "op": { "const": "stop" }, "run_id": { "$ref": "#/$defs/run_id" } }
+    },
+    "status": {
+      "type": "object",
+      "required": ["op", "run_id"],
+      "properties": { "op": { "const": "status" }, "run_id": { "$ref": "#/$defs/run_id" } }
+    },
+    "events": {
+      "type": "object",
+      "required": ["op", "run_id"],
+      "properties": {
+        "op": { "const": "events" },
+        "run_id": { "$ref": "#/$defs/run_id" },
+        "after": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "started": {
+      "type": "object",
+      "required": ["session_ref", "state"],
+      "properties": { "session_ref": { "type": "string" }, "state": { "const": "running" } }
+    },
+    "sent": {
+      "type": "object",
+      "required": ["delivered"],
+      "properties": { "delivered": { "type": "boolean" } }
+    },
+    "status_response": {
+      "type": "object",
+      "required": ["state"],
+      "properties": {
+        "state": { "enum": ["running", "finished", "failed"] },
+        "session_ref": { "type": ["string", "null"] },
+        "cost_usd": { "type": "number", "minimum": 0 },
+        "result": { "type": ["string", "null"] },
+        "error": { "type": ["string", "null"] }
+      }
+    },
+    "events_response": {
+      "type": "object",
+      "required": ["events"],
+      "properties": {
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["kind"],
+            "properties": { "kind": { "type": "string" }, "data": {} }
+          }
+        }
+      }
+    }
+  }
+}

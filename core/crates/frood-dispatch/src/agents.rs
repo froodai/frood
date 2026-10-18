@@ -72,13 +72,13 @@ impl Ctx {
             )
             .await
             .map_err(|e| JobError::transient(e.to_string()))?;
-        let mut servers = vec![json!({
+        let servers = vec![json!({
             "name": "frood",
             "path": "/mcp",
             "headers": { "Authorization": format!("Bearer {}", token.token) },
         })];
         for tool in settings.tools.iter().filter(|t| *t != "frood") {
-            servers.push(json!({ "name": tool, "unavailable": "MCP sources arrive later in M4" }));
+            tracing::warn!(job = %spec.name, tool, "MCP sources are not wired yet; the agent runs without it");
         }
         Ok(Value::Array(servers))
     }
