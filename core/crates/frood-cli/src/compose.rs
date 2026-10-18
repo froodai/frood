@@ -6,8 +6,9 @@ use std::path::Path;
 use frood_config::{Loaded, ServerPlacement};
 
 /// PostgreSQL image of the default storage module.
-/// PostgreSQL 18 with pgvector (embeddings for search).
-pub const POSTGRES_IMAGE: &str = "pgvector/pgvector:pg18";
+/// PostgreSQL 18 with pgvector (embeddings for search), on the same Debian (and glibc, so
+/// the same collations) as the official `postgres:18` image.
+pub const POSTGRES_IMAGE: &str = "pgvector/pgvector:pg18-trixie";
 
 pub fn project_name(loaded: &Loaded) -> String {
     format!("frood-{}", loaded.config.installation.name)
