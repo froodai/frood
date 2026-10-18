@@ -888,6 +888,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "frood-llm"
+version = "0.0.1"
+dependencies = [
+ "axum",
+ "frood-config",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "frood-mcp"
 version = "0.0.1"
 dependencies = [
