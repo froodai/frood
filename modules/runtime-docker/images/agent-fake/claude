@@ -1,10 +1,16 @@
 #!/bin/sh
+# A stand-in for Claude Code: prints stream-json like `claude -p --output-format stream-json`
+# without calling any model. It keeps a session file in its home, so a resumed turn fails
+# unless the run's volume came back. With FAKE-MCP in its instructions it also works with
+# Frood through MCP: the first turn asks a question, the resumed turn proposes the answer.
 prompt="$2"
-session=""; resume=""
+session=""; resume=""; mcp=""; instructions=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --session-id) session="$2"; shift ;;
     --resume) resume="$2"; session="$2"; shift ;;
+    --mcp-config) mcp="$2"; shift ;;
+    --append-system-prompt) instructions="$2"; shift ;;
   esac
   shift
 done
@@ -14,7 +20,49 @@ if [ -n "$resume" ] && [ ! -f "$HOME/.claude/$resume" ]; then
 fi
 echo "$prompt" >> "$HOME/.claude/$session"
 echo "key=${ANTHROPIC_API_KEY:-none} turns=$(wc -l < "$HOME/.claude/$session" | tr -d ' ')" > "$HOME/last-env"
-echo '{"type":"system","subtype":"init","session_id":"'"$session"'","model":"claude-haiku-5-5","mcp_servers":[{"name":"frood","status":"connected"}]}'
+echo '{"type":"system","subtype":"init","session_id":"'"$session"'","model":"fake","mcp_servers":[{"name":"frood","status":"connected"}]}'
+
+result() { # text cost [error]
+  if [ -n "$3" ]; then
+    jq -cn --arg r "$1" --argjson c "$2" '{type:"result",subtype:"error_during_execution",is_error:true,result:$r,total_cost_usd:$c}'
+  else
+    jq -cn --arg r "$1" --argjson c "$2" '{type:"result",subtype:"success",is_error:false,result:$r,total_cost_usd:$c}'
+  fi
+}
+
+case "$instructions" in
+  *FAKE-MCP*)
+    url=$(printf '%s' "$mcp" | jq -r '.mcpServers.frood.url')
+    auth=$(printf '%s' "$mcp" | jq -r '.mcpServers.frood.headers.Authorization')
+    call() { # tool arguments-json
+      body=$(jq -cn --arg n "$1" --argjson a "$2" '{jsonrpc:"2.0",id:1,method:"tools/call",params:{name:$n,arguments:$a}}')
+      curl -sS -X POST "$url" -H "Authorization: $auth" -H 'Content-Type: application/json' \
+        -H 'Accept: application/json, text/event-stream' -H 'mcp-protocol-version: 2025-11-25' -d "$body"
+    }
+    tool_use() { jq -cn --arg n "mcp__frood__$1" '{type:"assistant",message:{content:[{type:"tool_use",name:$n,input:{}}]}}'; }
+    if [ -z "$resume" ]; then
+      tool_use ask_user
+      reply=$(call ask_user '{"question":"Is this a decision or a discussion?","options":["Decision","Discussion"]}')
+      text=$(printf '%s' "$reply" | jq -r '.result.content[0].text // .error.message // "no reply"')
+      if printf '%s' "$reply" | jq -e '.result.isError == true or .error != null' >/dev/null 2>&1; then
+        result "ask_user failed: $text" 0.01 error
+      else
+        result "Asked: $text" 0.01
+      fi
+    else
+      tool_use propose_change
+      args=$(jq -cn --arg t "Fake agent heard: $prompt" '{operations:[{op:"create",assertion:{kind:"decision",text:$t,modality:"reported"}}],rationale:"fake agent check",source_text:$t}')
+      reply=$(call propose_change "$args")
+      state=$(printf '%s' "$reply" | jq -r '.result.content[0].text | fromjson | .state' 2>/dev/null)
+      if [ -n "$state" ] && [ "$state" != "null" ]; then
+        result "Proposed one decision ($state)" 0.01
+      else
+        result "propose_change failed: $(printf '%s' "$reply" | head -c 300)" 0.01 error
+      fi
+    fi
+    exit 0 ;;
+esac
+
 case "$prompt" in
   *crash*) echo "boom" >&2; exit 3 ;;
   *ASK*) echo '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"mcp__frood__ask_user","input":{}}]}}'
