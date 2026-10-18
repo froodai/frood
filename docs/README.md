@@ -1,6 +1,6 @@
 # Frood: рабочие заметки по дизайну
 
-**Для ревью:** [review.html](review.html), опубликована как артефакт https://claude.ai/artifact/KMumQjoymMaSfdU1yhhqCa. Отметки по решениям и ответы на вопросы сохраняются в БД артефакта, коллекция `review`; префикс документа = раунд: 1 — `arch01_*`; 2 — `arch02_*`, `model01_*`; 3 — `arch03_*`, `model02_*`, `api01_*`; 4 — `api02_*`, `work01_*`; 5 — `work02_*`; 6 — `work03_*`, `ingest01_*`; 7 — `ingest02_*`, `notify01_*`; 8 — `notify02_*`, `platform01_*`; 9 — `platform02_*`, `mvp01_*`; 10 — `impl01_*`; 11 — `impl02_*`; 12 — `impl03_*`.
+**Для ревью:** [review.html](review.html), опубликована как артефакт https://claude.ai/artifact/KMumQjoymMaSfdU1yhhqCa. Отметки по решениям и ответы на вопросы сохраняются в БД артефакта, коллекция `review`; префикс документа = раунд: 1 — `arch01_*`; 2 — `arch02_*`, `model01_*`; 3 — `arch03_*`, `model02_*`, `api01_*`; 4 — `api02_*`, `work01_*`; 5 — `work02_*`; 6 — `work03_*`, `ingest01_*`; 7 — `ingest02_*`, `notify01_*`; 8 — `notify02_*`, `platform01_*`; 9 — `platform02_*`, `mvp01_*`; 10 — `impl01_*`; 11 — `impl02_*`; 12 — `impl03_*`; 13 — `impl04_*`.
 
 | Файл | Что внутри |
 |---|---|
@@ -14,6 +14,7 @@
 | [17_mvp_plan.md](17_mvp_plan.md) | **План реализации MVP** — критерий готовности (сквозной сценарий), объём, этапы M0–M7, репозиторий, тестирование, риски |
 | [18_implementation_log.md](18_implementation_log.md) | **Журнал реализации** — что сделано по этапам, как проверено, отличия от плана, изменения окружения |
 | [19_m3_plan.md](19_m3_plan.md) | **План M3** — поток ввода и извлечения, что строим, чьё это действие, отличия от плана MVP |
+| [21_m4_plan.md](21_m4_plan.md) | **План M4** — запуск агента, расписания, вопросы, рантайм, аккаунты и бюджеты, источники, `daily-sweep` |
 | [20_component_landscape.md](20_component_landscape.md) | Готовые компоненты под каждый кусок: API, возможности, ограничения, источники |
 | [30_constraints_and_gotchas.md](30_constraints_and_gotchas.md) | Факты внешнего мира, меняющие дизайн (G1–G13) |
 | [40_reconciliation_with_02.md](40_reconciliation_with_02.md) | Сверка с `02_findings_and_proposals.md`: совпадения, заимствования, новое, расхождения |

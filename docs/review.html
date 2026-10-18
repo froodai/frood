@@ -295,7 +295,7 @@ details.area[open] summary .tw{transform:rotate(90deg)}
         <span class="pill done">Inbox и уведомления v0.2</span>
         <span class="pill done">платформа v0.2</span>
         <span class="pill done">план MVP</span>
-        <span class="pill wait">реализация · M3 готов</span>
+        <span class="pill wait">реализация · M4 начат</span>
         <span class="pill">исходники: docs/*.md</span>
       </div>
     </header>
@@ -318,60 +318,40 @@ details.area[open] summary .tw{transform:rotate(90deg)}
       <section id="now-intro">
         <div class="sh"><h2>Что нужно от вас</h2></div>
         <div class="prose">
-          <p>Раунд 12. <b>M3 готов</b>: голосовое или заметка становится знанием, а другой клиент находит его по смыслу, на любом языке. Проверено тестами и в настоящих контейнерах. Не проверено с настоящими моделями и настоящим ботом: для этого нужны ваши ключи (ниже).</p>
-          <p>На ревью 4 решения, принятые при реализации, и 1 вопрос.</p>
+          <p>Раунд 13. M3 закрыт: проверен вживую через бота, D4 сделано — моделей по умолчанию нет, модель всегда указывается в конфиге. <b>Начат M4</b>: агенты, расписания, вопросы, бюджеты (план — docs/21).</p>
+          <p>На ревью 4 решения M4 и 1 вопрос. Части, которые от них не зависят, уже в работе.</p>
           <p>Отметки сохраняются в странице. Напишите в чат «готово», и я их прочитаю.</p>
         </div>
-        <div class="locked"><span class="caption">Принято:</span><span class="chip">Фазы 1–6</span><span class="chip">План MVP</span><span class="chip">M0–M2</span><span class="chip">R1′ чьё действие</span><span class="chip">R2 личные токены</span></div>
+        <div class="locked"><span class="caption">Принято:</span><span class="chip">Фазы 1–6</span><span class="chip">M0–M3</span><span class="chip">R1′, R2</span><span class="chip">D1–D3</span><span class="chip">D4: без моделей по умолчанию</span></div>
       </section>
 
-      <section id="now-done">
-        <div class="sh"><span class="tag ref">сделано</span><h2>M3: ввод и извлечение</h2><p class="sub">Подробно — docs/18 и docs/19. Запушено в froodai/frood, CI зелёный.</p></div>
-        <div class="scroll">
-          <table>
-            <thead><tr><th>Часть</th><th>Что работает</th></tr></thead>
-            <tbody>
-              <tr><td><b>Захват</b></td><td><code>/v1/capture</code>: текст или файл (голосовое, аудио, документ). Отвечает сразу; статус обработки и созданные предложения — по ссылке из ответа</td></tr>
-              <tr><td><b>Очередь</b></td><td>Событие → правило → запуск. Повторы с паузами; после перезапуска сервера незаконченное продолжается</td></tr>
-              <tr><td><b>Распознавание</b></td><td>Модуль <code>stt-openai</code>: голосовые Telegram (OGG/Opus) конвертируются и уходят в OpenAI</td></tr>
-              <tr><td><b>Извлечение</b></td><td>Модель получает заметку как данные (не инструкции), похожие утверждения и известных людей и проекты; отвечает: новое, замена, закрытие или дубль. Каждое изменение опирается на точную цитату. Повтор после сбоя не платит за модель второй раз</td></tr>
-              <tr><td><b>Поиск</b></td><td>Слова + смысл (эмбеддинги): русская заметка находится английским запросом. Без ключа OpenAI — только по словам</td></tr>
-              <tr><td><b>Telegram</b></td><td>Модуль-бот без публичного адреса. <code>frood link telegram --email …</code> даёт код, <code>/link КОД</code> связывает аккаунт. Бот отвечает «сохранено», потом дописывает, что запомнил и что ждёт решения</td></tr>
-              <tr><td><b>Модули</b></td><td><code>frood apply</code> поднимает их в Compose; каждый видит только свои секреты; ядро находит модули и выдаёт им токены со scopes из манифеста</td></tr>
-            </tbody>
-          </table>
+      <section id="now-flow">
+        <div class="sh"><span class="tag ref">план</span><h2>Как будет работать агент</h2></div>
+        <div class="explain">
+          <ol>
+            <li>Расписание, событие или ручной запуск создают запуск джобы.</li>
+            <li>Ядро выдаёт запуску свой токен: чтение, заметки, предложения — без права вердикта; живёт до конца запуска.</li>
+            <li>Модуль рантайма поднимает контейнер с Claude Code или Codex; агент работает с памятью через MCP Frood.</li>
+            <li>Нужен ответ человека — <code>ask_user</code>: вопрос уходит в Inbox, контейнер завершается, после ответа продолжается та же сессия.</li>
+            <li>Итог: отчёт, предложения (от имени <code>agent:&lt;джоба&gt;</code>, на ревью), стоимость; превышен бюджет — остановка.</li>
+          </ol>
         </div>
-        <p class="caption">Проверено: 83 теста, в том числе сквозной: «Договорились с Олей: релиз 2.4 — 14 ноября» → принятое обязательство с владельцем «Оля» → найдено запросом «release deadline in November» → голосовое «релиз переносим на 28 ноября» → конфликт ждёт решения. В Docker с модулями из исходников: голосовое прошло весь путь до API OpenAI. Нашлась и исправлена ошибка образа Postgres (несовпадение сортировки строк при переходе).</p>
-      </section>
-
-      <section id="now-keys">
-        <div class="sh"><span class="tag need">нужно от вас</span><h2>Ключи для живой проверки</h2><p class="sub">Положите в <code>~/frood-local/.frood/secrets.env</code>, по строке <code>ИМЯ=значение</code>. Не в чат и не на эту страницу.</p></div>
-        <div class="scroll">
-          <table>
-            <thead><tr><th>Секрет</th><th>Для чего</th><th>Где взять</th></tr></thead>
-            <tbody>
-              <tr><td><code>ANTHROPIC_API_KEY</code> и/или <code>OPENAI_API_KEY</code></td><td>Извлечение (Claude или GPT). Распознавание речи и поиск по смыслу — OpenAI или локальные модели (Whisper; эмбеддинги через Ollama)</td><td>console.anthropic.com, platform.openai.com</td></tr>
-              <tr><td><code>TELEGRAM_BOT_TOKEN</code></td><td>Ваш бот для заметок</td><td>@BotFather в Telegram → <code>/newbot</code></td></tr>
-            </tbody>
-          </table>
-        </div>
-        <div class="explain"><p>Дальше я сам добавлю в ваш <code>frood.yaml</code> аккаунты, модули и поиск по смыслу, перезапущу и проверю шаги 1–2 вживую: голосовое боту → вопрос в Claude Code.</p></div>
       </section>
 
       <section id="now-decisions">
-        <div class="sh"><span class="tag need">нужно ваше решение</span><h2>Решения M3</h2></div>
+        <div class="sh"><span class="tag need">нужно ваше решение</span><h2>Решения M4</h2></div>
         <div class="rv-list">
-          <div class="rv" data-id="impl03_D1" data-kind="decision" data-label="D1 Dispatcher и очередь — в M3">
-            <div class="txt"><span class="id">D1</span><h3>Dispatcher и очередь запусков сделаны в M3, а не в M4</h3><p class="why">Без них захват не запускает распознавание и извлечение. Связка аккаунта Telegram по коду — тоже уже сейчас, а не в M5: голосовое должно быть чьим-то. В M4 добавятся расписания, агенты и вопросы.</p></div><div class="ctl"></div>
+          <div class="rv" data-id="impl04_A1" data-kind="decision" data-label="A1 От чьего имени работает агент">
+            <div class="txt"><span class="id">A1</span><h3>У джобы-агента поле <code>on_behalf_of: email</code> — чей это агент</h3><p class="why">Обязательно, если джоба платит подпиской: подписка личная и тратится только на запуски её владельца. С API-ключом инсталляции поле можно не указывать. В любом случае агент пишет как <code>agent:&lt;джоба&gt;</code>, его предложения идут на ревью (R1′); в журнале видно, от чьего имени.</p></div><div class="ctl"></div>
           </div>
-          <div class="rv" data-id="impl03_D2" data-kind="decision" data-label="D2 Извлечённое из вашей заметки — ваше">
-            <div class="txt"><span class="id">D2</span><h3>То, что <code>extract</code> извлёк из заметки, которую вы прислали сами, — ваше: новые факты без конфликта принимаются сразу</h3><p class="why">Продолжение R1′. Замены, закрытия и противоречия ждут вашего вердикта. Из источников, которые захватили не вы (интеграции, ночной проход), всё идёт на ревью.</p><p class="affects">Риск: модель может принять «обсуждали» за «договорились». Если хотите, чтобы и ваши факты сначала шли в Inbox, — одна настройка <code>policies.auto_accept_own_facts: false</code>.</p></div><div class="ctl"></div>
+          <div class="rv" data-id="impl04_A2" data-kind="decision" data-label="A2 Изоляция рантайма Docker">
+            <div class="txt"><span class="id">A2</span><h3>Модулю «Docker на VPS» нужен доступ к Docker хоста — фактически права root на этом сервере. Принимаем для v1 с ограничениями</h3><p class="why">Ограничения: контейнер агента видит только свою рабочую папку, свои секреты и токен запуска; внутри агента Docker недоступен; лимиты CPU и памяти. Сеть открыта — агенту нужны модель и MCP. Сильнее (gVisor, отдельная VM, Air) — отдельными реализациями рантайма позже.</p></div><div class="ctl"></div>
           </div>
-          <div class="rv" data-id="impl03_D3" data-kind="decision" data-label="D3 Новые факты одной заметки — одним предложением">
-            <div class="txt"><span class="id">D3</span><h3>Все новые факты одной заметки — одно предложение; каждая замена или закрытие — отдельное</h3><p class="why">Новые люди, проекты и факты из одной заметки связаны между собой и принимаются вместе. Спорное решается по одному.</p></div><div class="ctl"></div>
+          <div class="rv" data-id="impl04_A3" data-kind="decision" data-label="A3 Всё про агента — явно в конфиге">
+            <div class="txt"><span class="id">A3</span><h3>Джоба-агент всегда называет рантайм, агента (claude-code или codex), модель и аккаунт — без умолчаний, как D4</h3><p class="why">Поэтому стандартный <code>daily-sweep</code> выключен, пока вы не впишете эти поля. Инструкции у стандартных джоб встроены и переопределяются.</p></div><div class="ctl"></div>
           </div>
-          <div class="rv" data-id="impl03_D4" data-kind="decision" data-label="D4 Модели по умолчанию">
-            <div class="txt"><span class="id">D4</span><h3>Модели по умолчанию: Claude Opus 5.5 (effort medium) или GPT-6 Astra для извлечения; text-embedding-3-small для поиска; gpt-transcribe для речи</h3><p class="why">Самые сильные текущие модели. Любая меняется одной строкой в <code>jobs.extract.with.model</code> или в настройках модуля. Для Claude включён серверный fallback: если классификатор откажет, запрос повторится на другой модели.</p></div><div class="ctl"></div>
+          <div class="rv" data-id="impl04_A4" data-kind="decision" data-label="A4 Подписка Claude — только внутри Claude Code">
+            <div class="txt"><span class="id">A4</span><h3>Подписка Claude используется только как вход немодифицированного Claude Code в контейнере (<code>claude setup-token</code>) для запусков её владельца; Frood никогда не ходит в API токеном подписки</h3><p class="why">Так разрешают условия Anthropic: свой вход в немодифицированный Claude Code, в том числе на хостинге; через свою подписку нельзя обслуживать других людей. Для Codex и подписки ChatGPT — то же правило.</p></div><div class="ctl"></div>
           </div>
         </div>
       </section>
@@ -379,12 +359,12 @@ details.area[open] summary .tw{transform:rotate(90deg)}
       <section id="now-questions">
         <div class="sh"><span class="tag need">нужно ваше решение</span><h2>Вопрос</h2></div>
         <div class="rv-list">
-          <div class="rv q" data-id="impl03_Q1" data-kind="question" data-label="QM1 Какие ключи положили">
-            <div class="txt"><span class="id">QM1</span><h3>Какие ключи вы положили (только названия, без значений)? Или живую проверку отложить и идти в M4?</h3></div><div class="ctl"></div>
+          <div class="rv q" data-id="impl04_Q1" data-kind="question" data-label="QA1 Источник и траты для живой проверки агента">
+            <div class="txt"><span class="id">QA1</span><h3>Для живой проверки ночного агента: какой MCP-источник взять — тестовый «командный чат» из комплекта Frood или ваш настоящий (Slack, Notion, YouTrack…)? И можно ли будет потратить около $0.05 на пару запусков Claude Code на Haiku?</h3><p class="affects">До живой проверки всё проверяется на поддельном агенте, без трат.</p></div><div class="ctl"></div>
           </div>
         </div>
-        <div class="overall" data-id="impl03_overall" data-kind="overall" data-label="Общий вердикт по M3">
-          <h3>Общий вердикт по M3</h3>
+        <div class="overall" data-id="impl04_overall" data-kind="overall" data-label="Общий вердикт по плану M4">
+          <h3>Общий вердикт по плану M4</h3>
           <div class="ctl"></div>
         </div>
       </section>
@@ -1717,7 +1697,7 @@ jobs:
               <li>Inbox, уведомления, внимание — приняты</li>
               <li>Ядро, реестр, деплой, бэкапы, версии — приняты</li>
               <li>План реализации MVP — принят</li>
-              <li class="cur">Реализация: M0–M2 приняты, M3 готов</li>
+              <li class="cur">Реализация: M0–M3 готовы, идёт M4</li>
             </ol>
           </div>
         </div>
@@ -1742,7 +1722,8 @@ jobs:
             <tr><td class="k">9</td><td>Лицензия L1; план MVP P1–P6, QP1</td><td>AGPL-3.0 + CLA; план принят; репозиторий приватный до отмашки</td></tr>
             <tr><td class="k">10</td><td>Реализация M0–M2: R1–R2, QR1–QR2</td><td>M0–M2 приняты; R2 принято; R1 — переделать (сказал сам ≠ агент на кроне); запушить и подключить Claude Code — да</td></tr>
             <tr><td class="k">11</td><td>R1′; вход Claude Code во Frood</td><td>R1′ принято; Claude Code подключён</td></tr>
-            <tr><td class="k">12</td><td>M3: D1–D4, QM1</td><td><span class="st wait">идёт</span></td></tr>
+            <tr><td class="k">12</td><td>M3: D1–D4, QM1</td><td>D1–D3 приняты; D4 — без моделей по умолчанию; ключи только для проверок</td></tr>
+            <tr><td class="k">13</td><td>План M4: A1–A4, QA1</td><td><span class="st wait">идёт</span></td></tr>
           </tbody>
         </table></div>
         <p class="caption">Все отметки хранятся в странице и продублированы в docs/README.md.</p>
@@ -1909,7 +1890,7 @@ jobs:
     overall: [["approve","Апрув"],["approve_changes","С правками"],["redo","Переделать"]]
   };
   var LABEL = {ok:"принять",discuss:"обсудить",no:"против",approve:"апрув",approve_changes:"апрув с правками",redo:"переделать"};
-  var LKEY = "frood-review-v12";
+  var LKEY = "frood-review-v13";
   var items = Array.prototype.slice.call(document.querySelectorAll("[data-id]"));
   var ids = {}; items.forEach(function(el){ ids[el.dataset.id] = true; });
   var state = {}, db = null, canWrite = true;
@@ -1977,13 +1958,13 @@ jobs:
     var a = 0, m = 0, q = 0;
     items.forEach(function(el){
       var id = el.dataset.id, s = state[id] || {};
-      if (el.dataset.kind === "decision" && s.verdict) { if (id.indexOf("impl03_") === 0) m++; else a++; }
+      if (el.dataset.kind === "decision" && s.verdict) { if (id.indexOf("impl04_") === 0) m++; else a++; }
       if (el.dataset.kind === "question" && (s.comment || "").trim()) q++;
     });
     var na = document.getElementById("n-arch"); if (na) na.textContent = a;
     document.getElementById("n-model").textContent = m;
     document.getElementById("n-q").textContent = q;
-    var o = state.impl03_overall || {};
+    var o = state.impl04_overall || {};
     document.getElementById("n-all").textContent = o.verdict ? LABEL[o.verdict] : "—";
   }
 
@@ -2010,9 +1991,9 @@ jobs:
   }
 
   function compose(){
-    var lines = ["Ревью Frood, раунд 12: M3"];
-    var o = state.impl03_overall || {};
-    lines.push("Общее по M3: " + (o.verdict ? LABEL[o.verdict] : "без вердикта") + (o.comment ? ". " + o.comment.trim() : ""));
+    var lines = ["Ревью Frood, раунд 13: план M4"];
+    var o = state.impl04_overall || {};
+    lines.push("Общее по плану M4: " + (o.verdict ? LABEL[o.verdict] : "без вердикта") + (o.comment ? ". " + o.comment.trim() : ""));
     items.forEach(function(el){
       var k = el.dataset.kind, s = state[el.dataset.id] || {}, c = (s.comment || "").trim();
       if (k === "decision") lines.push(el.dataset.label + ": " + (s.verdict ? LABEL[s.verdict] : "без отметки") + (c ? ". " + c : ""));
