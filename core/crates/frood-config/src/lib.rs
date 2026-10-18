@@ -229,10 +229,20 @@ fn validate_work(config: &Config, problems: &mut Vec<String>) {
             ));
         }
         let Account::ApiKey {
-            secret, base_url, ..
+            provider,
+            secret,
+            base_url,
+            workspace,
         } = account;
         if secret.trim().is_empty() {
             problems.push(format!("account {name}: secret is empty"));
+        }
+        if let Some(workspace) = workspace
+            && (*provider != ModelProvider::Anthropic || !workspace.starts_with("wrkspc_"))
+        {
+            problems.push(format!(
+                "account {name}: workspace is an Anthropic workspace id like wrkspc_…, got {workspace:?}"
+            ));
         }
         if let Some(url) = base_url
             && !(url.starts_with("https://") || is_loopback_http(url))
@@ -456,7 +466,7 @@ mod tests {
 
     const WORK: &str = "
 accounts:
-  anthropic: { kind: api_key, provider: anthropic, secret: '${secret:POSTGRES_PASSWORD}' }
+  anthropic: { kind: api_key, provider: anthropic, secret: '${secret:POSTGRES_PASSWORD}', workspace: wrkspc_01test }
   openai: { kind: api_key, provider: openai, secret: sk-test }
 modules:
   stt: { build: ../modules/stt-openai, secrets: [OPENAI_API_KEY], config: { model: whisper-1 } }
@@ -482,7 +492,8 @@ search:
             Account::ApiKey {
                 provider: ModelProvider::Anthropic,
                 secret: "pw".into(),
-                base_url: None
+                base_url: None,
+                workspace: Some("wrkspc_01test".into()),
             }
         );
         assert_eq!(config.modules["stt"].secrets, ["OPENAI_API_KEY"]);

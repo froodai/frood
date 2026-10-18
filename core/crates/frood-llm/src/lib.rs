@@ -94,6 +94,8 @@ pub struct Embeddings {
 struct Endpoint {
     provider: ModelProvider,
     key: String,
+    /// `anthropic-workspace-id` for organization-level Anthropic keys.
+    workspace: Option<String>,
     base_url: String,
 }
 
@@ -117,6 +119,7 @@ impl Gateway {
                     provider,
                     secret,
                     base_url,
+                    workspace,
                 } = account;
                 let default = match provider {
                     ModelProvider::Anthropic => ANTHROPIC_URL,
@@ -125,6 +128,7 @@ impl Gateway {
                 let endpoint = Endpoint {
                     provider: *provider,
                     key: secret.clone(),
+                    workspace: workspace.clone(),
                     base_url: base_url
                         .as_deref()
                         .unwrap_or(default)
@@ -218,6 +222,9 @@ impl Gateway {
             .post(format!("{}/v1/messages", endpoint.base_url))
             .header("x-api-key", &endpoint.key)
             .header("anthropic-version", "2023-06-01");
+        if let Some(workspace) = &endpoint.workspace {
+            call = call.header("anthropic-workspace-id", workspace);
+        }
         if FALLBACK_MODELS.contains(&model.as_str()) {
             body["fallbacks"] = json!("default");
             call = call.header("anthropic-beta", FALLBACK_BETA);
@@ -454,6 +461,7 @@ mod tests {
             provider,
             secret: "test-key".into(),
             base_url: Some(url.to_owned()),
+            workspace: None,
         };
         Gateway::new(&BTreeMap::from([("main".to_owned(), account)]))
     }
@@ -497,6 +505,27 @@ mod tests {
         assert_eq!(body["output_config"]["format"]["type"], "json_schema");
         assert_eq!(body["messages"][0]["content"], "<source>hello</source>");
         assert!(body.get("thinking").is_none());
+    }
+
+    #[tokio::test]
+    async fn organization_keys_name_their_workspace() {
+        let (url, seen) = provider(|_| {
+            json!({ "model": "claude-haiku-5-5", "content": [{ "type": "text", "text": "{\"ok\": true}" }],
+                    "stop_reason": "end_turn", "usage": {} })
+        })
+        .await;
+        let account = Account::ApiKey {
+            provider: ModelProvider::Anthropic,
+            secret: "org-key".into(),
+            base_url: Some(url),
+            workspace: Some("wrkspc_01abc".into()),
+        };
+        let gateway = Gateway::new(&BTreeMap::from([("main".to_owned(), account)]));
+        gateway.complete("main", &request()).await.unwrap();
+        assert_eq!(
+            seen.lock().unwrap()[0].0["anthropic-workspace-id"],
+            "wrkspc_01abc"
+        );
     }
 
     #[tokio::test]
@@ -592,6 +621,7 @@ mod tests {
                 provider: ModelProvider::Anthropic,
                 secret: "k".into(),
                 base_url: None,
+                workspace: None,
             },
         )]));
         assert!(matches!(
@@ -606,6 +636,7 @@ mod tests {
             provider,
             secret: "k".into(),
             base_url: None,
+            workspace: None,
         };
         let one = Gateway::new(&BTreeMap::from([(
             "o".to_owned(),
