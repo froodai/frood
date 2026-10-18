@@ -257,17 +257,29 @@ impl Dispatch {
         source_id: Uuid,
     ) -> Result<SourceStatus, frood_ledger::LedgerError> {
         self.ctx.ledger.source(source_id).await?;
-        let runs = runs::for_subject(&self.ctx.pool, &format!("source/{source_id}")).await?;
+        let subject = format!("source/{source_id}");
+        let runs = runs::for_subject(&self.ctx.pool, &subject).await?;
         let proposals = self.ctx.ledger.proposals_citing_source(source_id).await?;
-        let state = if runs.is_empty() {
-            "idle"
-        } else if runs.iter().any(|r| r.status == "running") {
+        // Events about the source the dispatcher has not read yet still make runs: between
+        // `transcribe` finishing and `extract` being queued, nothing is running, yet the
+        // source is not done.
+        let undispatched: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM journal WHERE subject = $1 AND position > \
+             coalesce((SELECT position FROM journal_checkpoints WHERE reader = $2), 0))",
+        )
+        .bind(&subject)
+        .bind(READER)
+        .fetch_one(&self.ctx.pool)
+        .await?;
+        let state = if runs.iter().any(|r| r.status == "running") {
             "working"
-        } else if runs.iter().any(|r| r.status == "queued") {
+        } else if undispatched || runs.iter().any(|r| r.status == "queued") {
             // A failed attempt waiting for its retry counts as queued.
             "queued"
         } else if runs.iter().any(|r| r.status == "failed") {
             "failed"
+        } else if runs.is_empty() {
+            "idle"
         } else {
             "done"
         };
