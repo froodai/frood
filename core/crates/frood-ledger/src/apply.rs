@@ -504,6 +504,7 @@ impl<'a> Applier<'a> {
         valid_to: Option<Timestamp>,
         status: Status,
     ) -> Result<()> {
+        let slots = self.resolve_slot_refs(&content.slots)?;
         sqlx::query(
             "INSERT INTO assertion_versions (assertion_id, version, kind, text, subjects, slots, modality, authority, \
              said_at, valid_from, valid_to, recorded_from, status, review_after, evidence, proposal_id, verdict_id) \
@@ -514,7 +515,7 @@ impl<'a> Applier<'a> {
         .bind(&content.kind)
         .bind(content.text.trim())
         .bind(subjects)
-        .bind(&content.slots)
+        .bind(&slots)
         .bind(content.modality.as_str())
         .bind(&content.authority)
         .bind(content.said_at)
@@ -563,6 +564,23 @@ impl<'a> Applier<'a> {
             status,
         )
         .await
+    }
+
+    /// Slot values `ref:<key>` (an owner created in the same proposal) become entity ids.
+    fn resolve_slot_refs(&self, slots: &serde_json::Value) -> Result<serde_json::Value> {
+        let mut slots = slots.clone();
+        if let Some(map) = slots.as_object_mut() {
+            for value in map.values_mut() {
+                if let Some(key) = value.as_str().and_then(|v| v.strip_prefix("ref:")) {
+                    let id = self
+                        .entity_refs
+                        .get(key)
+                        .ok_or_else(|| invalid(format!("entity ref {key:?} is not defined")))?;
+                    *value = json!(id.to_string());
+                }
+            }
+        }
+        Ok(slots)
     }
 
     async fn resolve_subjects(&mut self, subjects: &[String]) -> Result<Vec<Uuid>> {

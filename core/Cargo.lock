@@ -803,8 +803,12 @@ dependencies = [
  "ed25519-dalek",
  "frood-auth",
  "frood-config",
+ "frood-dispatch",
  "frood-ledger",
+ "frood-llm",
  "frood-mcp",
+ "frood-modhost",
+ "frood-search",
  "frood-store",
  "http-body-util",
  "jsonwebtoken",
@@ -854,7 +858,11 @@ dependencies = [
  "frood-api",
  "frood-auth",
  "frood-config",
+ "frood-dispatch",
  "frood-ledger",
+ "frood-llm",
+ "frood-modhost",
+ "frood-search",
  "frood-store",
  "reqwest",
  "serde_json",
@@ -878,6 +886,26 @@ dependencies = [
  "sha2 0.11.1",
  "tempfile",
  "thiserror",
+]
+
+[[package]]
+name = "frood-dispatch"
+version = "0.0.1"
+dependencies = [
+ "base64 0.23.1",
+ "chrono",
+ "frood-config",
+ "frood-ledger",
+ "frood-llm",
+ "frood-modhost",
+ "frood-search",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -918,6 +946,7 @@ dependencies = [
  "chrono",
  "frood-auth",
  "frood-ledger",
+ "frood-search",
  "http",
  "rmcp",
  "schemars",

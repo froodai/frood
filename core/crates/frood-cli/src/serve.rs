@@ -34,31 +34,59 @@ pub async fn run(paths: &Paths) -> anyhow::Result<()> {
         .await
         .context("migrations failed")?;
 
-    let policies = &loaded.config.policies;
-    let auth = frood_auth::Auth::new(
-        pool.clone(),
-        frood_auth::AuthSettings::from_config(&loaded.config),
-    );
+    let config = &loaded.config;
+    let secrets = frood_config::Secrets::from_file(&paths.secrets())?;
+    let frood_api::Assembly {
+        state,
+        modules,
+        warnings,
+    } = frood_api::assemble(config, pool, |name| secrets.get(name));
+    for warning in &warnings {
+        tracing::warn!("{warning}");
+    }
+    let auth = state.auth.clone();
+    let dispatch = state.dispatch.clone();
     tracing::info!(issuer = %auth.settings().issuer, providers = auth.settings().providers.len(), "sign-in configured");
-    let ledger = frood_ledger::Ledger::new(
-        pool,
-        frood_ledger::PolicyConfig {
-            auto_accept_own_facts: policies.auto_accept_own_facts,
-            entity_merge_threshold: policies.entity_merge_threshold,
-        },
-    );
-    let app = frood_api::router(frood_api::AppState {
-        ledger,
-        auth,
-        installation: loaded.config.installation.name.clone(),
-    });
+
+    // Modules start in their own containers; find them and register their service tokens.
+    {
+        let modules = modules.clone();
+        let auth = auth.clone();
+        tokio::spawn(async move {
+            modules
+                .discover_all(Duration::from_secs(600), |name, manifest| {
+                    let auth = auth.clone();
+                    let token = modules.token(&name).map(str::to_owned);
+                    async move {
+                        match token {
+                            Some(token) => {
+                                if let Err(err) = auth
+                                    .register_service_token(&name, &token, &manifest.frood_api)
+                                    .await
+                                {
+                                    tracing::error!(module = %name, error = %err, "cannot register the module's token");
+                                }
+                            }
+                            None => tracing::warn!(module = %name, secret = %frood_modhost::token_secret(&name), "no service token in the secrets; the module cannot call Frood"),
+                        }
+                    }
+                })
+                .await;
+        });
+    }
+
+    let app = frood_api::router(state);
+    let (stop, stopped) = tokio::sync::watch::channel(false);
+    let worker = tokio::spawn(dispatch.start(2, stopped));
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .with_context(|| format!("cannot listen on {addr}"))?;
-    tracing::info!(%addr, installation = %loaded.config.installation.name, "frood is listening");
+    tracing::info!(%addr, installation = %config.installation.name, "frood is listening");
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
+    let _ = stop.send(true);
+    let _ = worker.await;
     tracing::info!("frood stopped");
     Ok(())
 }

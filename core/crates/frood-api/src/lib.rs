@@ -7,6 +7,7 @@ mod capture;
 mod channels;
 mod error;
 mod ledger;
+mod work;
 
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -22,14 +23,74 @@ pub use error::ApiError;
 pub struct AppState {
     pub ledger: Ledger,
     pub auth: Auth,
+    pub searcher: frood_search::Searcher,
+    pub dispatch: frood_dispatch::Dispatch,
     pub installation: String,
+}
+
+/// Everything the server runs, assembled from the config.
+pub struct Assembly {
+    pub state: AppState,
+    pub modules: frood_modhost::Modules,
+    /// Jobs that cannot run and why.
+    pub warnings: Vec<String>,
+}
+
+/// Builds the server's parts: the Ledger with its policies, sign-in, the LLM gateway, search,
+/// the modules (`token_of` reads their service tokens from the secrets) and the dispatcher
+/// with the jobs the installation can run.
+pub fn assemble(
+    config: &frood_config::Config,
+    pool: frood_store::sqlx::PgPool,
+    token_of: impl Fn(&str) -> Option<String>,
+) -> Assembly {
+    let policies = &config.policies;
+    let ledger = Ledger::new(
+        pool.clone(),
+        frood_ledger::PolicyConfig {
+            auto_accept_own_facts: policies.auto_accept_own_facts,
+            entity_merge_threshold: policies.entity_merge_threshold,
+        },
+    );
+    let auth = Auth::new(pool, frood_auth::AuthSettings::from_config(config));
+    let gateway = frood_llm::Gateway::new(&config.accounts);
+    let searcher = frood_search::Searcher::new(ledger.clone(), gateway.clone(), &config.search);
+    let modules = frood_modhost::Modules::new(config, token_of);
+    let caps = frood_dispatch::Capabilities {
+        default_account: gateway.default_account(),
+        embeddings: searcher.embedding_model().is_some(),
+        modules: config.modules.len(),
+    };
+    let (jobs, warnings) = frood_dispatch::resolve(config, &caps);
+    let dispatch = frood_dispatch::Dispatch::new(
+        ledger.clone(),
+        searcher.clone(),
+        gateway,
+        modules.clone(),
+        jobs,
+    );
+    Assembly {
+        state: AppState {
+            ledger,
+            auth,
+            searcher,
+            dispatch,
+            installation: config.installation.name.clone(),
+        },
+        modules,
+        warnings,
+    }
 }
 
 pub fn router(state: AppState) -> Router {
     let mcp = Router::new()
         .nest_service(
             "/mcp",
-            frood_mcp::service(state.ledger.clone(), allowed_hosts(&state.auth)),
+            frood_mcp::service(
+                state.ledger.clone(),
+                state.searcher.clone(),
+                allowed_hosts(&state.auth),
+            ),
         )
         .layer(middleware::from_fn_with_state(
             state.clone(),
@@ -44,6 +105,7 @@ pub fn router(state: AppState) -> Router {
         .merge(account::routes())
         .merge(capture::routes())
         .merge(channels::routes())
+        .merge(work::routes())
         .with_state(state)
         .merge(mcp)
         .merge(oauth)
@@ -111,11 +173,7 @@ mod tests {
         )
         .unwrap()
         .config;
-        router(AppState {
-            ledger: Ledger::new(pool.clone(), frood_ledger::PolicyConfig::default()),
-            auth: Auth::new(pool, frood_auth::AuthSettings::from_config(&config)),
-            installation: "test".to_owned(),
-        })
+        router(assemble(&config, pool, |_| None).state)
     }
 
     async fn get_json(path: &str) -> (StatusCode, Value) {

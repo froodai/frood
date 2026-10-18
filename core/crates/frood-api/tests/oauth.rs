@@ -13,9 +13,8 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use frood_api::{AppState, router};
+use frood_api::router;
 use frood_auth::{Auth, AuthSettings};
-use frood_ledger::{Ledger, PolicyConfig};
 use http_body_util::BodyExt;
 use jsonwebtoken::{Algorithm, EncodingKey, Header};
 use serde_json::{Value, json};
@@ -260,11 +259,7 @@ async fn setup(name: &str, idp: &Idp) -> Option<(Router, Auth)> {
     .expect("config")
     .config;
     let auth = Auth::new(pool.clone(), AuthSettings::from_config(&config));
-    let app = router(AppState {
-        ledger: Ledger::new(pool, PolicyConfig::default()),
-        auth: auth.clone(),
-        installation: "test".into(),
-    });
+    let app = router(frood_api::assemble(&config, pool, |_| None).state);
     Some((app, auth))
 }
 

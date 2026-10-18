@@ -4,9 +4,8 @@
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use frood_api::{AppState, router};
+use frood_api::router;
 use frood_auth::{Auth, AuthSettings};
-use frood_ledger::{Ledger, PolicyConfig};
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use tower::ServiceExt;
@@ -47,11 +46,7 @@ async fn app(name: &str) -> Option<(Router, Tokens)> {
         .create_personal_token(alice, "reader", &["knowledge:read".to_owned()], Some(1))
         .await
         .unwrap();
-    let app = router(AppState {
-        ledger: Ledger::new(pool, PolicyConfig::default()),
-        auth,
-        installation: "test".into(),
-    });
+    let app = router(frood_api::assemble(&config, pool, |_| None).state);
     Some((
         app,
         Tokens {
