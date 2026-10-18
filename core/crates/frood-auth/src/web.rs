@@ -74,10 +74,16 @@ async fn server_metadata(State(auth): State<Auth>) -> Json<Value> {
 
 fn resource_metadata(auth: &Auth, resource: Resource) -> Json<Value> {
     let settings = auth.settings();
+    // Clients such as Claude Code request every scope listed here: list only what the
+    // resource uses. MCP tools need no journal or admin rights.
+    let scopes: &[&str] = match resource {
+        Resource::Api => &scope::ALL,
+        Resource::Mcp => &[scope::READ, scope::CAPTURE, scope::PROPOSE, scope::DECIDE],
+    };
     Json(json!({
         "resource": settings.resource_url(resource),
         "authorization_servers": [settings.issuer],
-        "scopes_supported": scope::ALL,
+        "scopes_supported": scopes,
         "bearer_methods_supported": ["header"],
         "resource_name": format!("Frood {}", settings.installation),
     }))
