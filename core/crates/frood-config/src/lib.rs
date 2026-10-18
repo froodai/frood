@@ -12,9 +12,9 @@ use sha2::{Digest, Sha256};
 
 pub use interpolate::Secrets;
 pub use model::{
-    Account, AccountBudget, AskUser, Auth, Budget, Config, Deploy, Embeddings, Installation, Job,
-    ModelProvider, Module, OnExpire, Policies, Provider, Search, Server, ServerPlacement, Storage,
-    Trigger,
+    Account, AccountBudget, AskUser, Auth, AutoAccept, Budget, Config, Deploy, Embeddings,
+    Installation, Job, ModelProvider, Module, OnExpire, Policies, Provider, Search, Server,
+    ServerPlacement, Source, Storage, Trigger,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -362,6 +362,43 @@ fn validate_work(config: &Config, problems: &mut Vec<String>) {
                 ));
             }
         }
+        for tool in job.tools.iter().flatten() {
+            match tool.strip_prefix("source:") {
+                _ if tool == "frood" => {}
+                Some("${source}") => {}
+                Some(source) if config.sources.contains_key(source) => {}
+                Some(source) => problems.push(format!(
+                    "job {name}: tool {tool} names source {source}, which is not in sources"
+                )),
+                None => problems.push(format!(
+                    "job {name}: tool {tool:?} is not frood or source:<name>"
+                )),
+            }
+        }
+        if job
+            .on
+            .iter()
+            .flatten()
+            .any(|t| t.for_each.as_deref() == Some("source"))
+            && config.sources.is_empty()
+        {
+            problems.push(format!(
+                "job {name}: for_each: source, but there are no sources"
+            ));
+        }
+        if let Some(auto) = &job.auto_accept {
+            if auto.when != "authoritative_source" {
+                problems.push(format!(
+                    "job {name}: auto_accept.when can only be authoritative_source, not {:?}",
+                    auto.when
+                ));
+            }
+            if !auto.no_conflict {
+                problems.push(format!(
+                    "job {name}: auto_accept.no_conflict must stay true: conflicts always wait for a person"
+                ));
+            }
+        }
         if let Some(expire) = job
             .ask_user
             .as_ref()
@@ -370,6 +407,41 @@ fn validate_work(config: &Config, problems: &mut Vec<String>) {
         {
             problems.push(format!(
                 "job {name}: ask_user.expire_after {expire:?} is not a duration like 3d or 12h"
+            ));
+        }
+    }
+    for (name, source) in &config.sources {
+        if !is_valid_name(name) {
+            problems.push(format!(
+                "source name {name:?} must be lowercase letters, digits or dashes"
+            ));
+        }
+        if source.uses != "mcp" {
+            problems.push(format!(
+                "source {name}: uses {:?} is not available yet; this version reads MCP servers (uses: mcp)",
+                source.uses
+            ));
+        }
+        match &source.server {
+            None => problems.push(format!("source {name}: server is the MCP server's URL")),
+            Some(url) if !(url.starts_with("https://") || is_internal_http(url)) => {
+                problems.push(format!(
+                    "source {name}: server must be an https:// URL (plain http only inside the deployment)"
+                ));
+            }
+            Some(_) => {}
+        }
+        if source.connection.is_some() {
+            problems.push(format!(
+                "source {name}: personal connections come later; give a service account's token in headers"
+            ));
+        }
+        if let Some(retain) = &source.retain
+            && retain != "excerpts"
+            && retain != "full"
+        {
+            problems.push(format!(
+                "source {name}: retain is excerpts or full, not {retain:?}"
             ));
         }
     }
@@ -471,6 +543,16 @@ fn is_loopback_http(url: &str) -> bool {
     ["http://127.0.0.1", "http://localhost", "http://[::1]"]
         .iter()
         .any(|prefix| url.starts_with(prefix))
+}
+
+/// Plain HTTP to a loopback address or to a service inside the deployment (a host name without
+/// dots, like `team-chat` in Compose).
+fn is_internal_http(url: &str) -> bool {
+    let Some(rest) = url.strip_prefix("http://") else {
+        return false;
+    };
+    let host = rest.split(['/', ':']).next().unwrap_or_default();
+    is_loopback_http(url) || (!host.is_empty() && !host.contains('.'))
 }
 
 fn is_valid_name(name: &str) -> bool {
@@ -601,7 +683,10 @@ mod tests {
         );
         let loaded = parse(&raw, &secrets()).unwrap();
         assert_eq!(loaded.warnings.len(), 1);
-        assert!(loaded.warnings[0].contains("`runtimes`") && loaded.warnings[0].contains("M4"));
+        assert!(
+            loaded.warnings[0].contains("`runtimes`")
+                && loaded.warnings[0].contains("runtime module")
+        );
     }
 
     const WORK: &str = "
@@ -646,6 +731,13 @@ search:
     #[test]
     fn agent_jobs_parse_and_are_checked() {
         let agent = "
+sources:
+  team-chat:
+    uses: mcp
+    server: https://mcp.example.com/mcp
+    headers: { Authorization: 'Bearer ${secret:POSTGRES_PASSWORD}' }
+    scope: { channels: ['#release'] }
+    authoritative: true
 jobs:
   daily-sweep:
     uses: agents.execute
@@ -653,6 +745,7 @@ jobs:
       - { schedule: '0 3 * * *', timezone: Europe/Amsterdam, for_each: source }
     instructions: ./agents/daily-sweep.md
     tools: [frood, 'source:${source}']
+    auto_accept: { when: authoritative_source }
     runtime: stt
     agent: claude-code
     model: claude-haiku-5-5
@@ -672,8 +765,13 @@ jobs:
         );
         assert_eq!(job.ask_user.as_ref().unwrap().on_expire, OnExpire::Skip);
         assert_eq!(job.budget.as_ref().unwrap().max_minutes, Some(15));
+        let source = &loaded.config.sources["team-chat"];
+        assert_eq!(source.headers["Authorization"], "Bearer pw");
+        assert!(source.authoritative);
 
         let bad = raw
+            .replace("uses: mcp", "uses: slack-events")
+            .replace("when: authoritative_source", "when: always")
             .replace("'0 3 * * *'", "'every night'")
             .replace("Europe/Amsterdam", "Mars/Base")
             .replace("knowledge:propose]", "knowledge:decide]")
@@ -690,6 +788,8 @@ jobs:
                     "not knowledge:decide",
                     "duration like",
                     "needs a timezone",
+                    "this version reads MCP servers",
+                    "auto_accept.when can only be",
                 ] {
                     assert!(
                         problems.iter().any(|p| p.contains(needle)),

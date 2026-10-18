@@ -20,7 +20,7 @@ use uuid::Uuid;
 use crate::jobs::{AgentSettings, JobError, JobSpec};
 use crate::questions::{self, NewQuestion, Question};
 use crate::runs::{self, Run};
-use crate::{Ctx, Dispatch};
+use crate::{Ctx, Dispatch, sources};
 
 /// Run tokens live until the run ends; a run may wait days for an answer.
 const RUN_TOKEN_TTL: Duration = Duration::from_secs(14 * 86_400);
@@ -37,15 +37,39 @@ fn capability_input(spec: &JobSpec, settings: &AgentSettings, run: &Run) -> Valu
     })
 }
 
+/// The source a run reads, as its first message tells it.
+struct SourceBrief<'a> {
+    name: &'a str,
+    scope: Option<&'a Value>,
+    since: Option<chrono::DateTime<Utc>>,
+}
+
 /// The first message of a run: what it was started for.
-fn first_prompt(spec: &JobSpec, run: &Run) -> String {
+fn first_prompt(spec: &JobSpec, run: &Run, source: Option<SourceBrief<'_>>) -> String {
     let input = serde_json::to_string_pretty(&run.input).unwrap_or_default();
-    format!(
+    let mut prompt = format!(
         "You are running the Frood job `{}` (run {}). Your instructions are in the system prompt. \
          Work with Frood through its MCP tools. When you are done, give a short report of what you \
          did and which proposals you made.\n\nWhat started this run:\n{input}",
         spec.name, run.id
-    )
+    );
+    if let Some(source) = source {
+        prompt.push_str(&format!(
+            "\n\nThe source: `{}`. Its tools are on the MCP server `source:{}`.",
+            source.name, source.name
+        ));
+        if let Some(scope) = source.scope {
+            prompt.push_str(&format!("\nWhat to read there: {scope}"));
+        }
+        match source.since {
+            Some(since) => prompt.push_str(&format!(
+                "\nRead what is new since {} (when the last successful run of this job started).",
+                since.to_rfc3339()
+            )),
+            None => prompt.push_str("\nThis job has not read this source before."),
+        }
+    }
+    prompt
 }
 
 impl Ctx {
@@ -61,6 +85,7 @@ impl Ctx {
             .revoke_run_tokens(run.id)
             .await
             .map_err(|e| JobError::transient(e.to_string()))?;
+        let tools = sources::tools(settings, run)?;
         let token = self
             .auth
             .issue_run_token(
@@ -72,13 +97,24 @@ impl Ctx {
             )
             .await
             .map_err(|e| JobError::transient(e.to_string()))?;
-        let servers = vec![json!({
-            "name": "frood",
-            "path": "/mcp",
-            "headers": { "Authorization": format!("Bearer {}", token.token) },
-        })];
-        for tool in settings.tools.iter().filter(|t| *t != "frood") {
-            tracing::warn!(job = %spec.name, tool, "MCP sources are not wired yet; the agent runs without it");
+        let mut servers = Vec::new();
+        for tool in &tools {
+            if tool == "frood" {
+                servers.push(json!({
+                    "name": "frood",
+                    "path": "/mcp",
+                    "headers": { "Authorization": format!("Bearer {}", token.token) },
+                }));
+                continue;
+            }
+            let name = tool.strip_prefix("source:").unwrap_or(tool);
+            let source = self.sources.get(name).ok_or_else(|| {
+                JobError::permanent(format!(
+                    "job {}: source {name} is not in sources",
+                    spec.name
+                ))
+            })?;
+            servers.push(sources::mcp_server(tool, source));
         }
         Ok(Value::Array(servers))
     }
@@ -172,8 +208,18 @@ pub(crate) async fn start_or_resume(
         body["session_ref"] = json!(run.session_ref);
         body["message"] = json!(message);
     } else {
+        let source = sources::run_source(run);
+        let since = match &source {
+            Some(name) => sources::checkpoint(&ctx.pool, name, &spec.name).await?,
+            None => None,
+        };
+        let brief = source.as_deref().map(|name| SourceBrief {
+            name,
+            scope: ctx.sources.get(name).and_then(|s| s.scope.as_ref()),
+            since,
+        });
         body["op"] = json!("start");
-        body["prompt"] = json!(first_prompt(spec, run));
+        body["prompt"] = json!(first_prompt(spec, run, brief));
     }
     let out = ctx
         .modules
@@ -216,6 +262,13 @@ impl Dispatch {
         };
         if let Err(err) = result {
             tracing::error!(run = %run.id, error = %err, "cannot record the end of a run");
+        }
+        if status == "succeeded"
+            && let Some(source) = sources::run_source(run)
+            && let Err(err) =
+                sources::advance(pool, &source, &run.job, run.created_at, run.id).await
+        {
+            tracing::error!(run = %run.id, source, error = %err, "cannot record how far the source was read");
         }
         let _ = self.ctx.auth.revoke_run_tokens(run.id).await;
         for q in questions::for_run(pool, run.id).await.unwrap_or_default() {
@@ -580,5 +633,34 @@ impl Dispatch {
 
     pub async fn run_events(&self, run_id: Uuid, after: i64) -> sqlx::Result<Vec<runs::RunEvent>> {
         runs::events(&self.ctx.pool, run_id, after, 500).await
+    }
+
+    /// The source a run reads, if it is for one.
+    pub async fn run_source(&self, run_id: Uuid) -> Option<String> {
+        let run = runs::get(&self.ctx.pool, run_id).await.ok()??;
+        sources::run_source(&run)
+    }
+
+    /// The source whose authority lets a policy accept this run's proposals (W4′): the job
+    /// has `auto_accept`, and the run reads exactly one source, marked `authoritative`.
+    pub async fn authoritative_source(&self, run_id: Uuid) -> Option<String> {
+        let run = runs::get(&self.ctx.pool, run_id).await.ok()??;
+        let (_, settings) = self.agent_settings(&run.job)?;
+        if !settings.auto_accept {
+            return None;
+        }
+        let tools = sources::tools(settings, &run).ok()?;
+        let read: Vec<&str> = tools
+            .iter()
+            .filter_map(|t| t.strip_prefix("source:"))
+            .collect();
+        let [only] = read.as_slice() else {
+            return None;
+        };
+        self.ctx
+            .sources
+            .get(*only)
+            .filter(|s| s.authoritative)
+            .map(|_| (*only).to_owned())
     }
 }

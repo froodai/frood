@@ -76,14 +76,7 @@ pub fn assemble(
         modules.clone(),
         jobs,
     )
-    .with_sources(
-        config
-            .sources
-            .as_ref()
-            .and_then(|sources| sources.as_object())
-            .map(|sources| sources.keys().cloned().collect())
-            .unwrap_or_default(),
-    );
+    .with_sources(config.sources.clone());
     Assembly {
         state: AppState {
             ledger,

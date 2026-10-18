@@ -68,9 +68,11 @@ CREATE TABLE schedule_state (
     PRIMARY KEY (job, trigger, item)
 );
 
--- How far each source has been read, for "what changed since last time".
+-- How far each reader (a job) has read each source, for "what changed since last time".
 CREATE TABLE source_checkpoints (
-    source      TEXT PRIMARY KEY,
+    source      TEXT NOT NULL,
+    reader      TEXT NOT NULL,
     checkpoint  JSONB NOT NULL DEFAULT '{}',
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (source, reader)
 );

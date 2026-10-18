@@ -561,7 +561,8 @@ async fn schedules_tick_once_per_source() {
     let raw = "version: 1\ninstallation: {name: test}\nstorage: {uses: postgres, url: 'postgres://unused'}\n\
          deploy: {server: host}\n\
          accounts:\n  claude: { kind: api_key, provider: anthropic, secret: sk-test }\n\
-         sources:\n  team-chat: {}\n  wiki: {}\n\
+         sources:\n  team-chat: { uses: mcp, server: 'http://team-chat:8080/mcp' }\n  \
+         wiki: { uses: mcp, server: 'https://wiki.example.com/mcp' }\n\
          jobs:\n  extract: { enabled: false }\n  nightly:\n    uses: agents.execute\n    \
          on: [{ schedule: '0 3 * * *', timezone: Europe/Amsterdam, for_each: source }]\n    \
          runtime: runtime\n    agent: claude-code\n    model: claude-haiku-5-5\n    account: claude\n    \
@@ -731,4 +732,221 @@ async fn subscriptions_and_monthly_budgets() {
         runtime.lock().unwrap().ops_for(&second).is_empty(),
         "never started"
     );
+}
+
+#[tokio::test]
+async fn daily_sweep_reads_its_source_and_proposes() {
+    use chrono::TimeZone;
+    let Some(url) = frood_store::testing::database_url() else {
+        eprintln!("FROOD_TEST_DATABASE_URL is not set; skipping");
+        return;
+    };
+    let pool = frood_store::testing::fresh_database(&url, "daily_sweep")
+        .await
+        .expect("test database");
+    let runtime = Shared::default();
+    let fake = fake_runtime(runtime.clone()).await;
+    let raw = format!(
+        "version: 1\ninstallation: {{name: test}}\nstorage: {{uses: postgres, url: 'postgres://unused'}}\n\
+         deploy: {{server: host}}\n\
+         accounts:\n  claude: {{ kind: api_key, provider: anthropic, secret: sk-test }}\n\
+         sources:\n  team-chat:\n    uses: mcp\n    server: 'http://team-chat:8080/mcp'\n    \
+         headers: {{ Authorization: 'Bearer chat-token' }}\n    scope: {{ channels: ['#release'] }}\n  \
+         adr:\n    uses: mcp\n    server: 'https://adr.example.com/mcp'\n    authoritative: true\n\
+         jobs:\n  extract: {{ enabled: false }}\n  daily-sweep:\n    \
+         on: [{{ schedule: '0 3 * * *', timezone: Europe/Amsterdam, for_each: source }}]\n    \
+         runtime: runtime\n    agent: claude-code\n    model: claude-haiku-5-5\n    account: claude\n    \
+         budget: {{ max_usd: 0.5 }}\n    auto_accept: {{ when: authoritative_source }}\n\
+         modules:\n  runtime: {{ url: '{fake}' }}\n"
+    );
+    let config = frood_config::parse(
+        &raw,
+        &frood_config::Secrets::from_pairs(Vec::<(String, String)>::new()),
+    )
+    .unwrap()
+    .config;
+    let assembly = frood_api::assemble(&config, std::path::Path::new("."), pool, |name| {
+        (name == "FROOD_MODULE_TOKEN_RUNTIME").then(|| "rt-token".to_owned())
+    });
+    assert!(assembly.warnings.is_empty(), "{:?}", assembly.warnings);
+    let auth = assembly.state.auth.clone();
+    let alice = auth
+        .user_id_by_email("alice@example.com", true)
+        .await
+        .unwrap();
+    let scopes: Vec<String> = ["knowledge:read", "knowledge:propose", "admin"]
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect();
+    let (_, pat) = auth
+        .create_personal_token(alice, "test", &scopes, None)
+        .await
+        .unwrap();
+    let dispatch = assembly.state.dispatch.clone();
+    let app = frood_api::router(assembly.state);
+
+    // What the team agreed: Alice's own fact, accepted at once.
+    let agreed = text(
+        &tool(
+            &app,
+            &pat,
+            "propose_change",
+            json!({
+                "operations": [{ "op": "create", "assertion": { "kind": "commitment", "text": "Релиз 2.4 — 14 ноября", "modality": "agreed", "slots": { "due": "2026-11-14" } } }],
+                "rationale": "Agreed with Olya",
+                "source_text": "Договорились с Олей: релиз 2.4 — 14 ноября",
+            }),
+        )
+        .await,
+    );
+    assert_eq!(agreed["state"], "accepted", "{agreed}");
+
+    // The nightly schedule fires once per source.
+    let at = |d: u32, h: u32| chrono::Utc.with_ymd_and_hms(2026, 11, d, h, 0, 0).unwrap();
+    assert_eq!(dispatch.tick_schedules(at(9, 12)).await.unwrap(), 0);
+    assert_eq!(dispatch.tick_schedules(at(10, 2)).await.unwrap(), 2);
+    dispatch.drain().await.unwrap();
+    let starts: Vec<Value> = runtime
+        .lock()
+        .unwrap()
+        .calls
+        .iter()
+        .filter(|c| c["op"] == "start")
+        .cloned()
+        .collect();
+    assert_eq!(starts.len(), 2);
+    let chat = starts
+        .iter()
+        .find(|s| s["prompt"].as_str().unwrap().contains("`team-chat`"))
+        .unwrap();
+    let adr = starts
+        .iter()
+        .find(|s| s["prompt"].as_str().unwrap().contains("`adr`"))
+        .unwrap();
+    assert_eq!(chat["job"], "daily-sweep");
+    assert!(
+        chat["instructions"]
+            .as_str()
+            .unwrap()
+            .contains("nightly sweep"),
+        "the standard instructions"
+    );
+    let servers = chat["mcp_servers"].as_array().unwrap();
+    assert_eq!(servers.len(), 2, "{servers:?}");
+    assert_eq!(
+        servers[1],
+        json!({ "name": "source:team-chat", "url": "http://team-chat:8080/mcp", "headers": { "Authorization": "Bearer chat-token" } })
+    );
+    let prompt = chat["prompt"].as_str().unwrap();
+    assert!(prompt.contains("#release"), "{prompt}");
+    assert!(
+        prompt.contains("has not read this source before"),
+        "{prompt}"
+    );
+
+    // In the team chat: the release moves. Frood knows another date, so it is a conflict and
+    // waits for a person, whatever the job's policy.
+    let chat_token = run_token(chat);
+    let hits = text(
+        &tool(
+            &app,
+            &chat_token,
+            "search_knowledge",
+            json!({ "query": "релиз 2.4" }),
+        )
+        .await,
+    );
+    let known = &hits[0];
+    assert_eq!(known["text"], "Релиз 2.4 — 14 ноября", "{hits}");
+    let conflict = text(
+        &tool(
+            &app,
+            &chat_token,
+            "propose_change",
+            json!({
+                "operations": [{ "op": "supersede", "assertion_id": known["assertion_id"], "assertion": { "kind": "commitment", "text": "Релиз 2.4 — 28 ноября", "modality": "reported", "slots": { "due": "2026-11-28" } } }],
+                "base": [{ "assertion_id": known["assertion_id"], "version": known["version"] }],
+                "risk": "conflict",
+                "rationale": "#release, Olya, 2026-11-09 18:02",
+                "source_text": "Оля: релиз переносим на 28.11",
+            }),
+        )
+        .await,
+    );
+    assert_eq!(conflict["state"], "open", "{conflict}");
+    assert_eq!(conflict["author"], "agent:daily-sweep");
+
+    // In the authoritative ADR repository: a new decision is accepted by the job's policy; a
+    // contradiction still waits.
+    let adr_token = run_token(adr);
+    let decision = text(
+        &tool(
+            &app,
+            &adr_token,
+            "propose_change",
+            json!({
+                "operations": [{ "op": "create", "assertion": { "kind": "decision", "text": "Сервисы общаются через gRPC", "modality": "agreed" } }],
+                "rationale": "ADR-042, accepted",
+                "source_text": "ADR-042: Status accepted. Services talk gRPC.",
+            }),
+        )
+        .await,
+    );
+    assert_eq!(decision["state"], "accepted", "{decision}");
+    assert_eq!(
+        decision["verdicts"][0]["decided_by"],
+        "policy:authoritative-source"
+    );
+    assert!(
+        decision["verdicts"][0]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("source adr")
+    );
+    let disputed = text(
+        &tool(
+            &app,
+            &adr_token,
+            "propose_change",
+            json!({
+                "operations": [{ "op": "supersede", "assertion_id": known["assertion_id"], "assertion": { "kind": "commitment", "text": "Релиз 2.4 — 1 декабря", "modality": "agreed" } }],
+                "base": [{ "assertion_id": known["assertion_id"], "version": known["version"] }],
+                "risk": "conflict",
+                "rationale": "ADR-043",
+                "source_text": "ADR-043: release 2.4 on December 1",
+            }),
+        )
+        .await,
+    );
+    assert_eq!(disputed["state"], "open", "{disputed}");
+
+    // Both finish; the next night each reads from where its last run started.
+    let first_runs = dispatch.runs(Some("daily-sweep"), None, 10).await.unwrap();
+    {
+        let mut rt = runtime.lock().unwrap();
+        for run in &first_runs {
+            rt.run(&run.id.to_string()).state = "finished".into();
+        }
+    }
+    dispatch.watch_once().await.unwrap();
+    let chat_run = first_runs
+        .iter()
+        .find(|r| r.input["event"]["data"]["source"] == "team-chat")
+        .unwrap();
+    assert_eq!(
+        dispatch.run(chat_run.id).await.unwrap().unwrap().status,
+        "succeeded"
+    );
+    assert_eq!(dispatch.tick_schedules(at(11, 2)).await.unwrap(), 2);
+    dispatch.drain().await.unwrap();
+    let next = runtime
+        .lock()
+        .unwrap()
+        .calls
+        .iter()
+        .filter(|c| c["op"] == "start")
+        .map(|c| c["prompt"].as_str().unwrap().to_owned())
+        .find(|p| p.contains("`team-chat`") && p.contains("Read what is new since"))
+        .expect("the second night's sweep of the team chat");
+    assert!(next.contains(&chat_run.created_at.to_rfc3339()), "{next}");
 }

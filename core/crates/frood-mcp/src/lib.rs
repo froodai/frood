@@ -10,7 +10,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use frood_auth::{Principal, scope};
 use frood_dispatch::Dispatch;
 use frood_ledger::model::*;
-use frood_ledger::{Ledger, LedgerError, SearchQuery};
+use frood_ledger::{Ledger, LedgerError, ProposalContext, SearchQuery};
 use frood_search::{SearchError, Searcher};
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::tool::{Extension, ToolCallContext};
@@ -583,6 +583,16 @@ impl FroodMcp {
     ) -> ToolResult {
         let principal = principal(&parts)?;
         let actor = actor(&principal);
+        // An agent's run: the source it reads goes with the quote, and may let a policy accept.
+        let (run_source, context) = match &principal.run {
+            Some(run) => (
+                self.dispatch.run_source(run.id).await,
+                ProposalContext {
+                    authoritative_source: self.dispatch.authoritative_source(run.id).await,
+                },
+            ),
+            None => (None, ProposalContext::default()),
+        };
         let mut operations = operations(p.operations)?;
         let mut evidence: Vec<Uuid> = p
             .evidence
@@ -606,7 +616,13 @@ impl FroodMcp {
                         title: None,
                         content: text.clone(),
                         said_at: Some(Utc::now()),
-                        metadata: json!({ "via": "mcp" }),
+                        metadata: match (&principal.run, &run_source) {
+                            (Some(run), Some(source)) => {
+                                json!({ "via": "mcp", "run_id": run.id, "source": source })
+                            }
+                            (Some(run), None) => json!({ "via": "mcp", "run_id": run.id }),
+                            _ => json!({ "via": "mcp" }),
+                        },
                     };
                     let captured = self
                         .ledger
@@ -654,7 +670,7 @@ impl FroodMcp {
         };
         render(
             self.ledger
-                .open_proposal(&actor, input)
+                .open_proposal_in(&actor, input, &context)
                 .await
                 .map_err(ledger_error)?,
         )

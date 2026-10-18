@@ -30,11 +30,12 @@ pub struct Config {
     pub jobs: BTreeMap<String, Job>,
     #[serde(default)]
     pub search: Search,
+    /// Where knowledge comes from (docs/14 §3), by name.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub sources: BTreeMap<String, Source>,
 
     // Sections implemented by later milestones. They are accepted so a config can be written
     // ahead of time, but ignored with a warning until the milestone lands.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sources: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtimes: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -404,6 +405,10 @@ pub struct Job {
     /// Limits of one run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub budget: Option<Budget>,
+    /// Let a policy accept the agent's proposals (W4′): only from an authoritative source and
+    /// never a conflict.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_accept: Option<AutoAccept>,
     /// Other inputs for the capability (`module`, `effort`, …).
     #[serde(
         default,
@@ -492,6 +497,48 @@ pub struct Budget {
     pub max_minutes: Option<u32>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AutoAccept {
+    /// `authoritative_source`: the run reads one source, marked `authoritative`.
+    pub when: String,
+    /// Conflicts always wait for a person; only `true` is accepted.
+    #[serde(default = "yes")]
+    pub no_conflict: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+/// A place knowledge comes from (docs/14 §3). This version has MCP servers that agents read
+/// (`uses: mcp`); pull and push connectors come as modules later.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Source {
+    /// `mcp`: an MCP server an agent reads through its tools.
+    pub uses: String,
+    /// The MCP server's URL (Streamable HTTP).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server: Option<String>,
+    /// Headers for the server, e.g. `Authorization: Bearer ${secret:SLACK_MCP_TOKEN}` for a
+    /// service account.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub headers: BTreeMap<String, String>,
+    /// A person's own connection (`user:<email>`) instead of a service account. Later.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connection: Option<String>,
+    /// What to read there, for the agent: channels, folders, projects.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<serde_json::Value>,
+    /// What Frood keeps from it: `excerpts` (quotes in evidence) or `full`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retain: Option<String>,
+    /// Decisions from here may be accepted by a job's policy (W4′).
+    #[serde(default)]
+    pub authoritative: bool,
+}
+
 /// Search settings.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -513,8 +560,10 @@ pub struct Embeddings {
 
 /// Reserved sections and the milestone that starts using each of them.
 pub(crate) const RESERVED_SECTIONS: &[(&str, &str)] = &[
-    ("sources", "M4"),
-    ("runtimes", "M4"),
+    (
+        "runtimes",
+        "a later milestone; name a runtime module in the job's `runtime` for now",
+    ),
     ("imports", "a later milestone"),
     ("attention", "M5"),
     ("channels", "M5"),
@@ -524,7 +573,6 @@ pub(crate) const RESERVED_SECTIONS: &[(&str, &str)] = &[
 impl Config {
     pub(crate) fn reserved_present(&self) -> Vec<&'static str> {
         let present = [
-            ("sources", self.sources.is_some()),
             ("runtimes", self.runtimes.is_some()),
             ("imports", self.imports.is_some()),
             ("attention", self.attention.is_some()),
