@@ -36,10 +36,23 @@ pub struct AgentSettings {
     pub on_behalf_of: Option<String>,
     pub ask_user: AskUser,
     pub budget: Budget,
+    /// A policy may accept proposals from a run that reads one authoritative source (W4′).
+    pub auto_accept: bool,
 }
 
 /// Instructions of the standard `daily-sweep`, used unless the config gives its own.
 const DAILY_SWEEP: &str = include_str!("../../prompts/daily-sweep.md");
+
+/// What a standard agent job brings unless the config says otherwise.
+struct Builtin {
+    instructions: &'static str,
+    tools: &'static [&'static str],
+}
+
+const DAILY_SWEEP_BUILTIN: Builtin = Builtin {
+    instructions: DAILY_SWEEP,
+    tools: &["frood", "source:${source}"],
+};
 
 #[derive(Debug, Clone)]
 pub struct JobSpec {
@@ -151,7 +164,7 @@ fn read_instructions(value: &str, base_dir: &Path) -> Result<String, String> {
 fn agent_settings(
     name: &str,
     job: &Job,
-    builtin_instructions: Option<&str>,
+    builtin: Option<&Builtin>,
     base_dir: &Path,
 ) -> Result<AgentSettings, String> {
     let missing: Vec<&str> = [
@@ -174,11 +187,11 @@ fn agent_settings(
             missing.join(", ")
         ));
     }
-    let instructions = match (&job.instructions, builtin_instructions) {
+    let instructions = match (&job.instructions, builtin) {
         (Some(text), _) => {
             read_instructions(text, base_dir).map_err(|e| format!("job {name}: {e}"))?
         }
-        (None, Some(builtin)) => builtin.to_owned(),
+        (None, Some(builtin)) => builtin.instructions.to_owned(),
         (None, None) => return Err(format!("job {name} is off: it has no instructions")),
     };
     Ok(AgentSettings {
@@ -187,7 +200,13 @@ fn agent_settings(
         model: job.model.clone().unwrap_or_default(),
         account: job.account.clone().unwrap_or_default(),
         instructions,
-        tools: job.tools.clone().unwrap_or_else(|| vec!["frood".into()]),
+        tools: job.tools.clone().unwrap_or_else(|| {
+            builtin
+                .map_or(&["frood"][..], |b| b.tools)
+                .iter()
+                .map(|t| (*t).to_owned())
+                .collect()
+        }),
         permissions: job.permissions.clone().unwrap_or_else(|| {
             vec![
                 "knowledge:read".into(),
@@ -203,6 +222,7 @@ fn agent_settings(
             default_answer: None,
         }),
         budget: job.budget.clone().unwrap_or_default(),
+        auto_accept: job.auto_accept.is_some(),
     })
 }
 
@@ -266,7 +286,7 @@ pub fn resolve(config: &Config, caps: &Capabilities<'_>) -> (Vec<JobSpec>, Vec<S
                 let Some(change) = config.jobs.get(&job.name) else {
                     continue;
                 };
-                match agent_settings(&job.name, change, Some(DAILY_SWEEP), caps.base_dir) {
+                match agent_settings(&job.name, change, Some(&DAILY_SWEEP_BUILTIN), caps.base_dir) {
                     Ok(settings) => job.agent = Some(settings),
                     Err(warning) => {
                         warnings.push(warning);

@@ -22,7 +22,7 @@ pub use error::{LedgerError, Result};
 use error::{invalid, is_unique_violation};
 use journal::Event;
 use model::*;
-pub use policy::PolicyConfig;
+pub use policy::{PolicyConfig, ProposalContext};
 pub use search::{SearchHit, SearchQuery};
 
 /// Largest file a capture may carry.
@@ -314,6 +314,17 @@ impl Ledger {
 
     /// Opens a proposal, then lets the policies decide whether it is accepted right away.
     pub async fn open_proposal(&self, author: &Actor, input: NewProposal) -> Result<Proposal> {
+        self.open_proposal_in(author, input, &ProposalContext::default())
+            .await
+    }
+
+    /// [`Ledger::open_proposal`] with what the policies may know about where it comes from.
+    pub async fn open_proposal_in(
+        &self,
+        author: &Actor,
+        input: NewProposal,
+        context: &ProposalContext,
+    ) -> Result<Proposal> {
         let alternatives = match (input.operations, input.alternatives) {
             (Some(operations), None) => vec![Alternative {
                 key: "default".to_owned(),
@@ -419,12 +430,18 @@ impl Ledger {
         tx.commit().await?;
 
         let proposal = self.proposal(id).await?;
-        if let Some((policy, alternative)) = policy::evaluate(&proposal, &self.policy) {
+        if let Some((policy, alternative)) = policy::evaluate(&proposal, &self.policy, context) {
+            let reason = match (&context.authoritative_source, policy) {
+                (Some(source), "authoritative-source") => {
+                    format!("auto-accepted by policy {policy}: source {source}")
+                }
+                _ => format!("auto-accepted by policy {policy}"),
+            };
             let verdict = VerdictInput {
                 decision: Decision::Accept,
                 alternative: Some(alternative),
                 operations: None,
-                reason: Some(format!("auto-accepted by policy {policy}")),
+                reason: Some(reason),
                 deferred_until: None,
             };
             match self

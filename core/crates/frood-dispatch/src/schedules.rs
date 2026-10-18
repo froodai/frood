@@ -73,7 +73,7 @@ impl Dispatch {
         let mut fired = 0;
         for schedule in schedules(&self.jobs) {
             let items: Vec<Option<&str>> = if schedule.for_each_source {
-                self.sources.iter().map(|s| Some(s.as_str())).collect()
+                self.ctx.sources.keys().map(|s| Some(s.as_str())).collect()
             } else {
                 vec![None]
             };

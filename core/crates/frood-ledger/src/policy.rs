@@ -19,10 +19,19 @@ impl Default for PolicyConfig {
     }
 }
 
+/// What the policies may know about where a proposal comes from, beyond its author.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ProposalContext {
+    /// The proposal comes from an agent run of a job with `auto_accept`, which reads one
+    /// source marked `authoritative` (W4′).
+    pub authoritative_source: Option<String>,
+}
+
 /// Which policy, if any, accepts the proposal, and which alternative it takes.
 pub(crate) fn evaluate(
     proposal: &Proposal,
     config: &PolicyConfig,
+    context: &ProposalContext,
 ) -> Option<(&'static str, String)> {
     let [only] = proposal.alternatives.as_slice() else {
         return None;
@@ -40,6 +49,20 @@ pub(crate) fn evaluate(
         })
     {
         return Some(("own-facts", only.key.clone()));
+    }
+
+    // W4′: an agent reading an authoritative source may record new knowledge and changes;
+    // contradictions always wait for a person.
+    if context.authoritative_source.is_some()
+        && proposal.author.starts_with("agent:")
+        && matches!(proposal.risk, Risk::New | Risk::Change)
+        && only.operations.iter().all(|op| match op {
+            Operation::Link { kind, .. } => *kind != LinkKind::Contradicts,
+            Operation::MergeEntities { .. } => false,
+            _ => true,
+        })
+    {
+        return Some(("authoritative-source", only.key.clone()));
     }
 
     if let Some(threshold) = config.entity_merge_threshold
@@ -63,6 +86,10 @@ mod tests {
 
     use super::*;
     use crate::model::{Alternative, AssertionContent, BaseRef, Modality, ProposalState};
+
+    fn none() -> ProposalContext {
+        ProposalContext::default()
+    }
 
     fn proposal(author: &str, risk: Risk, operations: Vec<Operation>) -> Proposal {
         Proposal {
@@ -109,7 +136,12 @@ mod tests {
     fn users_own_new_facts_are_accepted() {
         let config = PolicyConfig::default();
         assert_eq!(
-            evaluate(&proposal("user:alice", Risk::New, vec![create()]), &config).map(|p| p.0),
+            evaluate(
+                &proposal("user:alice", Risk::New, vec![create()]),
+                &config,
+                &none()
+            )
+            .map(|p| p.0),
             Some("own-facts")
         );
     }
@@ -120,14 +152,16 @@ mod tests {
         assert!(
             evaluate(
                 &proposal("agent:daily-sweep", Risk::New, vec![create()]),
-                &config
+                &config,
+                &none()
             )
             .is_none()
         );
         assert!(
             evaluate(
                 &proposal("user:alice", Risk::Conflict, vec![create()]),
-                &config
+                &config,
+                &none()
             )
             .is_none()
         );
@@ -136,7 +170,7 @@ mod tests {
             assertion_id: Uuid::now_v7(),
             version: 1,
         });
-        assert!(evaluate(&with_base, &config).is_none());
+        assert!(evaluate(&with_base, &config, &none()).is_none());
         let disabled = PolicyConfig {
             auto_accept_own_facts: false,
             ..PolicyConfig::default()
@@ -144,7 +178,8 @@ mod tests {
         assert!(
             evaluate(
                 &proposal("user:alice", Risk::New, vec![create()]),
-                &disabled
+                &disabled,
+                &none()
             )
             .is_none()
         );
@@ -159,8 +194,35 @@ mod tests {
         };
         let mut p = proposal("agent:extract", Risk::EntityMerge, vec![merge]);
         p.confidence = Some(0.95);
-        assert_eq!(evaluate(&p, &config).map(|p| p.0), Some("entity-merge"));
+        assert_eq!(
+            evaluate(&p, &config, &none()).map(|p| p.0),
+            Some("entity-merge")
+        );
         p.confidence = Some(0.5);
-        assert!(evaluate(&p, &config).is_none());
+        assert!(evaluate(&p, &config, &none()).is_none());
+    }
+
+    #[test]
+    fn agents_reading_an_authoritative_source_record_but_never_contradict() {
+        let config = PolicyConfig::default();
+        let adr = ProposalContext {
+            authoritative_source: Some("adr-repo".into()),
+        };
+        let agent = |risk| proposal("agent:daily-sweep", risk, vec![create()]);
+        assert_eq!(
+            evaluate(&agent(Risk::New), &config, &adr).map(|p| p.0),
+            Some("authoritative-source")
+        );
+        assert_eq!(
+            evaluate(&agent(Risk::Change), &config, &adr).map(|p| p.0),
+            Some("authoritative-source")
+        );
+        assert!(evaluate(&agent(Risk::Conflict), &config, &adr).is_none());
+        assert!(evaluate(&agent(Risk::New), &config, &none()).is_none());
+        let human = proposal("user:alice", Risk::Change, vec![create()]);
+        assert!(
+            evaluate(&human, &config, &adr).is_none(),
+            "only agents' runs"
+        );
     }
 }

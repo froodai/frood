@@ -9,7 +9,9 @@ mod jobs;
 pub mod questions;
 pub mod runs;
 mod schedules;
+mod sources;
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -40,14 +42,13 @@ pub(crate) struct Ctx {
     pub searcher: Searcher,
     pub gateway: Gateway,
     pub modules: Modules,
+    pub sources: Arc<BTreeMap<String, frood_config::Source>>,
 }
 
 #[derive(Clone)]
 pub struct Dispatch {
     ctx: Ctx,
     jobs: Arc<Vec<JobSpec>>,
-    /// Names of the sources, for `for_each: source`.
-    sources: Arc<Vec<String>>,
 }
 
 /// Processing of one source: its runs and the proposals that cite it.
@@ -77,15 +78,15 @@ impl Dispatch {
                 searcher,
                 gateway,
                 modules,
+                sources: Arc::new(BTreeMap::new()),
             },
             jobs: Arc::new(jobs),
-            sources: Arc::new(Vec::new()),
         }
     }
 
-    /// The sources schedules with `for_each: source` run for.
-    pub fn with_sources(mut self, sources: Vec<String>) -> Self {
-        self.sources = Arc::new(sources);
+    /// The sources agents read; schedules with `for_each: source` run once for each.
+    pub fn with_sources(mut self, sources: BTreeMap<String, frood_config::Source>) -> Self {
+        self.ctx.sources = Arc::new(sources);
         self
     }
 
