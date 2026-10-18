@@ -93,7 +93,8 @@ async fn execute(
             run.state = "running".into();
             json!({ "session_ref": run.session, "state": "running" })
         }
-        "send" => json!({ "delivered": true }),
+        // An agent that cannot take input mid-turn: the core keeps the message for later.
+        "send" => json!({ "delivered": !body["message"].as_str().unwrap().contains("later") }),
         "stop" => {
             rt.run(&id).state = "failed".into();
             json!({})
@@ -482,8 +483,8 @@ async fn agent_asks_waits_resumes_and_proposes() {
     );
     assert_eq!(
         runtime.lock().unwrap().ops_for(&run_id),
-        ["start", "resume"],
-        "nothing was stopped"
+        ["start", "resume", "stop"],
+        "stopped once it ended, to free the session"
     );
 
     // A second run: steering reaches it at once; going over the budget stops it.
@@ -546,6 +547,34 @@ async fn agent_asks_waits_resumes_and_proposes() {
     assert_eq!(q["status"], "cancelled", "{q}");
     let (_, now) = call(&app, get_json(&format!("/v1/runs/{third}"), &pat)).await;
     assert_eq!(now["status"], "cancelled", "{now}");
+
+    // A fourth run cannot take a message mid-turn: it continues with it after its turn.
+    let (_, fourth) = call(&app, post_json("/v1/runs", &pat, json!({ "job": "sweep" }))).await;
+    let fourth = fourth["id"].as_str().unwrap().to_owned();
+    dispatch.drain().await.unwrap();
+    let (_, steered) = call(
+        &app,
+        post_json(
+            &format!("/v1/runs/{fourth}/messages"),
+            &pat,
+            json!({ "text": "Check #general later too" }),
+        ),
+    )
+    .await;
+    assert_eq!(steered["outcome"], "queued", "{steered}");
+    runtime.lock().unwrap().run(&fourth).state = "finished".into();
+    dispatch.watch_once().await.unwrap();
+    dispatch.drain().await.unwrap();
+    let resume = runtime.lock().unwrap().last("resume");
+    assert_eq!(resume["run_id"], fourth.as_str());
+    assert_eq!(
+        resume["message"],
+        "Message from a person: Check #general later too"
+    );
+    runtime.lock().unwrap().run(&fourth).state = "finished".into();
+    dispatch.watch_once().await.unwrap();
+    let (_, now) = call(&app, get_json(&format!("/v1/runs/{fourth}"), &pat)).await;
+    assert_eq!(now["status"], "succeeded", "{now}");
 }
 
 #[tokio::test]
@@ -835,7 +864,7 @@ async fn daily_sweep_reads_its_source_and_proposes() {
     assert_eq!(servers.len(), 2, "{servers:?}");
     assert_eq!(
         servers[1],
-        json!({ "name": "source:team-chat", "url": "http://team-chat:8080/mcp", "headers": { "Authorization": "Bearer chat-token" } })
+        json!({ "name": "source-team-chat", "url": "http://team-chat:8080/mcp", "headers": { "Authorization": "Bearer chat-token" } })
     );
     let prompt = chat["prompt"].as_str().unwrap();
     assert!(prompt.contains("#release"), "{prompt}");

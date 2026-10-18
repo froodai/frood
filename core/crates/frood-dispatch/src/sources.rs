@@ -36,10 +36,16 @@ pub(crate) fn tools(settings: &AgentSettings, run: &Run) -> Result<Vec<String>, 
         .collect()
 }
 
-/// The MCP server entry of a source tool (`source:<name>`), for the runtime.
-pub(crate) fn mcp_server(tool: &str, source: &Source) -> Value {
+/// Name of a source's MCP server for the agent: `source-<name>`. Agents name tools after
+/// their servers, and tool names allow only letters, digits, `_` and `-`.
+pub(crate) fn server_name(source: &str) -> String {
+    format!("source-{source}")
+}
+
+/// The MCP server entry of a source, for the runtime.
+pub(crate) fn mcp_server(name: &str, source: &Source) -> Value {
     json!({
-        "name": tool,
+        "name": server_name(name),
         "url": source.server,
         "headers": source.headers,
     })

@@ -23,11 +23,13 @@ pub struct Question {
     pub expires_at: Option<DateTime<Utc>>,
     pub on_expire: String,
     pub created_at: DateTime<Utc>,
+    /// The answer (or its absence) has reached the agent.
+    pub delivered: bool,
 }
 
 macro_rules! columns {
     () => {
-        "id, run_id, job, asked_for, text, options, context, status, answer, answered_by, answered_at, expires_at, on_expire, created_at"
+        "id, run_id, job, asked_for, text, options, context, status, answer, answered_by, answered_at, expires_at, on_expire, created_at, delivered"
     };
 }
 
@@ -47,6 +49,7 @@ fn question(row: &sqlx::postgres::PgRow) -> sqlx::Result<Question> {
         expires_at: row.try_get("expires_at")?,
         on_expire: row.try_get("on_expire")?,
         created_at: row.try_get("created_at")?,
+        delivered: row.try_get("delivered")?,
     })
 }
 
@@ -164,18 +167,36 @@ pub(crate) async fn set_status(pool: &PgPool, id: Uuid, status: &str) -> sqlx::R
     Ok(())
 }
 
-/// The message that resumes a run after its questions were settled.
-pub(crate) fn resume_message(questions: &[Question]) -> String {
-    let mut lines = vec!["Answers to your questions:".to_owned()];
-    for q in questions {
-        let answer = match q.status.as_str() {
-            "answered" => q.answer.clone().unwrap_or_default(),
-            "expired" => "(no answer in time; continue without it)".to_owned(),
-            _ => "(not answered)".to_owned(),
-        };
-        lines.push(format!("- {}\n  {}", q.text, answer));
+pub(crate) async fn mark_delivered(pool: &PgPool, ids: &[Uuid]) -> sqlx::Result<()> {
+    if ids.is_empty() {
+        return Ok(());
     }
-    lines.join("\n")
+    sqlx::query("UPDATE questions SET delivered = true WHERE id = ANY($1)")
+        .bind(ids)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// The message that resumes a run: answers it has not seen yet and people's messages.
+pub(crate) fn resume_message(questions: &[Question], messages: &[&str]) -> String {
+    let mut parts = Vec::new();
+    if !questions.is_empty() {
+        let mut lines = vec!["Answers to your questions:".to_owned()];
+        for q in questions {
+            let answer = match q.status.as_str() {
+                "answered" => q.answer.clone().unwrap_or_default(),
+                "expired" => "(no answer in time; continue without it)".to_owned(),
+                _ => "(not answered)".to_owned(),
+            };
+            lines.push(format!("- {}\n  {}", q.text, answer));
+        }
+        parts.push(lines.join("\n"));
+    }
+    for text in messages {
+        parts.push(format!("Message from a person: {text}"));
+    }
+    parts.join("\n\n")
 }
 
 #[cfg(test)]
@@ -199,12 +220,21 @@ mod tests {
             expires_at: None,
             on_expire: "skip".into(),
             created_at: Utc::now(),
+            delivered: false,
         };
-        let message = resume_message(&[
-            q("Decision or discussion?", "answered", Some("Decision")),
-            q("Who owns it?", "expired", None),
-        ]);
+        let message = resume_message(
+            &[
+                q("Decision or discussion?", "answered", Some("Decision")),
+                q("Who owns it?", "expired", None),
+            ],
+            &["Skip the bots"],
+        );
         assert!(message.contains("Decision or discussion?\n  Decision"));
         assert!(message.contains("no answer in time"));
+        assert!(message.ends_with("Message from a person: Skip the bots"));
+        assert_eq!(
+            resume_message(&[], &["Also #release"]),
+            "Message from a person: Also #release"
+        );
     }
 }

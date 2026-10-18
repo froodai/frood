@@ -55,8 +55,9 @@ fn first_prompt(spec: &JobSpec, run: &Run, source: Option<SourceBrief<'_>>) -> S
     );
     if let Some(source) = source {
         prompt.push_str(&format!(
-            "\n\nThe source: `{}`. Its tools are on the MCP server `source:{}`.",
-            source.name, source.name
+            "\n\nThe source: `{}`. Its tools are on the MCP server `{}`.",
+            source.name,
+            sources::server_name(source.name)
         ));
         if let Some(scope) = source.scope {
             prompt.push_str(&format!("\nWhat to read there: {scope}"));
@@ -114,7 +115,7 @@ impl Ctx {
                     spec.name
                 ))
             })?;
-            servers.push(sources::mcp_server(tool, source));
+            servers.push(sources::mcp_server(name, source));
         }
         Ok(Value::Array(servers))
     }
@@ -196,14 +197,22 @@ pub(crate) async fn start_or_resume(
     body["mcp_servers"] = ctx.mcp_servers(spec, settings, run, on_behalf_of).await?;
     body["credentials"] = credentials;
     let resuming = run.runtime.is_some() && run.session_ref.is_some();
+    let mut delivered = Vec::new();
     if resuming {
-        let qs = questions::for_run(&ctx.pool, run.id).await?;
-        let mut message = questions::resume_message(&qs);
-        for pending in run.pending_messages.as_array().into_iter().flatten() {
-            if let Some(text) = pending.as_str() {
-                message.push_str(&format!("\n\nMessage from a person: {text}"));
-            }
-        }
+        let settled: Vec<Question> = questions::for_run(&ctx.pool, run.id)
+            .await?
+            .into_iter()
+            .filter(|q| q.status != "open" && !q.delivered)
+            .collect();
+        delivered = settled.iter().map(|q| q.id).collect();
+        let messages: Vec<&str> = run
+            .pending_messages
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect();
+        let message = questions::resume_message(&settled, &messages);
         body["op"] = json!("resume");
         body["session_ref"] = json!(run.session_ref);
         body["message"] = json!(message);
@@ -226,6 +235,7 @@ pub(crate) async fn start_or_resume(
         .call(&settings.runtime, "agents.execute", &body)
         .await?;
     let session = out.get("session_ref").and_then(Value::as_str);
+    questions::mark_delivered(&ctx.pool, &delivered).await?;
     runs::set_started(
         &ctx.pool,
         run.id,
@@ -253,8 +263,14 @@ impl Dispatch {
         spec.agent.as_ref().map(|a| (spec, a))
     }
 
+    /// Ends a run: the runtime stops the agent and frees what it holds (its session too), the
+    /// run token dies, open questions are cancelled.
     async fn finish(&self, run: &Run, status: &str, output: Option<&Value>, error: Option<&str>) {
         let pool = &self.ctx.pool;
+        if let Some(runtime) = &run.runtime {
+            self.runtime_call(runtime, json!({ "op": "stop", "run_id": run.id }))
+                .await;
+        }
         let result = match status {
             "succeeded" => runs::succeed(pool, run.id, output.unwrap_or(&Value::Null)).await,
             "cancelled" => runs::cancel(pool, run.id, error.unwrap_or("cancelled")).await,
@@ -397,8 +413,6 @@ impl Dispatch {
             _ => account_over,
         };
         if let Some(reason) = over {
-            self.runtime_call(&runtime, json!({ "op": "stop", "run_id": run.id }))
-                .await;
             self.finish(run, "failed", None, Some(&reason)).await;
             return Ok(());
         }
@@ -409,9 +423,18 @@ impl Dispatch {
                     .await?
                     .iter()
                     .any(|q| q.status == "open");
+                let messages = run
+                    .pending_messages
+                    .as_array()
+                    .is_some_and(|m| !m.is_empty());
                 if open {
                     runs::set_waiting(&self.ctx.pool, run.id).await?;
                     runs::add_event(&self.ctx.pool, run.id, "waiting", &json!({})).await?;
+                } else if messages {
+                    // People wrote while it worked: it continues with their messages.
+                    runs::set_waiting(&self.ctx.pool, run.id).await?;
+                    runs::requeue_for_resume(&self.ctx.pool, run.id).await?;
+                    runs::add_event(&self.ctx.pool, run.id, "messages", &json!({})).await?;
                 } else {
                     let output = json!({ "result": status.get("result"), "cost_usd": cost });
                     self.finish(run, "succeeded", Some(&output), None).await;
@@ -443,10 +466,6 @@ impl Dispatch {
             "cancel" => {
                 questions::set_status(&self.ctx.pool, question.id, "expired").await?;
                 if let Some(run) = runs::get(&self.ctx.pool, question.run_id).await? {
-                    if let Some(runtime) = &run.runtime {
-                        self.runtime_call(runtime, json!({ "op": "stop", "run_id": run.id }))
-                            .await;
-                    }
                     self.finish(&run, "cancelled", None, Some("a question expired"))
                         .await;
                 }
@@ -602,10 +621,6 @@ impl Dispatch {
             .ok_or("the run is not known")?;
         if matches!(run.status.as_str(), "succeeded" | "failed" | "cancelled") {
             return Err(format!("the run is already {}", run.status));
-        }
-        if let Some(runtime) = &run.runtime {
-            self.runtime_call(runtime, json!({ "op": "stop", "run_id": run_id }))
-                .await;
         }
         self.finish(&run, "cancelled", None, Some("cancelled by a person"))
             .await;
