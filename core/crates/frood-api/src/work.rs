@@ -84,5 +84,11 @@ async fn run(
         .await
         .map_err(|e| ApiError::from(frood_ledger::LedgerError::from(e)))?
         .map(Json)
-        .ok_or_else(|| ApiError::new(axum::http::StatusCode::NOT_FOUND, "not-found", format!("run {id} not found")))
+        .ok_or_else(|| {
+            ApiError::new(
+                axum::http::StatusCode::NOT_FOUND,
+                "not-found",
+                format!("run {id} not found"),
+            )
+        })
 }
