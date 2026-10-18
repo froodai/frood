@@ -8,7 +8,7 @@ installation:
 
 server:
   listen: "__LISTEN__"
-  # public_url: https://mem.example.com   # needed from M2 for OAuth and MCP clients
+  # public_url: https://mem.example.com   # needed for cloud clients: Claude, ChatGPT
 
 storage:
   uses: postgres
@@ -18,3 +18,17 @@ deploy:
   target: compose
   server: __SERVER__   # container: Frood runs in Docker; host: you run `frood serve` yourself
 __IMAGE_OR_BUILD__  postgres_port: __PG_PORT__
+
+# Who may sign in, and through which identity providers (docs/12 §3).
+auth:
+  allow: []                  # exact addresses, e.g. [you@example.com]
+  # allow_domains: [example.com]
+  providers: []
+  #  - kind: oidc            # Google, Microsoft Entra, a corporate SSO
+  #    id: google
+  #    label: Google
+  #    issuer: https://accounts.google.com
+  #    client_id: 1234.apps.googleusercontent.com
+  #    client_secret: ${secret:GOOGLE_CLIENT_SECRET}
+  #  - kind: dev             # development only: type an email; local servers only
+  #    id: dev
