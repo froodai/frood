@@ -13,7 +13,7 @@ jobs:
         working-directory: core
     services:
       postgres:
-        image: postgres:18
+        image: pgvector/pgvector:pg18
         env:
           POSTGRES_PASSWORD: test
         ports:

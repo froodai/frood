@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -17,27 +19,32 @@ pub struct Config {
     pub policies: Policies,
     #[serde(default)]
     pub auth: Auth,
+    /// Accounts of model providers, by name (docs/13 §8).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub accounts: BTreeMap<String, Account>,
+    /// Container modules, by name (docs/16 §2).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub modules: BTreeMap<String, Module>,
+    /// Jobs: changes to the built-in standard set and new jobs (docs/13 §3).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub jobs: BTreeMap<String, Job>,
+    #[serde(default)]
+    pub search: Search,
 
     // Sections implemented by later milestones. They are accepted so a config can be written
     // ahead of time, but ignored with a warning until the milestone lands.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sources: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub accounts: Option<serde_json::Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtimes: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub imports: Option<serde_json::Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub jobs: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attention: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub channels: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backup: Option<serde_json::Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub modules: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -246,31 +253,134 @@ fn default_merge_threshold() -> Option<f32> {
     Some(0.9)
 }
 
+/// An account that pays for model calls.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum Account {
+    /// A provider API key, paid by use. Belongs to the installation.
+    ApiKey {
+        provider: ModelProvider,
+        /// The key, e.g. `${secret:ANTHROPIC_API_KEY}`.
+        secret: String,
+        /// Another endpoint with the same API (a proxy or a compatible service).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        base_url: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum ModelProvider {
+    Anthropic,
+    Openai,
+}
+
+impl Account {
+    pub fn provider(&self) -> ModelProvider {
+        match self {
+            Self::ApiKey { provider, .. } => *provider,
+        }
+    }
+}
+
+/// A container module (docs/16 §2): where it comes from, its secrets and settings.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Module {
+    /// Image to run; pin by digest in production.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
+    /// Or build the image from this directory (relative to the config file).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build: Option<String>,
+    /// Or a module that already runs elsewhere, e.g. during development.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// Host port (127.0.0.1) for a server that runs on the host; assigned when omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+    /// Secrets the module receives as environment variables. Others stay hidden from it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub secrets: Vec<String>,
+    /// Module settings, checked against the schema in its manifest.
+    #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
+    pub config: serde_json::Map<String, serde_json::Value>,
+}
+
+/// A job: what capability to call, on which events, with which inputs (docs/13 §3–4).
+/// Jobs of the standard set (`transcribe`, `extract`, `embed`) exist without being written;
+/// writing one changes only the fields given.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Job {
+    /// Capability the job calls: `llm.complete`, `media.transcribe`, `llm.embed`, …
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uses: Option<String>,
+    /// `false` turns the job off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// Events that start the job.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<Vec<Trigger>>,
+    /// Inputs: `account`, `model`, `module`, `instructions`, …
+    #[serde(
+        default,
+        rename = "with",
+        skip_serializing_if = "serde_json::Map::is_empty"
+    )]
+    pub with: serde_json::Map<String, serde_json::Value>,
+}
+
+/// An event that starts a job, optionally narrowed by fields of the event data.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Trigger {
+    /// Journal event type, e.g. `source.captured`.
+    pub event: String,
+    /// Event data fields that must equal these values, e.g. `{ has_text: true }`.
+    #[serde(default, rename = "where", skip_serializing_if = "BTreeMap::is_empty")]
+    pub filter: BTreeMap<String, serde_json::Value>,
+}
+
+/// Search settings.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Search {
+    /// Embeddings for search by meaning and across languages. Without them, search matches
+    /// words only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embeddings: Option<Embeddings>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Embeddings {
+    /// Account from `accounts` that computes them.
+    pub account: String,
+    /// Model; the provider's default multilingual model when omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+}
+
 /// Reserved sections and the milestone that starts using each of them.
 pub(crate) const RESERVED_SECTIONS: &[(&str, &str)] = &[
-    ("sources", "M3"),
-    ("accounts", "M4"),
+    ("sources", "M4"),
     ("runtimes", "M4"),
-    ("imports", "M4"),
-    ("jobs", "M4"),
+    ("imports", "a later milestone"),
     ("attention", "M5"),
     ("channels", "M5"),
     ("backup", "M6"),
-    ("modules", "M6"),
 ];
 
 impl Config {
     pub(crate) fn reserved_present(&self) -> Vec<&'static str> {
         let present = [
             ("sources", self.sources.is_some()),
-            ("accounts", self.accounts.is_some()),
             ("runtimes", self.runtimes.is_some()),
             ("imports", self.imports.is_some()),
-            ("jobs", self.jobs.is_some()),
             ("attention", self.attention.is_some()),
             ("channels", self.channels.is_some()),
             ("backup", self.backup.is_some()),
-            ("modules", self.modules.is_some()),
         ];
         present
             .into_iter()

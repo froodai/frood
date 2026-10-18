@@ -12,7 +12,8 @@ use sha2::{Digest, Sha256};
 
 pub use interpolate::Secrets;
 pub use model::{
-    Auth, Config, Deploy, Installation, Policies, Provider, Server, ServerPlacement, Storage,
+    Account, Auth, Config, Deploy, Embeddings, Installation, Job, ModelProvider, Module, Policies,
+    Provider, Search, Server, ServerPlacement, Storage, Trigger,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -140,6 +141,7 @@ fn validate(config: &Config) -> Result<(), ConfigError> {
         ));
     }
     validate_auth(config, &mut problems);
+    validate_work(config, &mut problems);
     if config.deploy.target != "compose" {
         problems.push(format!(
             "deploy.target {:?} is not available yet; only `compose` exists",
@@ -215,6 +217,103 @@ fn validate_auth(config: &Config, problems: &mut Vec<String>) {
     }
     if auth.access_token_minutes == 0 || auth.refresh_token_days == 0 {
         problems.push("auth token lifetimes must be positive".to_owned());
+    }
+}
+
+/// Accounts, modules, jobs and search (M3).
+fn validate_work(config: &Config, problems: &mut Vec<String>) {
+    for (name, account) in &config.accounts {
+        if !is_valid_name(name) {
+            problems.push(format!(
+                "account name {name:?} must be lowercase letters, digits or dashes"
+            ));
+        }
+        let Account::ApiKey {
+            secret, base_url, ..
+        } = account;
+        if secret.trim().is_empty() {
+            problems.push(format!("account {name}: secret is empty"));
+        }
+        if let Some(url) = base_url
+            && !(url.starts_with("https://") || is_loopback_http(url))
+        {
+            problems.push(format!("account {name}: base_url must be an https:// URL"));
+        }
+    }
+    let mut ports = BTreeSet::new();
+    for (name, module) in &config.modules {
+        if !is_valid_name(name) {
+            problems.push(format!(
+                "module name {name:?} must be lowercase letters, digits or dashes"
+            ));
+        }
+        let sources = [&module.image, &module.build, &module.url]
+            .iter()
+            .filter(|s| s.is_some())
+            .count();
+        if sources != 1 {
+            problems.push(format!(
+                "module {name}: set exactly one of image, build or url"
+            ));
+        }
+        if let Some(url) = &module.url
+            && !(url.starts_with("http://") || url.starts_with("https://"))
+        {
+            problems.push(format!("module {name}: url must be http:// or https://"));
+        }
+        for secret in &module.secrets {
+            if secret.is_empty()
+                || !secret
+                    .chars()
+                    .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+            {
+                problems.push(format!(
+                    "module {name}: secret name {secret:?} must be like TELEGRAM_BOT_TOKEN"
+                ));
+            }
+        }
+        if let Some(port) = module.port
+            && !ports.insert(port)
+        {
+            problems.push(format!("module {name}: port {port} is used twice"));
+        }
+    }
+    for (name, job) in &config.jobs {
+        if !is_valid_name(name) {
+            problems.push(format!(
+                "job name {name:?} must be lowercase letters, digits or dashes"
+            ));
+        }
+        if let Some(account) = job.with.get("account") {
+            match account.as_str() {
+                Some(account) if config.accounts.contains_key(account) => {}
+                _ => problems.push(format!("job {name}: account {account} is not in accounts")),
+            }
+        }
+        if let Some(module) = job.with.get("module") {
+            match module.as_str() {
+                Some(module) if config.modules.contains_key(module) => {}
+                _ => problems.push(format!("job {name}: module {module} is not in modules")),
+            }
+        }
+        for trigger in job.on.iter().flatten() {
+            if trigger.event.trim().is_empty() {
+                problems.push(format!("job {name}: a trigger has no event"));
+            }
+        }
+    }
+    if let Some(embeddings) = &config.search.embeddings {
+        match config.accounts.get(&embeddings.account) {
+            None => problems.push(format!(
+                "search.embeddings.account {:?} is not in accounts",
+                embeddings.account
+            )),
+            Some(account) if account.provider() == ModelProvider::Anthropic => problems.push(
+                "search.embeddings: Anthropic has no embeddings API; use an openai account"
+                    .to_owned(),
+            ),
+            Some(_) => {}
+        }
     }
 }
 
@@ -347,12 +446,82 @@ mod tests {
     #[test]
     fn reserved_sections_warn() {
         let raw = format!(
-            "{}\njobs:\n  digest: {{}}\n",
+            "{}\nruntimes:\n  local: {{}}\n",
             template_for(ServerPlacement::Host)
         );
         let loaded = parse(&raw, &secrets()).unwrap();
         assert_eq!(loaded.warnings.len(), 1);
-        assert!(loaded.warnings[0].contains("`jobs`") && loaded.warnings[0].contains("M4"));
+        assert!(loaded.warnings[0].contains("`runtimes`") && loaded.warnings[0].contains("M4"));
+    }
+
+    const WORK: &str = "
+accounts:
+  anthropic: { kind: api_key, provider: anthropic, secret: '${secret:POSTGRES_PASSWORD}' }
+  openai: { kind: api_key, provider: openai, secret: sk-test }
+modules:
+  stt: { build: ../modules/stt-openai, secrets: [OPENAI_API_KEY], config: { model: whisper-1 } }
+  telegram: { image: 'ghcr.io/froodai/telegram:0.0.1', secrets: [TELEGRAM_BOT_TOKEN] }
+jobs:
+  extract: { with: { account: anthropic, model: claude-sonnet-5-5 } }
+  transcribe: { with: { module: stt } }
+  embed: { enabled: false }
+search:
+  embeddings: { account: openai }
+";
+
+    #[test]
+    fn work_sections_parse() {
+        let raw = format!("{}{WORK}", template_for(ServerPlacement::Host));
+        let config = parse(&raw, &secrets()).unwrap().config;
+        assert_eq!(
+            config.accounts["anthropic"].provider(),
+            ModelProvider::Anthropic
+        );
+        assert_eq!(
+            config.accounts["anthropic"],
+            Account::ApiKey {
+                provider: ModelProvider::Anthropic,
+                secret: "pw".into(),
+                base_url: None
+            }
+        );
+        assert_eq!(config.modules["stt"].secrets, ["OPENAI_API_KEY"]);
+        assert_eq!(config.jobs["extract"].with["model"], "claude-sonnet-5-5");
+        assert_eq!(config.jobs["embed"].enabled, Some(false));
+        assert_eq!(config.search.embeddings.unwrap().account, "openai");
+    }
+
+    #[test]
+    fn work_sections_are_checked() {
+        let raw = format!("{}{WORK}", template_for(ServerPlacement::Host))
+            .replace("account: anthropic, model", "account: nobody, model")
+            .replace(
+                "embeddings: { account: openai }",
+                "embeddings: { account: anthropic }",
+            )
+            .replace(
+                "image: 'ghcr.io/froodai/telegram:0.0.1'",
+                "image: x, url: 'http://127.0.0.1:9000'",
+            );
+        match parse(&raw, &secrets()) {
+            Err(ConfigError::Invalid(problems)) => {
+                assert!(
+                    problems.iter().any(|p| p.contains("job extract: account")),
+                    "{problems:?}"
+                );
+                assert!(
+                    problems
+                        .iter()
+                        .any(|p| p.contains("Anthropic has no embeddings"))
+                );
+                assert!(
+                    problems
+                        .iter()
+                        .any(|p| p.contains("module telegram: set exactly one"))
+                );
+            }
+            other => panic!("expected Invalid, got {other:?}"),
+        }
     }
 
     #[test]
