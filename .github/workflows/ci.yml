@@ -40,3 +40,23 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - run: docker build core
+
+  modules:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        module: [stt-openai, telegram]
+    defaults:
+      run:
+        working-directory: modules/${{ matrix.module }}
+    steps:
+      - uses: actions/checkout@v5
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      - run: rustup toolchain install 1.99 --profile minimal --component rustfmt,clippy && rustup default 1.99
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: modules/${{ matrix.module }}
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo test --locked
+      - run: docker build .

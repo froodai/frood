@@ -1,0 +1,16 @@
+name: telegram
+version: 0.0.1
+description: Telegram bot for quick capture. Text, voice messages and files go to /v1/capture as the person whose Telegram account is linked (/link <code>). Uses long polling, so no public address is needed.
+license: Apache-2.0
+provides: []
+frood_api: [knowledge:capture, knowledge:read, channels:act]
+config:
+  type: object
+  properties:
+    language: { type: string, enum: [en, ru], description: "Language of the bot's replies, default en" }
+permissions:
+  egress: [api.telegram.org]
+  secrets: [TELEGRAM_BOT_TOKEN]
+runtime:
+  form: container
+  health: /healthz
