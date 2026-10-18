@@ -583,9 +583,8 @@ jobs:
     ask_user: { allowed: true, expire_after: 3d, on_expire: skip }
     budget: { max_usd: 0.5, max_minutes: 15 }
 ";
-        let raw = format!("{}{WORK}", template_for(ServerPlacement::Host))
-            .replace("\njobs:\n", &format!("{agent}"))
-            .replace("  extract: { with", "  extract: { with");
+        let raw =
+            format!("{}{WORK}", template_for(ServerPlacement::Host)).replace("\njobs:\n", agent);
         let loaded = parse(&raw, &secrets()).unwrap();
         let job = &loaded.config.jobs["daily-sweep"];
         assert_eq!(
