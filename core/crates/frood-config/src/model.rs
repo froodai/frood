@@ -541,6 +541,10 @@ pub struct Source {
     /// Decisions from here may be accepted by a job's policy (W4′).
     #[serde(default)]
     pub authoritative: bool,
+    /// The server's tools the agent may call; all of them when left out. Name only reading
+    /// tools for a source the agent must not change.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<String>>,
 }
 
 /// Search settings.

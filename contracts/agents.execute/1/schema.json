@@ -42,7 +42,8 @@
         "name": { "type": "string" },
         "path": { "type": "string", "description": "Relative to FROOD_URL" },
         "url": { "type": "string", "format": "uri" },
-        "headers": { "type": "object", "additionalProperties": { "type": "string" } }
+        "headers": { "type": "object", "additionalProperties": { "type": "string" } },
+        "tools": { "type": "array", "items": { "type": "string" } }
       },
       "oneOf": [{ "required": ["path"] }, { "required": ["url"] }]
     },

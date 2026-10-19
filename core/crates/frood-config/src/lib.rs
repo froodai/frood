@@ -436,6 +436,17 @@ fn validate_work(config: &Config, problems: &mut Vec<String>) {
                 "source {name}: personal connections come later; give a service account's token in headers"
             ));
         }
+        for tool in source.tools.iter().flatten() {
+            if tool.is_empty()
+                || !tool
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+            {
+                problems.push(format!(
+                    "source {name}: tool {tool:?} must be a tool name like search_issues"
+                ));
+            }
+        }
         if let Some(retain) = &source.retain
             && retain != "excerpts"
             && retain != "full"
@@ -737,6 +748,7 @@ sources:
     server: https://mcp.example.com/mcp
     headers: { Authorization: 'Bearer ${secret:POSTGRES_PASSWORD}' }
     scope: { channels: ['#release'] }
+    tools: [search_messages, read_thread]
     authoritative: true
 jobs:
   daily-sweep:
@@ -768,6 +780,10 @@ jobs:
         let source = &loaded.config.sources["team-chat"];
         assert_eq!(source.headers["Authorization"], "Bearer pw");
         assert!(source.authoritative);
+        assert_eq!(
+            source.tools.as_deref(),
+            Some(&["search_messages".to_owned(), "read_thread".to_owned()][..])
+        );
 
         let bad = raw
             .replace("uses: mcp", "uses: slack-events")

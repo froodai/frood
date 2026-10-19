@@ -44,11 +44,15 @@ pub(crate) fn server_name(source: &str) -> String {
 
 /// The MCP server entry of a source, for the runtime.
 pub(crate) fn mcp_server(name: &str, source: &Source) -> Value {
-    json!({
+    let mut server = json!({
         "name": server_name(name),
         "url": source.server,
         "headers": source.headers,
-    })
+    });
+    if let Some(tools) = &source.tools {
+        server["tools"] = json!(tools);
+    }
+    server
 }
 
 /// Where the job last finished reading the source.

@@ -22,6 +22,9 @@ pub struct McpServer {
     pub url: Option<String>,
     #[serde(default)]
     pub headers: BTreeMap<String, String>,
+    /// The only tools of this server the agent may call; all when absent.
+    #[serde(default)]
+    pub tools: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -164,7 +167,16 @@ fn claude_code(turn: &Turn<'_>) -> Result<Command, String> {
         args.extend(["--max-budget-usd".into(), format!("{budget:.4}")]);
     }
     args.push("--allowedTools".into());
-    args.extend(turn.mcp_servers.iter().map(|s| format!("mcp__{}", s.name)));
+    for server in turn.mcp_servers {
+        match &server.tools {
+            Some(tools) => args.extend(
+                tools
+                    .iter()
+                    .map(|tool| format!("mcp__{}__{tool}", server.name)),
+            ),
+            None => args.push(format!("mcp__{}", server.name)),
+        }
+    }
     Ok(Command { args, env })
 }
 
@@ -222,6 +234,13 @@ fn codex(turn: &Turn<'_>) -> Result<Command, String> {
             "-c".into(),
             format!("{key}.default_tools_approval_mode=\"approve\""),
         ]);
+        if let Some(tools) = &server.tools {
+            let list: Vec<String> = tools.iter().map(|t| toml_string(t)).collect();
+            args.extend([
+                "-c".into(),
+                format!("{key}.enabled_tools=[{}]", list.join(", ")),
+            ]);
+        }
     }
     match turn.resume {
         Some(session) => args.extend(["resume".into(), session.into(), turn.prompt.into()]),
@@ -421,12 +440,14 @@ mod tests {
                 path: Some("/mcp".into()),
                 url: None,
                 headers: BTreeMap::from([("Authorization".into(), "Bearer frood_run_x".into())]),
+                tools: None,
             },
             McpServer {
                 name: "source-team-chat".into(),
                 path: None,
                 url: Some("http://team-chat:8080/mcp".into()),
                 headers: BTreeMap::new(),
+                tools: Some(vec!["search_messages".into()]),
             },
         ]
     }
@@ -469,7 +490,11 @@ mod tests {
         assert!(cmd.args.contains(&"--strict-mcp-config".to_owned()));
         assert_eq!(
             cmd.args[cmd.args.len() - 3..],
-            ["--allowedTools", "mcp__frood", "mcp__source-team-chat"]
+            [
+                "--allowedTools",
+                "mcp__frood",
+                "mcp__source-team-chat__search_messages"
+            ]
         );
         assert!(
             cmd.env
@@ -513,6 +538,14 @@ mod tests {
             )
         );
         assert!(cmd.args.last().unwrap().starts_with("Sweep.\n\n---\n\nGo"));
+        assert!(cmd.args.contains(
+            &"mcp_servers.source-team-chat.enabled_tools=[\"search_messages\"]".to_owned()
+        ));
+        assert!(
+            !cmd.args
+                .iter()
+                .any(|a| a.starts_with("mcp_servers.frood.enabled_tools"))
+        );
         assert_eq!(
             cmd.env,
             [("CODEX_API_KEY".to_owned(), "sk-test".to_owned())]
