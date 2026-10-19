@@ -972,6 +972,7 @@ dependencies = [
 name = "frood-config"
 version = "0.0.1"
 dependencies = [
+ "chrono",
  "chrono-tz",
  "croner",
  "hex",

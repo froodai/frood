@@ -290,6 +290,7 @@ impl Dispatch {
         for q in questions::for_run(pool, run.id).await.unwrap_or_default() {
             if q.status == "open" {
                 let _ = questions::set_status(pool, q.id, "cancelled").await;
+                self.question_closed(&q, "question.cancelled").await;
             }
         }
         let event = match status {
@@ -472,7 +473,22 @@ impl Dispatch {
             }
             _ => questions::set_status(&self.ctx.pool, question.id, "expired").await?,
         }
+        self.question_closed(question, "question.expired").await;
         Ok(())
+    }
+
+    /// Journal event for a question that will get no answer from a person.
+    async fn question_closed(&self, question: &Question, event: &'static str) {
+        let _ = self
+            .ctx
+            .ledger
+            .append_event(
+                "system:questions",
+                event,
+                format!("question/{}", question.id),
+                json!({ "question_id": question.id, "run_id": question.run_id }),
+            )
+            .await;
     }
 
     /// `ask_user` from an agent's run: the question waits for a person; when the agent ends

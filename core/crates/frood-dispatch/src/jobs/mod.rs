@@ -21,6 +21,8 @@ pub enum Task {
     Embed,
     /// An agent in a runtime module (`agents.execute`).
     Agent,
+    /// "What is new since last time" for each person, without a model (B3).
+    Digest,
 }
 
 /// What an agent job needs to run (docs/13 §3); all of it named in the config (A3).
@@ -53,6 +55,22 @@ const DAILY_SWEEP_BUILTIN: Builtin = Builtin {
     instructions: DAILY_SWEEP,
     tools: &["frood", "source:${source}"],
 };
+
+/// Instructions of the standard `investigate`: context gathered before a person is told (N6).
+const INVESTIGATE: &str = include_str!("../../prompts/investigate.md");
+
+const INVESTIGATE_BUILTIN: Builtin = Builtin {
+    instructions: INVESTIGATE,
+    tools: &["frood"],
+};
+
+fn builtin(job: &str) -> Option<&'static Builtin> {
+    match job {
+        "daily-sweep" => Some(&DAILY_SWEEP_BUILTIN),
+        "investigate" => Some(&INVESTIGATE_BUILTIN),
+        _ => None,
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct JobSpec {
@@ -131,6 +149,22 @@ fn standard() -> Vec<JobSpec> {
             name: "daily-sweep".into(),
             uses: "agents.execute".into(),
             task: Task::Agent,
+            triggers: vec![],
+            with: Map::new(),
+            agent: None,
+        },
+        JobSpec {
+            name: "investigate".into(),
+            uses: "agents.execute".into(),
+            task: Task::Agent,
+            triggers: vec![],
+            with: Map::new(),
+            agent: None,
+        },
+        JobSpec {
+            name: "digest".into(),
+            uses: "inbox.digest".into(),
+            task: Task::Digest,
             triggers: vec![],
             with: Map::new(),
             agent: None,
@@ -286,7 +320,7 @@ pub fn resolve(config: &Config, caps: &Capabilities<'_>) -> (Vec<JobSpec>, Vec<S
                 let Some(change) = config.jobs.get(&job.name) else {
                     continue;
                 };
-                match agent_settings(&job.name, change, Some(&DAILY_SWEEP_BUILTIN), caps.base_dir) {
+                match agent_settings(&job.name, change, builtin(&job.name), caps.base_dir) {
                     Ok(settings) => job.agent = Some(settings),
                     Err(warning) => {
                         warnings.push(warning);
@@ -294,6 +328,8 @@ pub fn resolve(config: &Config, caps: &Capabilities<'_>) -> (Vec<JobSpec>, Vec<S
                     }
                 }
             }
+            // The digest runs when the config names when (a schedule) or by hand.
+            Task::Digest if !config.jobs.contains_key(&job.name) => continue,
             Task::Embed if !caps.embeddings => continue,
             Task::Transcribe if caps.modules == 0 => {
                 warnings.push(
@@ -309,7 +345,7 @@ pub fn resolve(config: &Config, caps: &Capabilities<'_>) -> (Vec<JobSpec>, Vec<S
     for (name, job) in &config.jobs {
         if matches!(
             name.as_str(),
-            "transcribe" | "extract" | "embed" | "daily-sweep"
+            "transcribe" | "extract" | "embed" | "daily-sweep" | "investigate" | "digest"
         ) || job.enabled == Some(false)
         {
             continue;

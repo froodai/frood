@@ -722,6 +722,17 @@ impl Ledger {
         query::assertion(&self.pool, id, as_of, valid_at).await
     }
 
+    /// Evidence by id, with its quotes; unknown ids are left out.
+    pub async fn evidence(&self, ids: &[Uuid]) -> Result<Vec<Evidence>> {
+        let rows = sqlx::query(
+            "SELECT id, source_id, anchor, quote, created_at FROM evidence WHERE id = ANY($1) ORDER BY created_at",
+        )
+        .bind(ids)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(rows::evidence).collect()
+    }
+
     pub async fn history(&self, id: Uuid) -> Result<Vec<AssertionVersion>> {
         query::history(&self.pool, id).await
     }

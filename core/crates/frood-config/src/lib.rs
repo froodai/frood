@@ -12,9 +12,10 @@ use sha2::{Digest, Sha256};
 
 pub use interpolate::Secrets;
 pub use model::{
-    Account, AccountBudget, AskUser, Auth, AutoAccept, Budget, Config, Deploy, Embeddings,
-    Installation, Job, ModelProvider, Module, OnExpire, Policies, Provider, Search, Server,
-    ServerPlacement, Source, Storage, Trigger,
+    Account, AccountBudget, AskUser, Attention, AttentionPerson, AttentionRoute, Auth, AutoAccept,
+    BeforeNotify, Budget, Config, Deploy, Embeddings, Installation, Job, ModelProvider, Module,
+    OnExpire, Policies, Provider, Search, Server, ServerPlacement, SituationMatch, Source, Storage,
+    Trigger,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -456,6 +457,7 @@ fn validate_work(config: &Config, problems: &mut Vec<String>) {
             ));
         }
     }
+    validate_attention(config, problems);
     if let Some(embeddings) = &config.search.embeddings {
         match config.accounts.get(&embeddings.account) {
             None => problems.push(format!(
@@ -512,6 +514,93 @@ fn validate_subscription_use(
         problems.push(format!(
             "job {name}: account {account} is {owner}'s subscription; set on_behalf_of: {owner}"
         ));
+    }
+}
+
+/// "HH:MM-HH:MM" as two times of day.
+pub fn parse_quiet_hours(value: &str) -> Option<(chrono::NaiveTime, chrono::NaiveTime)> {
+    let (from, to) = value.split_once('-')?;
+    let time = |t: &str| chrono::NaiveTime::parse_from_str(t.trim(), "%H:%M").ok();
+    Some((time(from)?, time(to)?))
+}
+
+fn validate_situation(place: &str, when: &model::SituationMatch, problems: &mut Vec<String>) {
+    if !["proposal", "question", "reminder", "alert"].contains(&when.kind.as_str()) {
+        problems.push(format!(
+            "{place}: kind is proposal, question, reminder or alert, not {:?}",
+            when.kind
+        ));
+    }
+    if let Some(risk) = &when.risk
+        && (when.kind != "proposal"
+            || ![
+                "new",
+                "change",
+                "conflict",
+                "stale_knowledge",
+                "entity_merge",
+            ]
+            .contains(&risk.as_str()))
+    {
+        problems.push(format!(
+            "{place}: risk {risk:?} applies to proposals: new, change, conflict, stale_knowledge or entity_merge"
+        ));
+    }
+}
+
+fn validate_attention(config: &Config, problems: &mut Vec<String>) {
+    let attention = &config.attention;
+    for (email, person) in &attention.people {
+        if !email.contains('@') {
+            problems.push(format!("attention.people: {email:?} is not an email"));
+        }
+        if let Some(zone) = &person.timezone
+            && zone.parse::<chrono_tz::Tz>().is_err()
+        {
+            problems.push(format!(
+                "attention.people.{email}: timezone {zone:?} is not an IANA zone like Europe/Amsterdam"
+            ));
+        }
+        if let Some(quiet) = &person.quiet_hours {
+            if parse_quiet_hours(quiet).is_none() {
+                problems.push(format!(
+                    "attention.people.{email}: quiet_hours {quiet:?} is not like \"23:00-08:00\""
+                ));
+            }
+            if person.timezone.is_none() {
+                problems.push(format!(
+                    "attention.people.{email}: quiet hours need a timezone (there is no default)"
+                ));
+            }
+        }
+    }
+    for (i, route) in attention.routes.iter().enumerate() {
+        validate_situation(&format!("attention.routes[{i}]"), &route.when, problems);
+        if !["now", "digest", "silent"].contains(&route.urgency.as_str()) {
+            problems.push(format!(
+                "attention.routes[{i}]: urgency is now, digest or silent, not {:?}",
+                route.urgency
+            ));
+        }
+    }
+    for (i, rule) in attention.before_notify.iter().enumerate() {
+        let place = format!("attention.before_notify[{i}]");
+        validate_situation(&place, &rule.when, problems);
+        if humantime::parse_duration(&rule.max_wait).is_err() {
+            problems.push(format!(
+                "{place}: max_wait {:?} is not a duration like 30m",
+                rule.max_wait
+            ));
+        }
+        let job = config.jobs.get(&rule.run);
+        if rule.run != "investigate"
+            && job.is_none_or(|j| j.uses.as_deref() != Some("agents.execute"))
+        {
+            problems.push(format!(
+                "{place}: run names an agent job, and {} is not one",
+                rule.run
+            ));
+        }
     }
 }
 

@@ -5,6 +5,8 @@
 //! agent jobs run in a runtime module and may wait for people's answers.
 
 mod agents;
+mod digest;
+pub mod inbox;
 mod jobs;
 pub mod questions;
 pub mod runs;
@@ -26,6 +28,7 @@ use sqlx::{PgPool, Row};
 use tokio::sync::watch;
 use uuid::Uuid;
 
+pub use inbox::{Act, ActOutcome, InboxItem, Shown};
 pub use jobs::{AgentSettings, Capabilities, JobError, JobSpec, Task, resolve};
 pub use questions::Question;
 pub use runs::Run;
@@ -43,6 +46,7 @@ pub(crate) struct Ctx {
     pub gateway: Gateway,
     pub modules: Modules,
     pub sources: Arc<BTreeMap<String, frood_config::Source>>,
+    pub attention: Arc<frood_config::Attention>,
 }
 
 #[derive(Clone)]
@@ -79,9 +83,16 @@ impl Dispatch {
                 gateway,
                 modules,
                 sources: Arc::new(BTreeMap::new()),
+                attention: Arc::new(frood_config::Attention::default()),
             },
             jobs: Arc::new(jobs),
         }
+    }
+
+    /// Who is told what, when and where.
+    pub fn with_attention(mut self, attention: frood_config::Attention) -> Self {
+        self.ctx.attention = Arc::new(attention);
+        self
     }
 
     /// The sources agents read; schedules with `for_each: source` run once for each.
@@ -184,6 +195,7 @@ impl Dispatch {
             Task::Extract => jobs::extract::run(&self.ctx, spec, &run).await,
             Task::Transcribe => jobs::transcribe::run(&self.ctx, spec, &run).await,
             Task::Embed => jobs::embed::run(&self.ctx).await,
+            Task::Digest => self.run_digest(&run).await,
             Task::Agent => unreachable!("handled above"),
         };
         match result {
@@ -261,6 +273,34 @@ impl Dispatch {
                         tracing::error!(error = %err, "schedules failed");
                     }
                     if tokio::time::timeout(Duration::from_secs(15), shutdown.changed())
+                        .await
+                        .is_ok()
+                        || *shutdown.borrow()
+                    {
+                        break;
+                    }
+                }
+            }));
+        }
+        {
+            let this = self.clone();
+            let mut shutdown = shutdown.clone();
+            tasks.push(tokio::spawn(async move {
+                let mut reminded: Option<std::time::Instant> = None;
+                loop {
+                    if let Err(err) = this.inbox_pending().await {
+                        tracing::error!(error = %err, "Inbox failed to read the journal");
+                    }
+                    if reminded.is_none_or(|at| at.elapsed() > Duration::from_secs(600)) {
+                        reminded = Some(std::time::Instant::now());
+                        if let Err(err) = this.remind_once(chrono::Utc::now()).await {
+                            tracing::error!(error = %err, "reminders failed");
+                        }
+                    }
+                    if let Err(err) = this.deliver_once().await {
+                        tracing::error!(error = %err, "Inbox delivery failed");
+                    }
+                    if tokio::time::timeout(Duration::from_secs(2), shutdown.changed())
                         .await
                         .is_ok()
                         || *shutdown.borrow()
