@@ -295,13 +295,13 @@ details.area[open] summary .tw{transform:rotate(90deg)}
         <span class="pill done">Inbox и уведомления v0.2</span>
         <span class="pill done">платформа v0.2</span>
         <span class="pill done">план MVP</span>
-        <span class="pill wait">реализация · M5 начат</span>
+        <span class="pill wait">реализация · M5 готов</span>
         <span class="pill">исходники: docs/*.md</span>
       </div>
     </header>
 
     <div class="tabs" role="tablist" aria-label="Этапы ревью">
-      <button class="tab" role="tab" id="t-now" data-tab="now" aria-controls="now" aria-selected="true">Сейчас на ревью <span class="n">5</span></button>
+      <button class="tab" role="tab" id="t-now" data-tab="now" aria-controls="now" aria-selected="true">Сейчас на ревью <span class="n">1</span></button>
       <button class="tab" role="tab" id="t-mvp" data-tab="mvp" aria-controls="mvp" aria-selected="false">План MVP</button>
       <button class="tab" role="tab" id="t-platform" data-tab="platform" aria-controls="platform" aria-selected="false">Платформа</button>
       <button class="tab" role="tab" id="t-notify" data-tab="notify" aria-controls="notify" aria-selected="false">Inbox и уведомления</button>
@@ -318,64 +318,22 @@ details.area[open] summary .tw{transform:rotate(90deg)}
       <section id="now-intro">
         <div class="sh"><h2>Что нужно от вас</h2></div>
         <div class="prose">
-          <p>Раунд 14. Раунд 13 принят: A1–A3 и A5–A7. По A4 вы спросили, нельзя ли входить подпиской в админке, а не генерировать ключ, — ниже ответ A4′.</p>
-          <p><b>Живая проверка M4 прошла</b> на вашем YouTrack через подписку Claude: агент прочитал задачи, сверился с памятью и открыл предложение — оно ждёт вашего решения. API-кредиты не тронуты.</p>
-          <p><b>M5 — Inbox и уведомления</b> (план — docs/22): ядро, Telegram с кнопками и правкой сообщений, напоминания о сроках, сводка и «исследовать перед обращением» готовы и проходят сквозной тест шагов 3–5 сценария; живой проверки на вашем боте ещё не было. Решения B1–B4 сделаны так, как предложены ниже, — переделаю, если отклоните.</p>
+          <p>Раунд 15. Раунд 14 принят: A4′ (вход подпиской кнопкой; принести токен или ключ тоже можно), B1–B3. По B4 вы написали, что напоминания должен настраивать человек, — переделал, ниже B4′.</p>
+          <p>M5 готов в коде и проходит сквозной тест шагов 3–5. Следующий шаг — живая проверка на вашем боте: пришлю в Telegram тестовый конфликт с кнопками, вы нажмёте «Отклонить» — знание не изменится, а мы увидим, что вердикт кнопкой работает. Это бесплатно, модель не нужна.</p>
           <p>Отметки сохраняются в странице. Напишите в чат «готово», и я их прочитаю.</p>
         </div>
-        <div class="locked"><span class="caption">Принято:</span><span class="chip">Фазы 1–6</span><span class="chip">M0–M3</span><span class="chip">R1′, R2</span><span class="chip">D1–D4</span><span class="chip">M4: A1–A3, A5–A7</span></div>
-      </section>
-
-      <section id="now-check">
-        <div class="sh"><span class="tag ref">сделано</span><h2>Живая проверка M4 на YouTrack</h2></div>
-        <div class="explain">
-          <ol>
-            <li>Локальный Frood обновлён до M4, в нём модуль агентов с образом Claude Code 2.1.302. Обработка заметок по-прежнему выключена.</li>
-            <li>Источник — встроенный MCP-сервер YouTrack (<code>&lt;адрес&gt;/mcp</code>) с вашим постоянным токеном. Агенту доступны <b>только читающие инструменты</b>: поиск и чтение задач, комментариев, статей, проектов. Создать, изменить или прокомментировать задачу он не может — для этого у источников появился белый список <code>tools</code>.</li>
-            <li>Платит подписка Claude через <code>claude setup-token</code> — расходуется лимит подписки, API-кредиты не трогаются. Модель — Haiku; бюджет запуска $0.30 по оценке Claude Code, 10 минут.</li>
-            <li>Запуск вручную: <code>daily-sweep</code> по YouTrack за последние сутки — задачи, где вы исполнитель, автор или комментатор. Расписание не включено.</li>
-          </ol>
-          <p><b>Итог:</b> запуск успешен за 30 секунд. Оба MCP-сервера подключились; агент сам составил запрос YouTrack, нашёл две задачи AIRC, прочитал их, не нашёл о них ничего в памяти и открыл одно предложение из двух статусов от <code>agent:daily-sweep/for/вас</code> — оно в Inbox, решать вам (можно отклонить: статусы быстро устаревают). Оценка Claude Code — $0.0075 из лимита подписки. Контейнер и том удалены.</p>
-          <p class="why">Нашлось: две первые попытки <code>propose_change</code> агент сделал с ошибкой и исправился сам, а журнал запуска показывал только «ошибка». Теперь в журнале есть текст ошибки, а описание инструмента перечисляет допустимые значения. Не проверено вживую: вопрос вам и продолжение той же сессии — агенту не понадобилось спрашивать (на агенте-подделке проверено).</p>
-          <p class="why">Ориентир по YouTrack — <a href="https://www.jetbrains.com/help/youtrack/server/model-context-protocol-server.html">документация JetBrains о Remote MCP Server</a>: адрес <code>/mcp</code>, токен в заголовке <code>Authorization</code>, права — как у владельца токена.</p>
-        </div>
-      </section>
-
-      <section id="now-m5">
-        <div class="sh"><span class="tag ref">план</span><h2>Как будет работать Inbox (M5)</h2></div>
-        <div class="explain">
-          <ol>
-            <li>Событие в памяти — конфликтное предложение, вопрос агента, упавший запуск, приближающийся срок — заводит запись Inbox, одну на ситуацию. Записи хранятся в базе и переживают перезапуск.</li>
-            <li>Маршрутизатор решает, кому, насколько срочно (сейчас, в сводку, тихо) и в какой канал.</li>
-            <li>Для выбранных ситуаций сначала работает агент <code>investigate</code> — дособирает контекст; уведомление приходит уже с ним.</li>
-            <li>Telegram показывает запись: что случилось, было и стало, цитата, ссылки и кнопки — «Принять», «Отклонить», «Отложить», варианты конфликта или ответы на вопрос агента.</li>
-            <li>Кнопка сразу ставит вердикт от вашего имени (QN1, R1′). Решили где-то ещё — запись закрывается сама, сообщение в Telegram правится.</li>
-            <li>Сводка «что нового с прошлого раза» и напоминания о сроках обязательств — оттуда же.</li>
-          </ol>
-        </div>
+        <div class="locked"><span class="caption">Принято:</span><span class="chip">Фазы 1–6</span><span class="chip">M0–M4</span><span class="chip">R1′, R2</span><span class="chip">D1–D4</span><span class="chip">A1–A7, A4′</span><span class="chip">B1–B3</span></div>
       </section>
 
       <section id="now-decisions">
-        <div class="sh"><span class="tag need">нужно ваше решение</span><h2>Решения</h2></div>
+        <div class="sh"><span class="tag need">нужно ваше решение</span><h2>Решение</h2></div>
         <div class="rv-list">
-          <div class="rv" data-id="impl05_A4" data-kind="decision" data-label="A4′ Вход подпиской — кнопкой, вход делает сам агент">
-            <div class="txt"><span class="id">A4′</span><h3>Подписку подключают кнопкой «Войти» в админке; сам вход делает Claude Code (или Codex), Frood только передаёт ссылку и код</h3><p class="why">Как это выглядит: в админке (M6) у аккаунта-подписки кнопка «Войти». Frood просит рантайм запустить в контейнере <code>claude setup-token</code> и показывает ссылку; вы входите на claude.ai, вставляете полученный код в админку; Claude Code выдаёт долгоживущий токен, Frood хранит его как секрет аккаунта. Codex входит по коду устройства — ссылка и код, вставлять ничего не надо. Сам Frood в OAuth Anthropic не ходит: тогда он был бы сторонним клиентом подписки, а это запрещено (A4). До админки то же делает команда <code>frood account login &lt;аккаунт&gt;</code> в терминале. Сейчас для проверки достаточно один раз выполнить <code>claude setup-token</code>.</p></div><div class="ctl"></div>
-          </div>
-          <div class="rv" data-id="impl05_B1" data-kind="decision" data-label="B1 Кому приходит уведомление">
-            <div class="txt"><span class="id">B1</span><h3>Push получает тот, для кого ситуация; ничья ситуация — всем, у кого связан канал</h3><p class="why">«Для кого»: автор заметки, из которой извлечено знание; человек из <code>on_behalf_of</code> агента; тот, кого агент спросил. Ничья — агент без <code>on_behalf_of</code>, сбой запуска, конфликт в общем источнике. В самом Inbox (API, MCP, позже админка) записи видят все: пространств нет (D9″). Позже маршрутизатор научится находить ответственных по знаниям — <code>responsibility</code> о человеке (N2).</p></div><div class="ctl"></div>
-          </div>
-          <div class="rv" data-id="impl05_B2" data-kind="decision" data-label="B2 Насколько срочно — встроенная таблица">
-            <div class="txt"><span class="id">B2</span><h3>Срочность по виду ситуации задаётся встроенной таблицей, конфиг её меняет; тихие часы — только если вы их назвали; предохранитель — 30 push в день на человека</h3><p class="why">Сейчас: конфликт, замена или закрытие известного знания, вопрос агента, тревога, напоминание о сроке. В сводку: новое знание, ждущее решения. Тихо (только в сводке как «что принято»): принятое политикой. Это поведение платформы, а не скрытая настройка вроде модели (D4), поэтому без него уведомления просто не работали бы. Тихие часы — личное дело, их не придумываю. Лимит — защита от потока при сбое, тоже меняется в конфиге.</p></div><div class="ctl"></div>
-          </div>
-          <div class="rv" data-id="impl05_B3" data-kind="decision" data-label="B3 Сводка без модели">
-            <div class="txt"><span class="id">B3</span><h3>Сводка «что нового с прошлого раза» — список со ссылками, без вызова модели; пересказ моделью — только если у джобы <code>digest</code> названа модель</h3><p class="why">Сводка по расписанию тратила бы деньги каждый день, а список «принято / ждёт решения / ближайшие сроки / сбои» понятен и без пересказа. С моделью (D4: названной явно) сверху добавится короткий абзац.</p></div><div class="ctl"></div>
-          </div>
-          <div class="rv" data-id="impl05_B4" data-kind="decision" data-label="B4 Когда напоминать о сроках">
-            <div class="txt"><span class="id">B4</span><h3>Напоминание о сроке обязательства — за день, в день срока и на следующий день («выполнено или перенести?»), в 9:00 по вашему часовому поясу; дальше — только в сводке</h3><p class="why">Часовой пояс человека задаётся в конфиге (<code>attention.people</code>) и обязателен для напоминаний — как у расписаний (A6). Кнопка «Выполнено» закрывает обязательство от вашего имени, «Перенести» спрашивает новую дату.</p></div><div class="ctl"></div>
+          <div class="rv" data-id="impl06_B4" data-kind="decision" data-label="B4′ Напоминания — список правил у каждого">
+            <div class="txt"><span class="id">B4′</span><h3>Напоминания о сроках — список правил «сколько дней от срока и во сколько»: общий для инсталляции и/или свой у каждого человека, сколько угодно; без списка напоминаний нет</h3><p class="why">Например: <code>reminders: [{ days: -3, at: "18:00" }, { days: 0, at: "09:00" }, { days: 1, at: "09:00" }]</code> — за три дня вечером, в день срока утром и на следующий день. Время — по часовому поясу человека (<code>attention.people.&lt;email&gt;.timezone</code>). Свой список человека заменяет общий <code>attention.reminders</code>. Каждое новое напоминание закрывает предыдущее по тому же сроку; «Выполнено» и «Перенести на неделю» работают как раньше.</p></div><div class="ctl"></div>
           </div>
         </div>
-        <div class="overall" data-id="impl05_overall" data-kind="overall" data-label="Общий вердикт по раунду 14">
-          <h3>Общий вердикт по раунду 14</h3>
+        <div class="overall" data-id="impl06_overall" data-kind="overall" data-label="Общий вердикт по раунду 15">
+          <h3>Общий вердикт по раунду 15</h3>
           <div class="ctl"></div>
         </div>
       </section>
@@ -1708,7 +1666,7 @@ jobs:
               <li>Inbox, уведомления, внимание — приняты</li>
               <li>Ядро, реестр, деплой, бэкапы, версии — приняты</li>
               <li>План реализации MVP — принят</li>
-              <li class="cur">Реализация: M0–M4 готовы, идёт M5</li>
+              <li class="cur">Реализация: M0–M5 готовы, живая проверка M5</li>
             </ol>
           </div>
         </div>
@@ -1735,7 +1693,8 @@ jobs:
             <tr><td class="k">11</td><td>R1′; вход Claude Code во Frood</td><td>R1′ принято; Claude Code подключён</td></tr>
             <tr><td class="k">12</td><td>M3: D1–D4, QM1</td><td>D1–D3 приняты; D4 — без моделей по умолчанию; ключи только для проверок</td></tr>
             <tr><td class="k">13</td><td>M4: A1–A7, QA1</td><td>A1–A3, A5–A7 приняты; A4 → A4′; проверка на YouTrack, платит подписка</td></tr>
-            <tr><td class="k">14</td><td>A4′ вход подпиской; M5: B1–B4</td><td><span class="st wait">идёт</span></td></tr>
+            <tr><td class="k">14</td><td>A4′ вход подпиской; M5: B1–B4</td><td>A4′, B1–B3 приняты; B4 → B4′</td></tr>
+            <tr><td class="k">15</td><td>B4′ напоминания</td><td><span class="st wait">идёт</span></td></tr>
           </tbody>
         </table></div>
         <p class="caption">Все отметки хранятся в странице и продублированы в docs/README.md.</p>
@@ -1902,7 +1861,7 @@ jobs:
     overall: [["approve","Апрув"],["approve_changes","С правками"],["redo","Переделать"]]
   };
   var LABEL = {ok:"принять",discuss:"обсудить",no:"против",approve:"апрув",approve_changes:"апрув с правками",redo:"переделать"};
-  var LKEY = "frood-review-v14";
+  var LKEY = "frood-review-v15";
   var items = Array.prototype.slice.call(document.querySelectorAll("[data-id]"));
   var ids = {}; items.forEach(function(el){ ids[el.dataset.id] = true; });
   var state = {}, db = null, canWrite = true;
@@ -1970,13 +1929,13 @@ jobs:
     var a = 0, m = 0, q = 0;
     items.forEach(function(el){
       var id = el.dataset.id, s = state[id] || {};
-      if (el.dataset.kind === "decision" && s.verdict) { if (id.indexOf("impl05_") === 0) m++; else a++; }
+      if (el.dataset.kind === "decision" && s.verdict) { if (id.indexOf("impl06_") === 0) m++; else a++; }
       if (el.dataset.kind === "question" && (s.comment || "").trim()) q++;
     });
     var na = document.getElementById("n-arch"); if (na) na.textContent = a;
     document.getElementById("n-model").textContent = m;
     document.getElementById("n-q").textContent = q;
-    var o = state.impl05_overall || {};
+    var o = state.impl06_overall || {};
     document.getElementById("n-all").textContent = o.verdict ? LABEL[o.verdict] : "—";
   }
 
@@ -2003,9 +1962,9 @@ jobs:
   }
 
   function compose(){
-    var lines = ["Ревью Frood, раунд 14: вход подпиской и M5"];
-    var o = state.impl05_overall || {};
-    lines.push("Общее по раунду 14: " + (o.verdict ? LABEL[o.verdict] : "без вердикта") + (o.comment ? ". " + o.comment.trim() : ""));
+    var lines = ["Ревью Frood, раунд 15: напоминания"];
+    var o = state.impl06_overall || {};
+    lines.push("Общее по раунду 15: " + (o.verdict ? LABEL[o.verdict] : "без вердикта") + (o.comment ? ". " + o.comment.trim() : ""));
     items.forEach(function(el){
       var k = el.dataset.kind, s = state[el.dataset.id] || {}, c = (s.comment || "").trim();
       if (k === "decision") lines.push(el.dataset.label + ": " + (s.verdict ? LABEL[s.verdict] : "без отметки") + (c ? ". " + c : ""));
