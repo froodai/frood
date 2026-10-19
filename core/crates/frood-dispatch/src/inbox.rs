@@ -110,6 +110,7 @@ pub async fn get(pool: &PgPool, id: Uuid) -> sqlx::Result<Option<InboxItem>> {
     row.as_ref().map(item).transpose()
 }
 
+#[allow(dead_code)]
 async fn by_subject(pool: &PgPool, subject: &str) -> sqlx::Result<Option<InboxItem>> {
     let row = sqlx::query(concat!(
         "SELECT ",
@@ -566,11 +567,22 @@ impl Dispatch {
             > 0)
     }
 
-    /// Reminders of due dates (B4): the day before, the day itself and the day after, at 9:00
-    /// in the person's zone. Items are made ahead and shown when their time comes. Returns how
-    /// many it made.
+    /// Reminders of due dates (B4′): each person's list of `{days, at}` — days from the due
+    /// date, a time of day in their zone — or the shared `attention.reminders`. An item is made
+    /// when its time comes (the scan runs every few minutes), and closes the earlier reminders
+    /// of the same due date. Returns how many it made.
     pub async fn remind_once(&self, now: DateTime<Utc>) -> sqlx::Result<usize> {
         use frood_ledger::model::{AssertionFilter, SlotFilter, SlotOp, Status};
+        let attention = &self.ctx.attention;
+        let mut days: Vec<i32> = attention.reminders.iter().map(|r| r.days).collect();
+        for person in attention.people.values() {
+            for rule in person.reminders.iter().flatten() {
+                days.push(rule.days);
+            }
+        }
+        let (Some(&earliest), Some(&latest)) = (days.iter().min(), days.iter().max()) else {
+            return Ok(0); // nobody wants reminders
+        };
         let today = now.date_naive();
         let filter = AssertionFilter {
             kind: Some("commitment".into()),
@@ -579,15 +591,15 @@ impl Dispatch {
                 SlotFilter {
                     key: "due".into(),
                     op: SlotOp::Gte,
-                    value: (today - Duration::days(2)).to_string(),
+                    value: (today - Duration::days(i64::from(latest) + 1)).to_string(),
                 },
                 SlotFilter {
                     key: "due".into(),
                     op: SlotOp::Lt,
-                    value: (today + Duration::days(3)).to_string(),
+                    value: (today + Duration::days(2 - i64::from(earliest))).to_string(),
                 },
             ],
-            limit: Some(500),
+            limit: Some(1000),
             ..Default::default()
         };
         let commitments = match self.ctx.ledger.assertions(&filter).await {
@@ -611,54 +623,65 @@ impl Dispatch {
                 continue;
             };
             for user in people_of(&proposal.author) {
-                let Some(zone) = self.zone_of(user).await else {
-                    continue; // B4: reminders need the person's timezone
+                let Some((zone, rules)) = self.reminders_of(user).await else {
+                    continue;
                 };
                 let local_today = now.with_timezone(&zone).date_naive();
-                let step = match (due - local_today).num_days() {
-                    1 => "before",
-                    0 => "today",
-                    -1 => "overdue",
-                    _ => continue,
-                };
-                let at = local_today
-                    .and_hms_opt(9, 0, 0)
-                    .and_then(|t| t.and_local_timezone(zone).earliest())
-                    .map(|t| t.with_timezone(&Utc))
-                    .unwrap_or(now);
-                let subject =
-                    |step: &str| format!("due/{}/{due}/{step}/{user}", commitment.assertion_id);
-                let new = insert(
-                    &self.ctx.pool,
-                    NewItem {
-                        kind: "reminder",
-                        subject: subject(step),
-                        urgency: urgency(&self.ctx.attention, "reminder", None),
-                        data: json!({
-                            "assertion_id": commitment.assertion_id, "text": commitment.text,
-                            "due": due.to_string(), "step": step,
-                        }),
-                        for_users: vec![user],
-                        notify_after: at,
-                        investigation: None,
-                    },
-                )
-                .await?;
-                if new.is_some() {
-                    made += 1;
-                    // The earlier step of the same reminder is over.
-                    for earlier in ["before", "today"] {
-                        if earlier != step
-                            && let Some(old) = by_subject(&self.ctx.pool, &subject(earlier)).await?
-                            && old.state != "resolved"
-                        {
-                            resolve(
-                                &self.ctx.pool,
-                                &old.subject,
-                                &json!({ "action": "next_step", "at": now }),
-                            )
-                            .await?;
-                        }
+                for rule in &rules {
+                    if due + Duration::days(i64::from(rule.days)) != local_today {
+                        continue;
+                    }
+                    let Ok(at) = chrono::NaiveTime::parse_from_str(&rule.at, "%H:%M") else {
+                        continue;
+                    };
+                    let Some(at) = local_today
+                        .and_time(at)
+                        .and_local_timezone(zone)
+                        .earliest()
+                        .map(|t| t.with_timezone(&Utc))
+                    else {
+                        continue;
+                    };
+                    // Made when its time comes, so a later reminder does not close an earlier one
+                    // before it is shown.
+                    if now + Duration::minutes(10) < at {
+                        continue;
+                    }
+                    let subject = format!(
+                        "due/{}/{due}/{}@{}/{user}",
+                        commitment.assertion_id, rule.days, rule.at
+                    );
+                    let new = insert(
+                        &self.ctx.pool,
+                        NewItem {
+                            kind: "reminder",
+                            subject: subject.clone(),
+                            urgency: urgency(attention, "reminder", None),
+                            data: json!({
+                                "assertion_id": commitment.assertion_id, "text": commitment.text,
+                                "due": due.to_string(), "days": rule.days,
+                            }),
+                            for_users: vec![user],
+                            notify_after: at,
+                            investigation: None,
+                        },
+                    )
+                    .await?;
+                    if new.is_some() {
+                        made += 1;
+                        // Earlier reminders of the same due date are over.
+                        sqlx::query(
+                            "UPDATE inbox_items SET state = 'resolved', resolution = $5, resolved_at = now(), updated_at = now() \
+                             WHERE kind = 'reminder' AND state <> 'resolved' AND subject <> $1 \
+                               AND data->>'assertion_id' = $2 AND data->>'due' = $3 AND $4 = ANY(for_users)",
+                        )
+                        .bind(&subject)
+                        .bind(commitment.assertion_id.to_string())
+                        .bind(due.to_string())
+                        .bind(user)
+                        .bind(json!({ "action": "next_reminder", "at": now }))
+                        .execute(&self.ctx.pool)
+                        .await?;
                     }
                 }
             }
@@ -666,16 +689,20 @@ impl Dispatch {
         Ok(made)
     }
 
-    async fn zone_of(&self, user: Uuid) -> Option<chrono_tz::Tz> {
+    /// A person's zone and reminders, if they have both.
+    async fn reminders_of(
+        &self,
+        user: Uuid,
+    ) -> Option<(chrono_tz::Tz, Vec<frood_config::Reminder>)> {
         let email = self.ctx.auth.user_email(user).await.ok()?;
-        self.ctx
-            .attention
-            .people
-            .get(&email)?
-            .timezone
-            .as_deref()?
-            .parse()
-            .ok()
+        let attention = &self.ctx.attention;
+        let person = attention.people.get(&email)?;
+        let zone = person.timezone.as_deref()?.parse().ok()?;
+        let rules = person
+            .reminders
+            .clone()
+            .unwrap_or_else(|| attention.reminders.clone());
+        (!rules.is_empty()).then_some((zone, rules))
     }
 
     /// The item with what a channel needs to show it.
