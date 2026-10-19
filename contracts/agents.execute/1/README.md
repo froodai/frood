@@ -37,7 +37,7 @@ sends `resume`.
   "prompt": "You are running the Frood job `daily-sweep` (run …). What started this run: …",
   "mcp_servers": [
     { "name": "frood", "path": "/mcp", "headers": { "Authorization": "Bearer frood_run_…" } },
-    { "name": "source-team-slack", "url": "https://mcp.example.com/slack", "headers": { "Authorization": "Bearer …" } }
+    { "name": "source-youtrack", "url": "https://youtrack.example.com/mcp", "headers": { "Authorization": "Bearer …" }, "tools": ["search_issues", "get_issue"] }
   ],
   "credentials": { "provider": "anthropic", "kind": "api_key", "api_key": "sk-ant-…", "workspace": "wrkspc_…" },
   "budget": { "max_usd": 0.5, "max_minutes": 15 },
@@ -52,7 +52,9 @@ sends `resume`.
 - `instructions` are the system prompt (appended to the agent's own); `prompt` is the first user
   message.
 - `mcp_servers` are the only MCP servers the agent gets. Names are letters, digits, `_` and
-  `-` (agents name tools after them). `path` is relative to `FROOD_URL`; `url` is absolute. Pass `headers` as they are. The `frood` server's token is a **run token**:
+  `-` (agents name tools after them). `path` is relative to `FROOD_URL`; `url` is absolute.
+  `tools`, when present, are the only tools of that server the agent may call: a source the
+  agent must not change lists only its reading tools. Pass `headers` as they are. The `frood` server's token is a **run token**:
   it lives as long as the run, may read, capture and propose, never decide.
 - `credentials` pay for the run, in one of two kinds:
   - `{ "kind": "api_key", "provider", "api_key", "workspace" }` — an API key; `workspace` is

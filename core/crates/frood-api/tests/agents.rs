@@ -780,7 +780,8 @@ async fn daily_sweep_reads_its_source_and_proposes() {
          deploy: {{server: host}}\n\
          accounts:\n  claude: {{ kind: api_key, provider: anthropic, secret: sk-test }}\n\
          sources:\n  team-chat:\n    uses: mcp\n    server: 'http://team-chat:8080/mcp'\n    \
-         headers: {{ Authorization: 'Bearer chat-token' }}\n    scope: {{ channels: ['#release'] }}\n  \
+         headers: {{ Authorization: 'Bearer chat-token' }}\n    scope: {{ channels: ['#release'] }}\n    \
+         tools: [search_messages]\n  \
          adr:\n    uses: mcp\n    server: 'https://adr.example.com/mcp'\n    authoritative: true\n\
          jobs:\n  extract: {{ enabled: false }}\n  daily-sweep:\n    \
          on: [{{ schedule: '0 3 * * *', timezone: Europe/Amsterdam, for_each: source }}]\n    \
@@ -864,7 +865,7 @@ async fn daily_sweep_reads_its_source_and_proposes() {
     assert_eq!(servers.len(), 2, "{servers:?}");
     assert_eq!(
         servers[1],
-        json!({ "name": "source-team-chat", "url": "http://team-chat:8080/mcp", "headers": { "Authorization": "Bearer chat-token" } })
+        json!({ "name": "source-team-chat", "url": "http://team-chat:8080/mcp", "headers": { "Authorization": "Bearer chat-token" }, "tools": ["search_messages"] })
     );
     let prompt = chat["prompt"].as_str().unwrap();
     assert!(prompt.contains("#release"), "{prompt}");
