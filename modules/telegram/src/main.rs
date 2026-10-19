@@ -1,18 +1,25 @@
-//! Frood module `telegram`: a bot for quick capture (docs/14 §2).
+//! Frood module `telegram`: a bot for quick capture (docs/14 §2) and the Inbox's Telegram
+//! channel (docs/15, `notify.send@1` / `notify.update@1`).
 //!
 //! Long-polls the Bot API, so it needs no public address. `/link <code>` links the sender's
 //! Telegram account to a person in Frood; after that, text, voice messages, audio and files go
 //! to `/v1/capture` as that person. The bot answers at once and edits its answer when
-//! processing is done: what it remembered, what waits for a decision.
+//! processing is done: what it remembered, what waits for a decision. Inbox items arrive as
+//! messages with buttons; a button acts as the person who pressed it.
 //!
 //! Environment (written by `frood apply`): `FROOD_URL`, `FROOD_TOKEN`, `FROOD_MODULE` (the
 //! channel name), `FROOD_MODULE_CONFIG` (`{"language": "en" | "ru"}`), `TELEGRAM_BOT_TOKEN`,
 //! optionally `TELEGRAM_API_URL`, `PORT` (8080, for `/manifest` and `/healthz`).
 
+mod notify;
+
 use std::sync::Arc;
 use std::time::Duration;
 
-use axum::routing::get;
+use axum::extract::State;
+use axum::http::{HeaderMap, StatusCode, header};
+use axum::response::{IntoResponse, Response};
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -47,7 +54,7 @@ struct Texts {
 }
 
 const EN: Texts = Texts {
-    help: "Send me notes, voice messages or files and I will put them into Frood.\nFirst link your account: run `frood link telegram --email you@example.com` (or ask your admin for a code) and send me /link CODE.",
+    help: "Send me notes, voice messages or files and I will put them into Frood. I also bring you what waits for your decision, with buttons; /digest shows what is new.\nFirst link your account: run `frood link telegram --email you@example.com` (or ask your admin for a code) and send me /link CODE.",
     not_linked: "This Telegram account is not linked to Frood yet. Send /link CODE (get a code with `frood link telegram --email …`).",
     linked: "Linked to",
     link_failed: "Could not link",
@@ -66,7 +73,7 @@ const EN: Texts = Texts {
 };
 
 const RU: Texts = Texts {
-    help: "Присылайте заметки, голосовые и файлы — я сохраню их во Frood.\nСначала свяжите аккаунт: выполните `frood link telegram --email you@example.com` (или попросите код у администратора) и пришлите мне /link КОД.",
+    help: "Присылайте заметки, голосовые и файлы — я сохраню их во Frood. А ещё приношу то, что ждёт вашего решения, с кнопками; /digest — что нового.\nСначала свяжите аккаунт: выполните `frood link telegram --email you@example.com` (или попросите код у администратора) и пришлите мне /link КОД.",
     not_linked: "Этот аккаунт Telegram ещё не связан с Frood. Пришлите /link КОД (код даёт `frood link telegram --email …`).",
     linked: "Связано с",
     link_failed: "Не удалось связать",
@@ -111,6 +118,8 @@ struct Update {
     update_id: i64,
     #[serde(default)]
     message: Option<Message>,
+    #[serde(default)]
+    callback_query: Option<Value>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -250,6 +259,29 @@ impl Bot {
                         )
                     }
                     Err(err) => format!("{}: {err}", t.link_failed),
+                };
+                self.reply(&message, &answer).await;
+                return;
+            }
+            "/digest" | "/new" => {
+                let response = self
+                    .frood(self.http.get(format!(
+                        "{}/v1/digest?external_id={external_id}",
+                        self.frood
+                    )))
+                    .send()
+                    .await;
+                let answer = match response {
+                    Ok(r) if r.status().is_success() => {
+                        let digest: Value = r.json().await.unwrap_or(Value::Null);
+                        notify::digest_text(&digest, self.lang.words())
+                    }
+                    Ok(r) if r.status() == StatusCode::FORBIDDEN => t.not_linked.to_owned(),
+                    Ok(r) => {
+                        let body: Value = r.json().await.unwrap_or(Value::Null);
+                        format!("{} {}", t.error, body["detail"].as_str().unwrap_or("?"))
+                    }
+                    Err(err) => format!("{} {err}", t.error),
                 };
                 self.reply(&message, &answer).await;
                 return;
@@ -439,7 +471,7 @@ impl Bot {
             let updates = self
                 .telegram(
                     "getUpdates",
-                    json!({ "offset": offset, "timeout": 30, "allowed_updates": ["message"] }),
+                    json!({ "offset": offset, "timeout": 30, "allowed_updates": ["message", "callback_query"] }),
                 )
                 .await;
             match updates
@@ -451,6 +483,10 @@ impl Bot {
                         if let Some(message) = update.message {
                             let bot = self.clone();
                             tokio::spawn(async move { bot.handle(message).await });
+                        }
+                        if let Some(query) = update.callback_query {
+                            let bot = self.clone();
+                            tokio::spawn(async move { bot.on_button(&query).await });
                         }
                     }
                 }
@@ -557,7 +593,7 @@ fn summary(status: &Value, t: &Texts) -> String {
     out.join("\n")
 }
 
-fn manifest_router() -> Router {
+fn router(bot: Arc<Bot>) -> Router {
     Router::new()
         .route(
             "/manifest",
@@ -569,6 +605,56 @@ fn manifest_router() -> Router {
             "/healthz",
             get(|| async { Json(json!({ "status": "ok" })) }),
         )
+        .route("/v1/capabilities/notify.send@1", post(notify_send))
+        .route("/v1/capabilities/notify.update@1", post(notify_update))
+        .with_state(bot)
+}
+
+/// The core presents the module's token when it calls a capability.
+fn from_core(bot: &Bot, headers: &HeaderMap) -> bool {
+    headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        == Some(bot.token.as_str())
+}
+
+fn problem(status: StatusCode, detail: &str) -> Response {
+    (
+        status,
+        [(header::CONTENT_TYPE, "application/problem+json")],
+        Json(json!({ "title": status.canonical_reason(), "status": status.as_u16(), "detail": detail })),
+    )
+        .into_response()
+}
+
+async fn notify_send(
+    State(bot): State<Arc<Bot>>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    if !from_core(&bot, &headers) {
+        return problem(StatusCode::UNAUTHORIZED, "bad or missing token");
+    }
+    match bot.notify_send(&body).await {
+        Ok(out) => Json(out).into_response(),
+        // Telegram refuses for good (blocked bot, unknown chat): the core stops trying.
+        Err(err) => problem(StatusCode::UNPROCESSABLE_ENTITY, &err),
+    }
+}
+
+async fn notify_update(
+    State(bot): State<Arc<Bot>>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    if !from_core(&bot, &headers) {
+        return problem(StatusCode::UNAUTHORIZED, "bad or missing token");
+    }
+    match bot.notify_update(&body).await {
+        Ok(out) => Json(out).into_response(),
+        Err(err) => problem(StatusCode::UNPROCESSABLE_ENTITY, &err),
+    }
 }
 
 fn bot_from_env() -> Result<Bot, String> {
@@ -628,7 +714,7 @@ async fn main() {
         let bot = bot.clone();
         async move { (*bot).clone().run().await }
     });
-    axum::serve(listener, manifest_router())
+    axum::serve(listener, router(bot.clone()))
         .with_graceful_shutdown(async {
             let _ = tokio::signal::ctrl_c().await;
         })
@@ -652,6 +738,8 @@ mod tests {
         edited: Vec<Value>,
         captures: Vec<Value>,
         links: Vec<Value>,
+        acts: Vec<Value>,
+        answered: Vec<Value>,
     }
 
     type Shared = Arc<Mutex<World>>;
@@ -704,6 +792,24 @@ mod tests {
                     return (axum::http::StatusCode::FORBIDDEN, Json(json!({ "type": "https://frood.dev/problems/not-linked", "detail": "not linked" })));
                 }
                 (axum::http::StatusCode::ACCEPTED, Json(json!({ "source_id": "src-1", "created": true })))
+            }))
+            .route("/botTOKEN/answerCallbackQuery", post(|State(w): State<Shared>, Json(b): Json<Value>| async move {
+                w.lock().unwrap().answered.push(b);
+                Json(json!({ "ok": true, "result": true }))
+            }))
+            .route("/v1/inbox/{id}", get(|Path(id): Path<String>| async move {
+                assert_eq!(id, "item-1");
+                Json(json!({
+                    "item": { "id": "item-1", "kind": "proposal", "state": "open" },
+                    "content": { "risk": "conflict", "alternatives": [{ "key": "default", "changes": [{ "before": "Релиз — 14.11", "after": "Релиз — 28.11" }] }] },
+                    "actions": [{ "action": "accept", "alternative": "default" }, { "action": "reject" }]
+                }))
+            }))
+            .route("/v1/inbox/{id}/act", post(|State(w): State<Shared>, headers: HeaderMap, Json(b): Json<Value>| async move {
+                assert_eq!(headers["authorization"], "Bearer module-token");
+                w.lock().unwrap().acts.push(b);
+                Json(json!({ "outcome": "done", "item": { "id": "item-1", "kind": "proposal", "state": "resolved",
+                    "resolution": { "action": "accept", "by": "user:u1/via/telegram" } } }))
             }))
             .route("/v1/sources/src-1/status", get(|| async {
                 Json(json!({ "state": "done", "proposals": [
@@ -813,6 +919,58 @@ mod tests {
                 .unwrap()
                 .starts_with("This Telegram account is not linked")
         );
+    }
+
+    #[tokio::test]
+    async fn inbox_items_come_with_buttons_that_act_as_the_person() {
+        let (url, world) = world().await;
+        let bot = bot(&url, Lang::Ru);
+        let shown = json!({
+            "item": { "id": "item-1", "kind": "proposal", "state": "open" },
+            "content": { "risk": "conflict", "alternatives": [{ "key": "default", "changes": [{ "before": "Релиз — 14.11", "after": "Релиз — 28.11" }] }] },
+            "actions": [{ "action": "accept", "alternative": "default" }, { "action": "reject" }]
+        });
+        let out = bot
+            .notify_send(
+                &json!({ "recipient": { "user_id": "u1", "external_id": "42" }, "item": shown }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(out["message_ref"], "42:900");
+        {
+            let w = world.lock().unwrap();
+            assert_eq!(w.sent[0]["chat_id"], 42);
+            assert!(
+                w.sent[0]["text"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("⚠️ Противоречит записанному")
+            );
+            assert_eq!(
+                w.sent[0]["reply_markup"]["inline_keyboard"][0][0]["callback_data"],
+                "i:item-1:0"
+            );
+        }
+
+        // The person presses «Принять».
+        bot.on_button(&json!({
+            "id": "q-1", "from": { "id": 42 }, "data": "i:item-1:0",
+            "message": { "message_id": 900, "chat": { "id": 42 } }
+        }))
+        .await;
+        let w = world.lock().unwrap();
+        assert_eq!(
+            w.acts[0],
+            json!({ "action": "accept", "alternative": "default", "external_id": "42" })
+        );
+        assert_eq!(w.answered[0]["text"], "Готово");
+        let edited = &w.edited[0];
+        assert_eq!(edited["message_id"], 900);
+        assert!(
+            edited["text"].as_str().unwrap().ends_with("✅ Принято"),
+            "{edited}"
+        );
+        assert_eq!(edited["reply_markup"]["inline_keyboard"], json!([]));
     }
 
     #[test]
