@@ -14,8 +14,8 @@ pub use interpolate::Secrets;
 pub use model::{
     Account, AccountBudget, AskUser, Attention, AttentionPerson, AttentionRoute, Auth, AutoAccept,
     BeforeNotify, Budget, Config, Deploy, Embeddings, Installation, Job, ModelProvider, Module,
-    OnExpire, Policies, Provider, Search, Server, ServerPlacement, SituationMatch, Source, Storage,
-    Trigger,
+    OnExpire, Policies, Provider, Reminder, Search, Server, ServerPlacement, SituationMatch,
+    Source, Storage, Trigger,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -548,9 +548,39 @@ fn validate_situation(place: &str, when: &model::SituationMatch, problems: &mut 
     }
 }
 
+fn validate_reminders(place: &str, reminders: &[model::Reminder], problems: &mut Vec<String>) {
+    for (i, reminder) in reminders.iter().enumerate() {
+        if !(-365..=365).contains(&reminder.days) {
+            problems.push(format!(
+                "{place}[{i}]: days is from -365 to 365 (days from the due date), not {}",
+                reminder.days
+            ));
+        }
+        if chrono::NaiveTime::parse_from_str(&reminder.at, "%H:%M").is_err() {
+            problems.push(format!(
+                "{place}[{i}]: at {:?} is a time of day like \"09:00\"",
+                reminder.at
+            ));
+        }
+    }
+}
+
 fn validate_attention(config: &Config, problems: &mut Vec<String>) {
     let attention = &config.attention;
+    validate_reminders("attention.reminders", &attention.reminders, problems);
     for (email, person) in &attention.people {
+        if let Some(reminders) = &person.reminders {
+            validate_reminders(
+                &format!("attention.people.{email}.reminders"),
+                reminders,
+                problems,
+            );
+            if person.timezone.is_none() && !reminders.is_empty() {
+                problems.push(format!(
+                    "attention.people.{email}: reminders need a timezone (there is no default)"
+                ));
+            }
+        }
         if !email.contains('@') {
             problems.push(format!("attention.people: {email:?} is not an email"));
         }

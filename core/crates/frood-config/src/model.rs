@@ -564,6 +564,20 @@ pub struct Attention {
     /// Most push messages a person gets in a day: a fuse against floods. Default 30.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_push_per_day: Option<u32>,
+    /// When to remind of due dates, for everyone with a timezone; a person's own list replaces
+    /// it. No list, no reminders.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reminders: Vec<Reminder>,
+}
+
+/// One reminder of a due date.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Reminder {
+    /// Days from the due date: -3 three days before, 0 on the day, 1 the day after.
+    pub days: i32,
+    /// Time of day in the person's zone, e.g. "09:00".
+    pub at: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -577,6 +591,9 @@ pub struct AttentionPerson {
     pub quiet_hours: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_push_per_day: Option<u32>,
+    /// This person's reminders of due dates, instead of `attention.reminders`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reminders: Option<Vec<Reminder>>,
 }
 
 /// Which situations a rule matches.

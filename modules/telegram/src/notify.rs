@@ -26,6 +26,8 @@ pub(crate) struct Words {
     due_before: &'static str,
     due_today: &'static str,
     due_overdue: &'static str,
+    due_in: &'static str,
+    due_ago: &'static str,
     failed: &'static str,
     accept: &'static str,
     reject: &'static str,
@@ -78,7 +80,9 @@ const EN: Words = Words {
     due: "⏰ Due",
     due_before: "is due tomorrow",
     due_today: "is due today",
-    due_overdue: "was due: done, or move it?",
+    due_overdue: "was due yesterday: done, or move it?",
+    due_in: "is due in {n} days",
+    due_ago: "was due {n} days ago: done, or move it?",
     failed: "🚨 A run failed",
     accept: "Accept",
     reject: "Reject",
@@ -131,7 +135,9 @@ const RU: Words = Words {
     due: "⏰ Срок",
     due_before: "завтра срок",
     due_today: "срок сегодня",
-    due_overdue: "срок прошёл: выполнено или перенести?",
+    due_overdue: "срок был вчера: выполнено или перенести?",
+    due_in: "срок через {n} дн.",
+    due_ago: "срок прошёл {n} дн. назад: выполнено или перенести?",
     failed: "🚨 Запуск упал",
     accept: "Принять",
     reject: "Отклонить",
@@ -256,10 +262,20 @@ pub(crate) fn text(shown: &Value, w: &Words) -> String {
             }
         }
         "reminder" => {
-            let step = match content["step"].as_str() {
-                Some("before") => w.due_before,
-                Some("today") => w.due_today,
-                _ => w.due_overdue,
+            // Days from the due date: -1 the day before, 0 the day, 1 the day after.
+            let days = content["days"]
+                .as_i64()
+                .unwrap_or(match content["step"].as_str() {
+                    Some("before") => -1,
+                    Some("today") => 0,
+                    _ => 1,
+                });
+            let step = match days {
+                -1 => w.due_before.to_owned(),
+                0 => w.due_today.to_owned(),
+                1 => w.due_overdue.to_owned(),
+                d if d < 0 => w.due_in.replace("{n}", &(-d).to_string()),
+                d => w.due_ago.replace("{n}", &d.to_string()),
             };
             lines.push(format!(
                 "{} {}: {}",
@@ -592,6 +608,27 @@ mod tests {
                 [{ "text": "Отклонить", "callback_data": "i:0199-item:1" }],
                 [{ "text": "Отложить", "callback_data": "i:0199-item:2" }]
             ] })
+        );
+    }
+
+    #[test]
+    fn reminders_say_how_far_the_due_date_is() {
+        let w = Lang::Ru.words();
+        let reminder = |days: i64| {
+            json!({ "item": { "id": "r", "kind": "reminder", "state": "open" },
+                    "content": { "text": "Сдать отчёт", "due": "2026-11-14", "days": days }, "actions": [] })
+        };
+        assert_eq!(
+            text(&reminder(-3), w),
+            "⏰ Срок 2026-11-14: срок через 3 дн.\nСдать отчёт"
+        );
+        assert_eq!(
+            text(&reminder(0), w),
+            "⏰ Срок 2026-11-14: срок сегодня\nСдать отчёт"
+        );
+        assert_eq!(
+            text(&reminder(2), w),
+            "⏰ Срок 2026-11-14: срок прошёл 2 дн. назад: выполнено или перенести?\nСдать отчёт"
         );
     }
 

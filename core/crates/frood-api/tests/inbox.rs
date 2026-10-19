@@ -496,7 +496,7 @@ async fn sqlx_link(pool: &frood_store::sqlx::PgPool, alice: uuid::Uuid) {
 }
 
 #[tokio::test]
-async fn due_dates_remind_the_day_before_on_the_day_and_after() {
+async fn due_dates_remind_as_each_person_configured() {
     use chrono::TimeZone;
     let Some(url) = frood_store::testing::database_url() else {
         eprintln!("FROOD_TEST_DATABASE_URL is not set; skipping");
@@ -509,7 +509,8 @@ async fn due_dates_remind_the_day_before_on_the_day_and_after() {
     let fake = fake_telegram(channel.clone()).await;
     let config = config(
         &fake,
-        "attention:\n  people:\n    alice@example.com: { timezone: Europe/Amsterdam }\n",
+        "attention:\n  people:\n    alice@example.com:\n      timezone: Europe/Amsterdam\n      \
+         reminders: [{ days: -1, at: '09:00' }, { days: 0, at: '09:00' }, { days: 0, at: '18:00' }, { days: 1, at: '09:00' }]\n",
     );
     let Setup {
         dispatch, ledger, ..
@@ -574,7 +575,7 @@ async fn due_dates_remind_the_day_before_on_the_day_and_after() {
             .map(|i| {
                 (
                     i.data["text"].as_str().unwrap().to_owned(),
-                    i.data["step"].as_str().unwrap().to_owned(),
+                    i.subject.split('/').nth(3).unwrap().to_owned(),
                 )
             })
             .collect();
@@ -585,23 +586,37 @@ async fn due_dates_remind_the_day_before_on_the_day_and_after() {
     // Two days before: nothing yet.
     let at = |d, h| chrono::Utc.with_ymd_and_hms(2026, 11, d, h, 0, 0).unwrap();
     assert_eq!(dispatch.remind_once(at(12, 10)).await.unwrap(), 0);
-    // The day before, at 9:00 Amsterdam (8:00 UTC in November).
-    assert_eq!(dispatch.remind_once(at(13, 6)).await.unwrap(), 2);
+    // The day before at 9:00 Amsterdam (8:00 UTC in November): made when its time comes.
     assert_eq!(
-        dispatch.remind_once(at(13, 7)).await.unwrap(),
+        dispatch.remind_once(at(13, 6)).await.unwrap(),
         0,
-        "once per step"
+        "too early"
+    );
+    assert_eq!(dispatch.remind_once(at(13, 8)).await.unwrap(), 2);
+    assert_eq!(
+        dispatch.remind_once(at(13, 9)).await.unwrap(),
+        0,
+        "once each"
     );
     let items = dispatch.inbox(false, 50).await.unwrap();
     assert_eq!(items[0].notify_after, at(13, 8));
     assert_eq!(items[0].for_users, [alice]);
-    // On the day the step moves on.
-    assert_eq!(dispatch.remind_once(at(14, 1)).await.unwrap(), 2);
+    assert_eq!(items[0].data["days"], -1);
+    // On the day, twice: at 9:00 and at 18:00; each closes the one before.
+    assert_eq!(dispatch.remind_once(at(14, 8)).await.unwrap(), 2);
     assert_eq!(
         reminders(dispatch.clone()).await,
         [
-            ("Позвонить Оле".into(), "today".into()),
-            ("Сдать отчёт".into(), "today".into())
+            ("Позвонить Оле".into(), "0@09:00".into()),
+            ("Сдать отчёт".into(), "0@09:00".into())
+        ]
+    );
+    assert_eq!(dispatch.remind_once(at(14, 17)).await.unwrap(), 2);
+    assert_eq!(
+        reminders(dispatch.clone()).await,
+        [
+            ("Позвонить Оле".into(), "0@18:00".into()),
+            ("Сдать отчёт".into(), "0@18:00".into())
         ]
     );
 
@@ -644,8 +659,8 @@ async fn due_dates_remind_the_day_before_on_the_day_and_after() {
         serde_json::to_value(report_now.status).unwrap(),
         "completed"
     );
-    // The day after: only the moved call would remind, and it is not due yet.
-    assert_eq!(dispatch.remind_once(at(15, 9)).await.unwrap(), 0);
+    // The day after: the report is done and the call moved, so nothing reminds.
+    assert_eq!(dispatch.remind_once(at(15, 8)).await.unwrap(), 0);
 }
 
 #[tokio::test]
