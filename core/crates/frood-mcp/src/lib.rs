@@ -221,6 +221,11 @@ pub struct ProposeParams {
     /// {assertion: {kind, text, modality, subjects?, slots?, said_at?, valid_from?, evidence?}},
     /// supersede {assertion_id, assertion}, close {assertion_id, status, valid_to?},
     /// reverify {assertion_id}, link {from, to, kind}, create_entity {ref?, type, name, aliases?}.
+    /// kind: decision, commitment, rule, responsibility, fact, status, event or open_question.
+    /// modality: mentioned, proposed, agreed, decided, reported, observed or inferred.
+    /// subjects: entity ids, or `ref:<key>` of a create_entity earlier in the same list.
+    /// slots: an object such as {"due": "2026-11-14", "owner": "<entity id>"}.
+    /// A supersede or close needs the assertion and its version in `base`.
     pub operations: Vec<serde_json::Map<String, Value>>,
     /// Why this change: shown to the person who decides.
     pub rationale: String,
