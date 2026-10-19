@@ -335,10 +335,22 @@ fn parse_claude(v: &Value) -> Vec<Parsed> {
         Some("user") => {
             for block in content() {
                 if block["type"] == "tool_result" {
-                    out.push(event(
-                        "tool_result",
-                        json!({ "is_error": block["is_error"].as_bool().unwrap_or(false) }),
-                    ));
+                    let failed = block["is_error"].as_bool().unwrap_or(false);
+                    let mut data = json!({ "is_error": failed });
+                    // The error says what to fix; results themselves stay out of the log.
+                    if failed {
+                        let text = match &block["content"] {
+                            Value::String(text) => text.clone(),
+                            Value::Array(parts) => parts
+                                .iter()
+                                .filter_map(|p| p["text"].as_str())
+                                .collect::<Vec<_>>()
+                                .join("\n"),
+                            _ => String::new(),
+                        };
+                        data["error"] = json!(text.chars().take(500).collect::<String>());
+                    }
+                    out.push(event("tool_result", data));
                 }
             }
         }
@@ -558,6 +570,7 @@ mod tests {
             r#"{"type":"system","subtype":"init","session_id":"s1","model":"claude-haiku-5-5","mcp_servers":[{"name":"frood","status":"connected"}]}"#,
             r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Reading"},{"type":"tool_use","name":"mcp__frood__ask_user","input":{}}]}}"#,
             r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t","content":"ok"}]}}"#,
+            r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"u","is_error":true,"content":[{"type":"text","text":"operation 1: unknown variant `seen`"}]}]}}"#,
             r#"{"type":"result","subtype":"success","is_error":false,"result":"Asked one question","total_cost_usd":0.0123,"num_turns":2,"duration_ms":900,"usage":{"input_tokens":10,"output_tokens":5}}"#,
             "not json",
         ];
@@ -571,6 +584,10 @@ mod tests {
         );
         assert!(
             matches!(&parsed[4], Parsed::Event(e) if e["kind"] == "tool_use" && e["data"]["name"] == "mcp__frood__ask_user")
+        );
+        assert!(matches!(&parsed[5], Parsed::Event(e) if e["data"].get("error").is_none()));
+        assert!(
+            matches!(&parsed[6], Parsed::Event(e) if e["data"]["error"] == "operation 1: unknown variant `seen`")
         );
         assert_eq!(
             parsed.last().unwrap(),
