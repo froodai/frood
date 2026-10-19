@@ -521,15 +521,32 @@ impl FroodMcp {
     }
 
     #[tool(
-        description = "Proposals waiting for a person's verdict, newest first.",
+        description = "What waits for a person: proposals to decide, agents' questions, reminders of due dates, failed runs. Each item says what happened and what can be done; the person's own items first.",
         annotations(read_only_hint = true)
     )]
-    async fn list_inbox(&self) -> ToolResult {
+    async fn list_inbox(&self, Extension(parts): Extension<http::request::Parts>) -> ToolResult {
+        let user = principal(&parts)?.user_id();
+        fn db(err: impl std::fmt::Display) -> String {
+            tracing::error!(error = %err, "database error in list_inbox");
+            "internal error; see server logs".to_owned()
+        }
+        let items = self.dispatch.inbox(false, 50).await.map_err(db)?;
+        let mut shown = Vec::with_capacity(items.len());
+        for item in items {
+            let for_me = user.is_some_and(|u| item.for_users.contains(&u));
+            let entry = self.dispatch.inbox_shown(item).await.map_err(db)?;
+            shown.push((for_me, entry));
+        }
+        shown.sort_by_key(|(for_me, _)| !*for_me);
         render(
-            self.ledger
-                .proposals(Some(ProposalState::Open), None, 50)
-                .await
-                .map_err(ledger_error)?,
+            shown
+                .into_iter()
+                .map(|(for_me, s)| json!({
+                    "id": s.item.id, "kind": s.item.kind, "urgency": s.item.urgency, "for_me": for_me,
+                    "created_at": s.item.created_at, "content": s.content, "investigation": s.item.investigation,
+                    "actions": s.actions,
+                }))
+                .collect::<Vec<_>>(),
         )
     }
 

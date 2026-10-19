@@ -33,6 +33,9 @@ pub struct Config {
     /// Where knowledge comes from (docs/14 §3), by name.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub sources: BTreeMap<String, Source>,
+    /// Who is told what, when and where (docs/15).
+    #[serde(default)]
+    pub attention: Attention,
 
     // Sections implemented by later milestones. They are accepted so a config can be written
     // ahead of time, but ignored with a warning until the milestone lands.
@@ -40,8 +43,6 @@ pub struct Config {
     pub runtimes: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub imports: Option<serde_json::Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub attention: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub channels: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -547,6 +548,67 @@ pub struct Source {
     pub tools: Option<Vec<String>>,
 }
 
+/// Inbox and notifications (docs/15, docs/22).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Attention {
+    /// Personal settings, by email.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub people: BTreeMap<String, AttentionPerson>,
+    /// Changes to how urgent kinds of situations are; the built-in table covers the rest.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub routes: Vec<AttentionRoute>,
+    /// Situations an agent looks into before anyone is told (N6).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub before_notify: Vec<BeforeNotify>,
+    /// Most push messages a person gets in a day: a fuse against floods. Default 30.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_push_per_day: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AttentionPerson {
+    /// IANA zone, e.g. Europe/Amsterdam: for quiet hours and reminder times.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timezone: Option<String>,
+    /// No push in these hours, e.g. "23:00-08:00"; urgent things wait for the morning.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quiet_hours: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_push_per_day: Option<u32>,
+}
+
+/// Which situations a rule matches.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SituationMatch {
+    /// proposal, question, reminder or alert.
+    pub kind: String,
+    /// For proposals: new, change, conflict, stale_knowledge or entity_merge.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub risk: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AttentionRoute {
+    #[serde(flatten)]
+    pub when: SituationMatch,
+    /// now (push), digest (in the next digest) or silent (Inbox only).
+    pub urgency: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BeforeNotify {
+    pub when: SituationMatch,
+    /// The agent job that investigates, e.g. investigate.
+    pub run: String,
+    /// Tell people anyway after this long, e.g. 30m.
+    pub max_wait: String,
+}
+
 /// Search settings.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -573,7 +635,6 @@ pub(crate) const RESERVED_SECTIONS: &[(&str, &str)] = &[
         "a later milestone; name a runtime module in the job's `runtime` for now",
     ),
     ("imports", "a later milestone"),
-    ("attention", "M5"),
     ("channels", "M5"),
     ("backup", "M6"),
 ];
@@ -583,7 +644,6 @@ impl Config {
         let present = [
             ("runtimes", self.runtimes.is_some()),
             ("imports", self.imports.is_some()),
-            ("attention", self.attention.is_some()),
             ("channels", self.channels.is_some()),
             ("backup", self.backup.is_some()),
         ];

@@ -166,6 +166,18 @@ impl Modules {
         self.endpoints.keys().map(String::as_str)
     }
 
+    /// Modules whose manifest (as discovered so far) provides a capability, e.g. `notify.send`.
+    pub fn providers(&self, capability: &str) -> Vec<String> {
+        let Ok(manifests) = self.manifests.read() else {
+            return Vec::new();
+        };
+        manifests
+            .iter()
+            .filter(|(_, m)| m.capability(capability).is_some())
+            .map(|(name, _)| name.clone())
+            .collect()
+    }
+
     pub fn token(&self, module: &str) -> Option<&str> {
         self.endpoints.get(module)?.token.as_deref()
     }

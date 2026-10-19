@@ -8,6 +8,7 @@ Apache-2.0 (see `LICENSE`). See [docs/16_platform.md](../docs/16_platform.md) §
 |---|---|---|
 | [`media.transcribe@1`](media.transcribe/1/README.md) | Speech to text | `modules/stt-openai` |
 | [`agents.execute@1`](agents.execute/1/README.md) | Run an agent (Claude Code, Codex, …) on a job, resume it in the same session | `modules/runtime-docker` (M4) |
+| [`notify.send@1`, `notify.update@1`](notify.send/1/README.md) | Show Inbox items to people in a channel; edit them when resolved | `modules/telegram` |
 
 Each contract has a `README.md` (behaviour) and a `schema.json` (JSON Schema 2020-12 of the
 requests and responses).

@@ -6,6 +6,7 @@ mod auth;
 mod capture;
 mod channels;
 mod error;
+mod inbox;
 mod ledger;
 mod work;
 
@@ -76,7 +77,8 @@ pub fn assemble(
         modules.clone(),
         jobs,
     )
-    .with_sources(config.sources.clone());
+    .with_sources(config.sources.clone())
+    .with_attention(config.attention.clone());
     Assembly {
         state: AppState {
             ledger,
@@ -116,6 +118,7 @@ pub fn router(state: AppState) -> Router {
         .merge(capture::routes())
         .merge(channels::routes())
         .merge(work::routes())
+        .merge(inbox::routes())
         .with_state(state)
         .merge(mcp)
         .merge(oauth)
