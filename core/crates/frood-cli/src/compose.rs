@@ -87,7 +87,6 @@ pub fn render(
              \x20     - {secrets}\n\
              \x20   volumes:\n\
              \x20     - {config_mount}\n\
-             \x20     - {secrets_mount}\n\
              \x20   ports:\n\
              \x20     - \"127.0.0.1:{port}:{port}\"\n\
              \x20   depends_on:\n\
@@ -101,11 +100,6 @@ pub fn render(
             config_mount = quote(&format!(
                 "{}:/etc/frood/frood.yaml:ro",
                 config_path.display()
-            )),
-            // Where `serve` looks for it next to the config: backups take a copy (C4).
-            secrets_mount = quote(&format!(
-                "{}:/etc/frood/.frood/secrets.env:ro",
-                secrets_path.display()
             )),
         ));
     }
@@ -341,7 +335,9 @@ mod tests {
         assert!(out.contains("\"127.0.0.1:8080:8080\""));
         assert!(out.contains("FROOD_DB_HOST: postgres"));
         assert!(out.contains("\"/x/frood.yaml:/etc/frood/frood.yaml:ro\""));
-        assert!(out.contains("\"/x/.frood/secrets.env:/etc/frood/.frood/secrets.env:ro\""));
+        // Secrets reach the server through its environment only: the file is not mounted, so
+        // its owner and permissions on the host do not matter.
+        assert!(!out.contains("secrets.env:/etc/frood"));
         assert!(out.contains("condition: service_healthy"));
     }
 

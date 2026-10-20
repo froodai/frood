@@ -4,7 +4,6 @@
 //! clear — into every target; and a restore of each target's latest backup into a temporary
 //! database, compared with what was backed up.
 
-use std::path::PathBuf;
 use std::time::Duration;
 
 use base64::Engine;
@@ -23,9 +22,10 @@ pub struct BackupSetup {
     pub installation: String,
     /// The database as the backup module reaches it.
     pub database_url: String,
-    /// `frood.yaml` as written, and where the secrets file is; the server sets them at start.
+    /// `frood.yaml` as written, and the installation's secrets as `KEY=value` lines; the
+    /// server sets them at start.
     pub config_yaml: Option<String>,
-    pub secrets_path: Option<PathBuf>,
+    pub secrets_env: Option<String>,
 }
 
 fn file(name: &str, data: &[u8]) -> Value {
@@ -69,17 +69,13 @@ pub(crate) async fn run(ctx: &Ctx, verify: bool) -> Result<Value, JobError> {
             Some(yaml) => files.push(file("frood.yaml", yaml.as_bytes())),
             None => warnings.push("frood.yaml is not in the backup: the server was not given it"),
         }
-        let secrets = match &setup.secrets_path {
-            Some(path) => tokio::fs::read(path).await.ok(),
-            None => None,
-        };
-        match secrets {
+        match &setup.secrets_env {
             Some(plain) => files.push(file(
                 "secrets.env.age",
-                &encrypt_secrets(&settings.recovery_key, &plain)?,
+                &encrypt_secrets(&settings.recovery_key, plain.as_bytes())?,
             )),
             None => warnings.push(
-                "the secrets file is not in the backup: the server cannot read it; keep a copy yourself",
+                "the secrets are not in the backup: the server was not given them; keep a copy yourself",
             ),
         }
         let schema: Option<i64> =

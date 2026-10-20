@@ -87,7 +87,7 @@ pub fn assemble(
             installation: config.installation.name.clone(),
             database_url: frood_modhost::database_url(config),
             config_yaml: None,
-            secrets_path: None,
+            secrets_env: None,
         });
     }
     Assembly {
