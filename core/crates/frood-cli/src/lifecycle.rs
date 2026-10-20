@@ -116,6 +116,9 @@ pub async fn apply(paths: &Paths, render_only: bool) -> anyhow::Result<()> {
 
     let build = loaded.config.deploy.build.is_some()
         || modules::containers(&loaded).any(|(_, m)| m.build.is_some());
+    // The database first: a new server migrates it as it starts, so a snapshot comes before.
+    docker_compose(&compose_path, &["up", "-d", "--wait", "postgres"]).await?;
+    snapshot_before_migrations(&loaded, &compose_path).await?;
     docker_compose_up(&compose_path, build).await?;
 
     let pool = frood_store::connect(&loaded.config.storage.url, Duration::from_secs(60))
@@ -258,6 +261,57 @@ async fn loaded_config_sha(port: u16) -> Option<String> {
         .ok()?;
     let body: serde_json::Value = response.json().await.ok()?;
     body.get("config_sha256")?.as_str().map(str::to_owned)
+}
+
+/// Snapshots kept in `.frood/snapshots`.
+const SNAPSHOTS_KEPT: usize = 5;
+
+/// Before new migrations change an existing database: a local dump to roll back to (C5).
+async fn snapshot_before_migrations(loaded: &Loaded, compose_path: &Path) -> anyhow::Result<()> {
+    let pool = frood_store::connect(&loaded.config.storage.url, Duration::from_secs(60))
+        .await
+        .context("database did not become reachable")?;
+    let (pending, existing) = frood_store::pending_migrations(&pool).await?;
+    pool.close().await;
+    if pending.is_empty() || !existing {
+        return Ok(());
+    }
+    let dir = absolute(&loaded.base_dir.join(".frood").join("snapshots"))?;
+    std::fs::create_dir_all(&dir)?;
+    let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ");
+    let path = dir.join(format!("{stamp}-before-{}.dump", pending[0]));
+    let file = std::fs::File::create(&path)
+        .with_context(|| format!("cannot create {}", path.display()))?;
+    let status = tokio::process::Command::new("docker")
+        .args(["compose", "-f"])
+        .arg(compose_path)
+        .args([
+            "exec", "-T", "postgres", "pg_dump", "-U", "frood", "-d", "frood", "-Fc",
+        ])
+        .stdout(file)
+        .status()
+        .await
+        .context("cannot run pg_dump in the postgres container")?;
+    if !status.success() {
+        let _ = std::fs::remove_file(&path);
+        bail!("the snapshot before migrations failed ({status}); nothing was changed");
+    }
+    println!(
+        "snapshot before migrations {:?}: {}",
+        pending,
+        path.display()
+    );
+    let mut dumps: Vec<_> = std::fs::read_dir(&dir)?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|e| e == "dump"))
+        .collect();
+    dumps.sort();
+    let extra = dumps.len().saturating_sub(SNAPSHOTS_KEPT);
+    for old in dumps.into_iter().take(extra) {
+        let _ = std::fs::remove_file(old);
+    }
+    Ok(())
 }
 
 async fn docker_compose(compose_path: &Path, args: &[&str]) -> anyhow::Result<()> {
