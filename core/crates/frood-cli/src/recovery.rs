@@ -62,6 +62,62 @@ pub struct RestoreOptions {
     pub env: Vec<String>,
     /// A restic snapshot id; the latest when omitted.
     pub snapshot: Option<String>,
+    /// Ports on this machine instead of the backup's, when those are taken here.
+    pub postgres_port: Option<u16>,
+    pub listen: Option<String>,
+}
+
+/// The restored config with this machine's ports: `deploy.postgres_port` (and the database
+/// URL's default port that follows it), and `server.listen`.
+fn with_ports(text: &str, postgres_port: Option<u16>, listen: Option<&str>) -> String {
+    let mut out = String::with_capacity(text.len());
+    for line in text.split_inclusive('\n') {
+        let trimmed = line.trim_start();
+        let indent = &line[..line.len() - trimmed.len()];
+        let ending = if line.ends_with('\n') { "\n" } else { "" };
+        if let Some(port) = postgres_port
+            && trimmed.starts_with("postgres_port:")
+        {
+            out.push_str(&format!("{indent}postgres_port: {port}{ending}"));
+        } else if let Some(listen) = listen
+            && trimmed.starts_with("listen:")
+        {
+            out.push_str(&format!("{indent}listen: \"{listen}\"{ending}"));
+        } else if let Some(port) = postgres_port
+            && let Some(at) = line.find("FROOD_DB_PORT:-")
+        {
+            let start = at + "FROOD_DB_PORT:-".len();
+            let digits = line[start..]
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .count();
+            out.push_str(&line[..start]);
+            out.push_str(&port.to_string());
+            out.push_str(&line[start + digits..]);
+        } else {
+            out.push_str(line);
+        }
+    }
+    out
+}
+
+/// What already holds a port on this machine: a program, or a Docker container that publishes
+/// it (Docker can hold a port that no listening socket shows).
+fn port_taken(port: u16) -> Option<String> {
+    // Only "in use" counts: a port below 1024 may just need root to bind.
+    if let Err(err) = std::net::TcpListener::bind(("127.0.0.1", port))
+        && err.kind() == std::io::ErrorKind::AddrInUse
+    {
+        return Some("a program on this machine".to_owned());
+    }
+    let listed = std::process::Command::new("docker")
+        .args(["ps", "--format", "{{.Names}}\t{{.Ports}}"])
+        .output()
+        .ok()?;
+    String::from_utf8_lossy(&listed.stdout)
+        .lines()
+        .find(|line| line.contains(&format!(":{port}->")))
+        .map(|line| format!("container {}", line.split('\t').next().unwrap_or("?")))
 }
 
 pub async fn restore(paths: &Paths, options: &RestoreOptions) -> anyhow::Result<()> {
@@ -179,7 +235,57 @@ pub async fn restore(paths: &Paths, options: &RestoreOptions) -> anyhow::Result<
         std::fs::read(work.join("secrets.env.age")).context("the backup has no secrets.env.age")?;
     let secrets = age::decrypt(&identity, &sealed)
         .map_err(|_| anyhow::anyhow!("this recovery key does not open the backup's secrets"))?;
-    std::fs::copy(work.join("frood.yaml"), &config_path).context("the backup has no frood.yaml")?;
+    let config_text = with_ports(
+        &std::fs::read_to_string(work.join("frood.yaml"))
+            .context("the backup has no frood.yaml")?,
+        options.postgres_port,
+        options.listen.as_deref(),
+    );
+
+    // The ports it will use on this machine, checked before anything is written.
+    let pairs = String::from_utf8_lossy(&secrets)
+        .lines()
+        .filter_map(|line| line.split_once('='))
+        .map(|(k, v)| (k.trim().to_owned(), v.trim().to_owned()))
+        .collect::<Vec<_>>();
+    let config = frood_config::parse(&config_text, &frood_config::Secrets::from_pairs(pairs))
+        .context("the restored frood.yaml does not load")?
+        .config;
+    let mut ports = vec![(
+        config.deploy.postgres_port,
+        "the database",
+        "--postgres-port",
+    )];
+    if config.deploy.server == frood_config::ServerPlacement::Container
+        && let Ok(addr) = config.server.listen.parse::<std::net::SocketAddr>()
+    {
+        ports.push((addr.port(), "the server", "--listen 0.0.0.0:<port>"));
+    }
+    // Caddy's ports matter only when the installation starts (`frood apply`): said, not refused.
+    let later: Vec<String> = if config.server.public_url.is_some() {
+        [80, 443]
+            .into_iter()
+            .filter_map(|port| {
+                port_taken(port).map(|by| format!("port {port} for HTTPS is taken by {by}"))
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let taken: Vec<String> = ports
+        .iter()
+        .filter_map(|(port, what, how)| {
+            port_taken(*port)
+                .map(|by| format!("port {port} for {what} is taken by {by}: use {how}"))
+        })
+        .collect();
+    if !taken.is_empty() {
+        std::fs::remove_dir_all(&work)?;
+        bail!("nothing was written:\n  {}", taken.join("\n  "));
+    }
+
+    std::fs::write(&config_path, &config_text)
+        .with_context(|| format!("cannot write {}", config_path.display()))?;
     std::fs::create_dir_all(secrets_path.parent().context("no secrets folder")?)?;
     write_private(&secrets_path, &secrets)?;
     println!(
@@ -224,8 +330,36 @@ pub async fn restore(paths: &Paths, options: &RestoreOptions) -> anyhow::Result<
         bail!("loading the database failed ({status})");
     }
     std::fs::remove_dir_all(&work)?;
+    for note in &later {
+        println!("note: {note}; free it, or remove server.public_url, before `frood apply`");
+    }
     println!(
         "\nRestored. Check frood.yaml — build paths and module volumes may differ on this machine — then run `frood apply`."
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const RESTORED: &str = "server:\n  listen: \"0.0.0.0:8080\"\nstorage:\n  uses: postgres\n  url: postgres://frood:${secret:POSTGRES_PASSWORD}@${env:FROOD_DB_HOST:-127.0.0.1}:${env:FROOD_DB_PORT:-5432}/frood\ndeploy:\n  postgres_port: 5432 # host port\n";
+
+    #[test]
+    fn ports_of_this_machine_replace_the_backups() {
+        let out = with_ports(RESTORED, Some(54398), Some("0.0.0.0:18098"));
+        assert!(out.contains("  listen: \"0.0.0.0:18098\"\n"));
+        assert!(out.contains("FROOD_DB_PORT:-54398}/frood"));
+        assert!(out.contains("  postgres_port: 54398\n"));
+        assert_eq!(with_ports(RESTORED, None, None), RESTORED);
+    }
+
+    #[test]
+    fn a_held_port_is_seen() {
+        let held = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = held.local_addr().unwrap().port();
+        assert!(port_taken(port).is_some());
+        drop(held);
+        assert!(port_taken(port).is_none());
+    }
 }

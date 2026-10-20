@@ -116,6 +116,12 @@ enum Command {
         /// A snapshot id. Default: the latest.
         #[arg(long)]
         snapshot: Option<String>,
+        /// The database's port on this machine, when the backup's is taken here.
+        #[arg(long)]
+        postgres_port: Option<u16>,
+        /// The server's address on this machine (e.g. 0.0.0.0:18080), when the backup's port is taken.
+        #[arg(long)]
+        listen: Option<String>,
     },
     /// Write all knowledge into a new folder, in a form that does not depend on the database.
     Export {
@@ -233,6 +239,8 @@ async fn main() -> ExitCode {
             image,
             env,
             snapshot,
+            postgres_port,
+            listen,
         } => {
             recovery::restore(
                 &paths,
@@ -242,6 +250,8 @@ async fn main() -> ExitCode {
                     image,
                     env,
                     snapshot,
+                    postgres_port,
+                    listen,
                 },
             )
             .await
