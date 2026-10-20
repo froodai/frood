@@ -109,15 +109,12 @@ impl Dispatch {
         self
     }
 
-    /// What a backup takes besides the database: the config as written and the secrets file.
-    pub fn with_backup_files(
-        mut self,
-        config_yaml: String,
-        secrets_path: std::path::PathBuf,
-    ) -> Self {
+    /// What a backup takes besides the database: the config as written and the secrets as
+    /// `KEY=value` lines.
+    pub fn with_backup_files(mut self, config_yaml: String, secrets_env: String) -> Self {
         if let Some(setup) = Arc::make_mut(&mut self.ctx.backup) {
             setup.config_yaml = Some(config_yaml);
-            setup.secrets_path = Some(secrets_path);
+            setup.secrets_env = Some(secrets_env);
         }
         self
     }

@@ -94,17 +94,10 @@ async fn backups_seal_the_secrets_and_alert_when_they_stop() {
     });
     assert!(assembly.warnings.is_empty(), "{:?}", assembly.warnings);
     assembly.modules.discover("backup").await.unwrap();
-    let secrets = tempfile::NamedTempFile::new().unwrap();
-    std::fs::write(
-        secrets.path(),
-        "POSTGRES_PASSWORD=dbpw\nTELEGRAM_BOT_TOKEN=123:abc\n",
-    )
-    .unwrap();
-    let dispatch = assembly
-        .state
-        .dispatch
-        .clone()
-        .with_backup_files(raw.clone(), secrets.path().to_owned());
+    let dispatch = assembly.state.dispatch.clone().with_backup_files(
+        raw.clone(),
+        "POSTGRES_PASSWORD=dbpw\nTELEGRAM_BOT_TOKEN=123:abc\n".to_owned(),
+    );
 
     // A backup by hand.
     let run = dispatch.start_manual("backup", &json!({})).await.unwrap();

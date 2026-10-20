@@ -46,7 +46,7 @@ pub async fn run(paths: &Paths) -> anyhow::Result<()> {
     state.dispatch = state
         .dispatch
         .clone()
-        .with_backup_files(loaded.raw.clone(), paths.secrets());
+        .with_backup_files(loaded.raw.clone(), secrets_env(&loaded, &secrets));
     for warning in &warnings {
         tracing::warn!("{warning}");
     }
@@ -116,4 +116,19 @@ async fn shutdown_signal() {
         () = ctrl_c => {},
         () = terminate => {},
     }
+}
+
+/// The installation's secrets as a secrets file: those the config refers to, those modules get,
+/// and the modules' service tokens. Built from what the server was given (its secrets file next
+/// to the config, or the environment in a container) so a backup can carry them.
+fn secrets_env(loaded: &frood_config::Loaded, secrets: &frood_config::Secrets) -> String {
+    let mut names: std::collections::BTreeSet<String> = loaded.secrets_used.clone();
+    for (name, module) in &loaded.config.modules {
+        names.extend(module.secrets.iter().cloned());
+        names.insert(frood_modhost::token_secret(name));
+    }
+    names
+        .into_iter()
+        .filter_map(|name| secrets.get(&name).map(|value| format!("{name}={value}\n")))
+        .collect()
 }
