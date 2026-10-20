@@ -271,3 +271,24 @@ mod tests {
         assert_eq!(vector_literal(&[0.5, -1.0]), "[0.5,-1]");
     }
 }
+
+/// Proposals that still wait for a verdict and whose texts share words with `text`, newest
+/// first: what an agent should not propose again.
+pub(crate) async fn pending_proposals(
+    pool: &PgPool,
+    text: &str,
+    limit: i64,
+) -> sqlx::Result<Vec<uuid::Uuid>> {
+    let Some(query) = tsquery(text) else {
+        return Ok(Vec::new());
+    };
+    sqlx::query_scalar(
+        "SELECT id FROM proposals WHERE state IN ('open', 'deferred') \
+           AND to_tsvector('simple', alternatives::text || ' ' || coalesce(rationale, '')) @@ to_tsquery('simple', $1) \
+         ORDER BY created_at DESC LIMIT $2",
+    )
+    .bind(query)
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+}

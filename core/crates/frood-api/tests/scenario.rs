@@ -470,6 +470,23 @@ async fn the_mvp_scenario() {
     dispatch.drain().await.unwrap();
     let (_, open) = call(&app, get_json("/v1/proposals?state=open", &client)).await;
     assert_eq!(open.as_array().unwrap().len(), 1, "{open}");
+    // The next night the agent finds it waiting and does not propose it again (F2).
+    let again = tool(
+        &app,
+        &agent,
+        "search_knowledge",
+        json!({ "query": "релиз 2.4" }),
+    )
+    .await;
+    let pending: Vec<&Value> = again
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|hit| hit.get("pending").is_some())
+        .collect();
+    assert_eq!(pending.len(), 1, "{again}");
+    assert_eq!(pending[0]["proposal_id"], proposed["id"]);
+    assert_eq!(pending[0]["changes"][0]["text"], "Релиз 2.4 — 28 ноября");
     // A model that runs its next parameter into a text is asked to send the call again.
     let body = json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": { "name": "propose_change", "arguments": {
         "operations": [{ "op": "create", "assertion": { "kind": "fact", "text": "x", "modality": "reported" } }],
