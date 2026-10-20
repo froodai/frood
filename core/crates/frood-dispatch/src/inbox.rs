@@ -80,9 +80,12 @@ pub(crate) struct NewItem<'a> {
 }
 
 pub(crate) async fn insert(pool: &PgPool, new: NewItem<'_>) -> sqlx::Result<Option<InboxItem>> {
+    // Deliveries compare with the database's clock: an item due by this host's clock is due by
+    // the database's too, even when the two differ by a few milliseconds.
     let row = sqlx::query(concat!(
         "INSERT INTO inbox_items (id, kind, subject, urgency, data, for_users, notify_after, investigation) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (subject) DO NOTHING RETURNING ",
+         VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $7 <= $9 THEN least($7, now()) ELSE $7 END, $8) \
+         ON CONFLICT (subject) DO NOTHING RETURNING ",
         columns!()
     ))
     .bind(Uuid::now_v7())
@@ -93,6 +96,7 @@ pub(crate) async fn insert(pool: &PgPool, new: NewItem<'_>) -> sqlx::Result<Opti
     .bind(&new.for_users)
     .bind(new.notify_after)
     .bind(&new.investigation)
+    .bind(Utc::now())
     .fetch_optional(pool)
     .await?;
     row.as_ref().map(item).transpose()
