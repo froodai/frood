@@ -171,8 +171,8 @@ impl Bot {
             .json(&body)
             .send()
             .await
-            .map_err(|e| e.to_string())?;
-        let value: Value = response.json().await.map_err(|e| e.to_string())?;
+            .map_err(redact)?;
+        let value: Value = response.json().await.map_err(redact)?;
         if value.get("ok") == Some(&json!(true)) {
             Ok(value.get("result").cloned().unwrap_or(Value::Null))
         } else {
@@ -384,10 +384,10 @@ impl Bot {
             .send()
             .await
             .and_then(reqwest::Response::error_for_status)
-            .map_err(|e| Captured::Failed(e.to_string()))?
+            .map_err(|e| Captured::Failed(redact(e)))?
             .bytes()
             .await
-            .map_err(|e| Captured::Failed(e.to_string()))?;
+            .map_err(|e| Captured::Failed(redact(e)))?;
         let content_type = file.mime_type.clone().unwrap_or_else(|| match kind {
             "voice" => "audio/ogg".to_owned(),
             _ => "application/octet-stream".to_owned(),
@@ -497,6 +497,12 @@ impl Bot {
             }
         }
     }
+}
+
+/// An HTTP error without its URL: Bot API URLs carry the bot's token, which must not reach logs
+/// or replies.
+fn redact(err: reqwest::Error) -> String {
+    err.without_url().to_string()
 }
 
 enum Captured {
@@ -971,6 +977,17 @@ mod tests {
             "{edited}"
         );
         assert_eq!(edited["reply_markup"]["inline_keyboard"], json!([]));
+    }
+
+    #[tokio::test]
+    async fn errors_never_show_the_bot_token() {
+        // Nothing listens there: the request fails with an error that would name the URL.
+        let bot = Bot {
+            telegram: "http://127.0.0.1:1/bot123456:SECRET-TOKEN".into(),
+            ..bot("http://127.0.0.1:1", Lang::En)
+        };
+        let err = bot.telegram("getUpdates", json!({})).await.unwrap_err();
+        assert!(!err.contains("SECRET-TOKEN"), "{err}");
     }
 
     #[test]
