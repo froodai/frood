@@ -8,6 +8,8 @@ use crate::{Bot, Lang};
 
 /// Words of notifications.
 pub(crate) struct Words {
+    /// Russian: detector texts are written out per language.
+    ru: bool,
     conflict: &'static str,
     change: &'static str,
     new: &'static str,
@@ -63,6 +65,7 @@ pub(crate) struct Words {
 }
 
 const EN: Words = Words {
+    ru: false,
     conflict: "⚠️ Conflict with what is recorded",
     change: "✏️ Change to what is recorded",
     new: "🆕 New knowledge",
@@ -118,6 +121,7 @@ const EN: Words = Words {
 };
 
 const RU: Words = Words {
+    ru: true,
     conflict: "⚠️ Противоречит записанному",
     change: "✏️ Изменение записанного",
     new: "🆕 Новое знание",
@@ -285,6 +289,7 @@ pub(crate) fn text(shown: &Value, w: &Words) -> String {
             ));
             lines.push(content["text"].as_str().unwrap_or_default().to_owned());
         }
+        "alert" if content.get("detector").is_some() => lines.push(detector_text(content, w)),
         "alert" => {
             lines.push(format!(
                 "{}: {}",
@@ -308,6 +313,56 @@ pub(crate) fn text(shown: &Value, w: &Words) -> String {
         lines.push(format!("\n{}", resolution(&item["resolution"], w)));
     }
     lines.join("\n")
+}
+
+/// A detector's alert: what stalled, in the bot's language.
+fn detector_text(c: &Value, w: &Words) -> String {
+    let field = |key: &str| c[key].as_str().unwrap_or("?").to_owned();
+    let since = c["since"]
+        .as_str()
+        .map(|s| s.chars().take(16).collect::<String>().replace('T', " "));
+    let ru = w.ru;
+    let text = match (c["detector"].as_str().unwrap_or_default(), ru) {
+        ("module_down", true) => format!("Модуль {} не отвечает", field("module")),
+        ("module_down", false) => format!("Module {} does not answer", field("module")),
+        ("failures_in_a_row", true) => format!("Джоба {} падает раз за разом", field("job")),
+        ("failures_in_a_row", false) => format!("Job {} keeps failing", field("job")),
+        ("queued", true) => format!("Запуск {} давно ждёт в очереди", field("job")),
+        ("queued", false) => format!("A run of {} waits in the queue too long", field("job")),
+        ("overrun", true) => format!("Запуск {} работает дольше отведённого", field("job")),
+        ("overrun", false) => format!("A run of {} works longer than its time", field("job")),
+        ("source_stale", true) => format!(
+            "{} давно не читал источник {}",
+            field("job"),
+            field("source")
+        ),
+        ("source_stale", false) => {
+            format!("{} has not read {} for long", field("job"), field("source"))
+        }
+        ("budget", true) => format!(
+            "Аккаунт {}: потрачено ${:.2} из ${:.2} за месяц",
+            field("account"),
+            c["spent_usd"].as_f64().unwrap_or(0.0),
+            c["monthly_usd"].as_f64().unwrap_or(0.0)
+        ),
+        ("budget", false) => format!(
+            "Account {}: ${:.2} of ${:.2} spent this month",
+            field("account"),
+            c["spent_usd"].as_f64().unwrap_or(0.0),
+            c["monthly_usd"].as_f64().unwrap_or(0.0)
+        ),
+        ("dispatcher_lag", true) => "Обработка событий отстаёт".to_owned(),
+        ("dispatcher_lag", false) => "Processing of events is behind".to_owned(),
+        _ => field("message"),
+    };
+    let mut out = format!("🚨 {text}");
+    if let Some(since) = since {
+        out.push_str(&format!(" ({since} UTC)"));
+    }
+    if let Some(error) = c["error"].as_str() {
+        out.push_str(&format!("\n{}", short(error, 500)));
+    }
+    out
 }
 
 /// A digest (`GET /v1/digest` or a `digest` item) as text.
@@ -608,6 +663,27 @@ mod tests {
                 [{ "text": "Отклонить", "callback_data": "i:0199-item:1" }],
                 [{ "text": "Отложить", "callback_data": "i:0199-item:2" }]
             ] })
+        );
+    }
+
+    #[test]
+    fn detector_alerts_say_what_stalled() {
+        let alert = |content: Value| json!({ "item": { "id": "a", "kind": "alert", "state": "open" }, "content": content, "actions": [{ "action": "dismiss" }] });
+        let shown = alert(
+            json!({ "detector": "failures_in_a_row", "job": "transcribe", "error": "ffmpeg missing" }),
+        );
+        assert_eq!(
+            text(&shown, Lang::Ru.words()),
+            "🚨 Джоба transcribe падает раз за разом\nffmpeg missing"
+        );
+        assert_eq!(
+            keyboard(&shown, Lang::Ru.words())["inline_keyboard"][0][0]["text"],
+            "Скрыть"
+        );
+        let shown = alert(json!({ "detector": "module_down", "module": "stt" }));
+        assert_eq!(
+            text(&shown, Lang::En.words()),
+            "🚨 Module stt does not answer"
         );
     }
 

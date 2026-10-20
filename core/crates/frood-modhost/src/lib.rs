@@ -166,6 +166,19 @@ impl Modules {
         self.endpoints.keys().map(String::as_str)
     }
 
+    /// Whether a module answers its health check now.
+    pub async fn healthy(&self, module: &str) -> bool {
+        let Ok(endpoint) = self.endpoint(module) else {
+            return false;
+        };
+        self.http
+            .get(format!("{}/healthz", endpoint.url))
+            .timeout(Duration::from_secs(5))
+            .send()
+            .await
+            .is_ok_and(|r| r.status().is_success())
+    }
+
     /// Modules whose manifest (as discovered so far) provides a capability, e.g. `notify.send`.
     pub fn providers(&self, capability: &str) -> Vec<String> {
         let Ok(manifests) = self.manifests.read() else {

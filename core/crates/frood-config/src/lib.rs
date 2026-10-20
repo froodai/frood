@@ -13,9 +13,9 @@ use sha2::{Digest, Sha256};
 pub use interpolate::Secrets;
 pub use model::{
     Account, AccountBudget, AskUser, Attention, AttentionPerson, AttentionRoute, Auth, AutoAccept,
-    BeforeNotify, Budget, Config, Deploy, Embeddings, Installation, Job, ModelProvider, Module,
-    OnExpire, Policies, Provider, Reminder, Search, Server, ServerPlacement, SituationMatch,
-    Source, Storage, Trigger,
+    BeforeNotify, Budget, Config, Deploy, Detectors, Embeddings, Installation, Job, ModelProvider,
+    Module, OnExpire, Policies, Provider, Reminder, Search, Server, ServerPlacement,
+    SituationMatch, Source, Storage, Trigger,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -568,6 +568,29 @@ fn validate_reminders(place: &str, reminders: &[model::Reminder], problems: &mut
 fn validate_attention(config: &Config, problems: &mut Vec<String>) {
     let attention = &config.attention;
     validate_reminders("attention.reminders", &attention.reminders, problems);
+    let detectors = &attention.detectors;
+    for (name, value) in [
+        ("dispatcher_lag", &detectors.dispatcher_lag),
+        ("queued", &detectors.queued),
+        ("overrun", &detectors.overrun),
+        ("source_stale", &detectors.source_stale),
+        ("module_down", &detectors.module_down),
+    ] {
+        if let Some(value) = value
+            && humantime::parse_duration(value).is_err()
+        {
+            problems.push(format!(
+                "attention.detectors.{name}: {value:?} is not a duration like 10m or 48h"
+            ));
+        }
+    }
+    if let Some(share) = detectors.budget_share
+        && !(0.0..=1.0).contains(&share)
+    {
+        problems.push(format!(
+            "attention.detectors.budget_share is a share from 0 to 1, not {share}"
+        ));
+    }
     for (email, person) in &attention.people {
         if let Some(reminders) = &person.reminders {
             validate_reminders(

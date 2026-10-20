@@ -5,6 +5,7 @@
 //! agent jobs run in a runtime module and may wait for people's answers.
 
 mod agents;
+mod detectors;
 mod digest;
 pub mod inbox;
 mod jobs;
@@ -53,6 +54,8 @@ pub(crate) struct Ctx {
 pub struct Dispatch {
     ctx: Ctx,
     jobs: Arc<Vec<JobSpec>>,
+    /// Since when each module has not answered (detectors).
+    down_since: Arc<std::sync::Mutex<BTreeMap<String, chrono::DateTime<chrono::Utc>>>>,
 }
 
 /// Processing of one source: its runs and the proposals that cite it.
@@ -86,6 +89,7 @@ impl Dispatch {
                 attention: Arc::new(frood_config::Attention::default()),
             },
             jobs: Arc::new(jobs),
+            down_since: Arc::default(),
         }
     }
 
@@ -291,10 +295,13 @@ impl Dispatch {
                     if let Err(err) = this.inbox_pending().await {
                         tracing::error!(error = %err, "Inbox failed to read the journal");
                     }
-                    if reminded.is_none_or(|at| at.elapsed() > Duration::from_secs(600)) {
+                    if reminded.is_none_or(|at| at.elapsed() > Duration::from_secs(300)) {
                         reminded = Some(std::time::Instant::now());
                         if let Err(err) = this.remind_once(chrono::Utc::now()).await {
                             tracing::error!(error = %err, "reminders failed");
+                        }
+                        if let Err(err) = this.detect_once(chrono::Utc::now()).await {
+                            tracing::error!(error = %err, "detectors failed");
                         }
                     }
                     if let Err(err) = this.deliver_once().await {

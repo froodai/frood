@@ -258,7 +258,11 @@ fn actions(kind: &str, data: &Value, proposal: Option<&Proposal>) -> Vec<Value> 
             out
         }
         "reminder" => vec![json!({ "action": "done" }), json!({ "action": "postpone" })],
-        "alert" => vec![json!({ "action": "retry" }), json!({ "action": "dismiss" })],
+        // A failed run can be retried; a detector's alert can only be hidden until it clears.
+        "alert" if data.get("run_id").is_some() && data.get("detector").is_none() => {
+            vec![json!({ "action": "retry" }), json!({ "action": "dismiss" })]
+        }
+        "alert" => vec![json!({ "action": "dismiss" })],
         _ => vec![json!({ "action": "seen" })],
     }
 }
