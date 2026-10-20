@@ -466,6 +466,29 @@ async fn the_mvp_scenario() {
     .await;
     assert_eq!(proposed["state"], "open", "{proposed}");
     assert_eq!(proposed["author"], format!("agent:daily-sweep/for/{alice}"));
+    // The words it quotes are its own material: extraction does not read them again.
+    dispatch.drain().await.unwrap();
+    let (_, open) = call(&app, get_json("/v1/proposals?state=open", &client)).await;
+    assert_eq!(open.as_array().unwrap().len(), 1, "{open}");
+    // A model that runs its next parameter into a text is asked to send the call again.
+    let body = json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": { "name": "propose_change", "arguments": {
+        "operations": [{ "op": "create", "assertion": { "kind": "fact", "text": "x", "modality": "reported" } }],
+        "rationale": "seen in chat</rationale>\n<parameter name=\"risk\">new",
+        "source_text": IN_CHAT,
+    } } });
+    let (_, refused) = call(
+        &app,
+        Request::post("/mcp")
+            .header(header::HOST, "frood:8080")
+            .header(header::AUTHORIZATION, format!("Bearer {agent}"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::ACCEPT, "application/json, text/event-stream")
+            .header("mcp-protocol-version", "2025-11-25")
+            .body(Body::from(body.to_string()))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(refused["result"]["isError"], true, "{refused}");
     runs.lock().unwrap()[0].2 = "finished".into();
     dispatch.watch_once().await.unwrap();
 
