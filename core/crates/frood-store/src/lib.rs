@@ -53,6 +53,22 @@ pub async fn migrate(pool: &PgPool) -> Result<(), StoreError> {
     Ok(())
 }
 
+/// Migrations this binary has that the database has not applied yet, and whether the database
+/// already holds an installation (some migrations applied).
+pub async fn pending_migrations(pool: &PgPool) -> Result<(Vec<i64>, bool), StoreError> {
+    let applied: Vec<i64> =
+        sqlx::query_scalar("SELECT version FROM _sqlx_migrations WHERE success ORDER BY version")
+            .fetch_all(pool)
+            .await
+            .unwrap_or_default(); // no table yet: a new database
+    let pending = sqlx::migrate!("./migrations")
+        .iter()
+        .map(|m| m.version)
+        .filter(|v| !applied.contains(v))
+        .collect();
+    Ok((pending, !applied.is_empty()))
+}
+
 /// Readiness probe: the database answers.
 pub async fn ping(pool: &PgPool) -> Result<(), StoreError> {
     sqlx::query("SELECT 1").execute(pool).await?;
@@ -168,6 +184,36 @@ pub mod testing {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn pending_migrations_are_found() {
+        let Some(url) = testing::database_url() else {
+            eprintln!("FROOD_TEST_DATABASE_URL is not set; skipping");
+            return;
+        };
+        let pool = testing::fresh_database(&url, "frood_store_pending")
+            .await
+            .unwrap();
+        assert_eq!(pending_migrations(&pool).await.unwrap(), (vec![], true));
+        // As if the database came from the version before the last migration.
+        let last: i64 = sqlx::query_scalar("SELECT max(version) FROM _sqlx_migrations")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM _sqlx_migrations WHERE version = $1")
+            .bind(last)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(pending_migrations(&pool).await.unwrap(), (vec![last], true));
+        sqlx::query("DROP TABLE _sqlx_migrations")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let (pending, existing) = pending_migrations(&pool).await.unwrap();
+        assert!(!existing, "a new database");
+        assert_eq!(pending.len() as i64, last);
+    }
 
     #[tokio::test]
     async fn revisions_are_recorded_once_per_content() {
