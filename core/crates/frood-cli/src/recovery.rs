@@ -96,24 +96,36 @@ pub async fn restore(paths: &Paths, options: &RestoreOptions) -> anyhow::Result<
         std::fs::remove_dir_all(&work)?;
     }
     std::fs::create_dir_all(&work)?;
+    // restic may run as another user than this one (below); it only writes the restored files.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&work, std::fs::Permissions::from_mode(0o777))?;
+    }
 
     // restic from the backup module's image; a repository folder on this machine is mounted.
     let mut command = tokio::process::Command::new("docker");
     command.args(["run", "--rm"]);
+    let local = Path::new(&options.repository);
+    // As whoever wrote a repository folder — the backup module's user, whose files only it may
+    // read — or else as this user.
     #[cfg(unix)]
     {
-        let uid = std::process::Command::new("id").arg("-u").output()?;
-        let gid = std::process::Command::new("id").arg("-g").output()?;
-        command.args([
-            "--user",
-            &format!(
-                "{}:{}",
-                String::from_utf8_lossy(&uid.stdout).trim(),
-                String::from_utf8_lossy(&gid.stdout).trim()
-            ),
-        ]);
+        use std::os::unix::fs::MetadataExt;
+        let owner = match std::fs::metadata(local.join("config")) {
+            Ok(meta) if local.is_absolute() => format!("{}:{}", meta.uid(), meta.gid()),
+            _ => {
+                let uid = std::process::Command::new("id").arg("-u").output()?;
+                let gid = std::process::Command::new("id").arg("-g").output()?;
+                format!(
+                    "{}:{}",
+                    String::from_utf8_lossy(&uid.stdout).trim(),
+                    String::from_utf8_lossy(&gid.stdout).trim()
+                )
+            }
+        };
+        command.args(["--user", &owner]);
     }
-    let local = Path::new(&options.repository);
     let repository = if local.is_absolute() && local.exists() {
         command
             .arg("-v")

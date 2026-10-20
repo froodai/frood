@@ -35,6 +35,21 @@ jobs:
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo test --locked
 
+  # Step 6 of the MVP scenario (docs/24, E1): backup, restore check, delete, restore.
+  backup-restore:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: rustup toolchain install 1.99 --profile minimal && rustup default 1.99
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core
+      - run: cargo build --locked -p frood-cli
+        working-directory: core
+      - run: deploy/e2e/backup-restore.sh
+        env:
+          FROOD: core/target/debug/frood
+
   image:
     runs-on: ubuntu-latest
     steps:
