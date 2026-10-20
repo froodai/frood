@@ -1,6 +1,7 @@
 //! `frood`: the server and the command-line interface (docs/16_platform.md §5).
 
 mod compose;
+mod export;
 mod init;
 mod lifecycle;
 mod modules;
@@ -80,6 +81,11 @@ enum Command {
         /// Whose account it is; the user is created if new.
         #[arg(long)]
         email: String,
+    },
+    /// Write all knowledge into a new folder, in a form that does not depend on the database.
+    Export {
+        /// The folder to create; it must not exist or be empty.
+        dir: PathBuf,
     },
     /// Config utilities.
     Config {
@@ -166,6 +172,7 @@ async fn main() -> ExitCode {
         Command::Apply { render_only } => lifecycle::apply(&paths, render_only).await,
         Command::Serve => serve::run(&paths).await,
         Command::Status => lifecycle::status(&paths).await,
+        Command::Export { dir } => lifecycle::export(&paths, &dir).await,
         Command::Link { channel, email } => token::link(&paths, &channel, &email).await,
         Command::Token { command } => match command {
             TokenCommand::Create {

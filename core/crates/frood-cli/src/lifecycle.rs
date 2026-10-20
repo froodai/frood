@@ -166,6 +166,21 @@ pub async fn apply(paths: &Paths, render_only: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
+pub async fn export(paths: &Paths, dir: &std::path::Path) -> anyhow::Result<()> {
+    let loaded = paths.load()?;
+    let pool = frood_store::connect(&loaded.config.storage.url, Duration::from_secs(5))
+        .await
+        .context("the database is not reachable; run `frood apply` first")?;
+    let exported = crate::export::export(&pool, &loaded.config.installation.name, dir).await?;
+    for (file, count) in &exported.counts {
+        println!("{file}: {count}");
+    }
+    println!("files: {}", exported.files);
+    println!("entity pages: {}", exported.entities);
+    println!("wrote {}", dir.display());
+    Ok(())
+}
+
 pub async fn status(paths: &Paths) -> anyhow::Result<()> {
     let loaded = paths.load()?;
     let url = format!("http://{}/readyz", local_address(&loaded));
