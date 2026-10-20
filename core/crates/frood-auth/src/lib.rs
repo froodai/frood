@@ -8,6 +8,7 @@
 
 mod channels;
 mod clients;
+pub use clients::ADMIN_CLIENT;
 mod oidc;
 mod pages;
 mod secret;

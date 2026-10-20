@@ -7,6 +7,7 @@
 mod agents;
 mod detectors;
 mod digest;
+pub mod health;
 pub mod inbox;
 mod jobs;
 pub mod questions;

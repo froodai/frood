@@ -843,4 +843,14 @@ impl Ledger {
     pub async fn journal(&self, after: i64, limit: i64) -> Result<Vec<JournalEvent>> {
         journal::read(&self.pool, after, limit).await
     }
+
+    /// Position of the newest journal event; 0 for an empty journal.
+    pub async fn journal_head(&self) -> Result<i64> {
+        Ok(
+            sqlx::query_scalar::<_, Option<i64>>("SELECT max(position) FROM journal")
+                .fetch_one(&self.pool)
+                .await?
+                .unwrap_or(0),
+        )
+    }
 }

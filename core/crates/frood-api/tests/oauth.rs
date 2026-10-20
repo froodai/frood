@@ -271,21 +271,41 @@ async fn authorize(
     challenge: &str,
     grant: &[&str],
 ) -> String {
+    let request = Authorize {
+        client_id,
+        redirect: REDIRECT,
+        scope: "knowledge:read knowledge:capture knowledge:propose",
+        resource: &format!("{ISSUER}/mcp"),
+    };
+    authorize_with(app, idp, &request, challenge, grant).await
+}
+
+struct Authorize<'a> {
+    client_id: &'a str,
+    redirect: &'a str,
+    scope: &'a str,
+    resource: &'a str,
+}
+
+async fn authorize_with(
+    app: &Router,
+    idp: &Idp,
+    request: &Authorize<'_>,
+    challenge: &str,
+    grant: &[&str],
+) -> String {
     let authorize = format!(
         "/oauth/authorize?{}",
         url::form_urlencoded::Serializer::new(String::new())
             .extend_pairs([
                 ("response_type", "code"),
-                ("client_id", client_id),
-                ("redirect_uri", REDIRECT),
+                ("client_id", request.client_id),
+                ("redirect_uri", request.redirect),
                 ("code_challenge", challenge),
                 ("code_challenge_method", "S256"),
-                (
-                    "scope",
-                    "knowledge:read knowledge:capture knowledge:propose"
-                ),
+                ("scope", request.scope),
                 ("state", "client-state"),
-                ("resource", &format!("{ISSUER}/mcp")),
+                ("resource", request.resource),
             ])
             .finish()
     );
@@ -327,7 +347,7 @@ async fn authorize(
     form.extend(grant.iter().map(|s| ("scope", *s)));
     let reply = post_form(app, "/oauth/consent", &form, Some(&cookie)).await;
     let back = reply.location();
-    assert!(back.as_str().starts_with(REDIRECT));
+    assert!(back.as_str().starts_with(request.redirect));
     assert_eq!(query(&back, "state"), "client-state");
     assert_eq!(query(&back, "iss"), ISSUER);
     query(&back, "code")
@@ -604,4 +624,102 @@ async fn people_outside_the_allow_list_cannot_sign_in() {
     .await;
     assert_eq!(reply.status, StatusCode::FORBIDDEN, "{}", reply.text());
     assert!(reply.header(header::SET_COOKIE).is_empty());
+}
+
+/// The admin panel the core serves signs in as the built-in client `frood-admin`, which may come
+/// back only to this installation's `/admin/`; its token reads health, logs and metrics.
+#[tokio::test]
+async fn admin_panel_signs_in_with_its_own_client() {
+    let idp = Idp::start("alice@example.com").await;
+    let Some((app, _auth)) = setup("oauth_admin", &idp).await else {
+        eprintln!("FROOD_TEST_DATABASE_URL is not set; skipping");
+        return;
+    };
+    let reply = get_with(&app, "/admin", None).await;
+    assert_eq!(reply.location().path(), "/admin/");
+    let page = get_with(&app, "/admin/", None).await;
+    assert_eq!(page.status, StatusCode::OK);
+    assert!(page.text().contains("frood-admin"));
+    assert!(
+        page.header(header::CONTENT_SECURITY_POLICY)
+            .contains("frame-ancestors 'none'")
+    );
+
+    // Anywhere else than the installation's own panel is refused on the page.
+    let (verifier, challenge) = pkce();
+    let reply = get_with(
+        &app,
+        &format!("/oauth/authorize?response_type=code&client_id=frood-admin&redirect_uri=https://evil.example/admin/&code_challenge={challenge}&code_challenge_method=S256"),
+        None,
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::BAD_REQUEST);
+
+    let home = format!("{ISSUER}/admin/");
+    let request = Authorize {
+        client_id: "frood-admin",
+        redirect: &home,
+        scope: "knowledge:read knowledge:capture knowledge:decide journal:read admin",
+        resource: &format!("{ISSUER}/v1"),
+    };
+    let grant = [
+        "knowledge:read",
+        "knowledge:capture",
+        "knowledge:decide",
+        "journal:read",
+        "admin",
+    ];
+    let code = authorize_with(&app, &idp, &request, &challenge, &grant).await;
+    let reply = post_form(
+        &app,
+        "/oauth/token",
+        &[
+            ("grant_type", "authorization_code"),
+            ("code", code.as_str()),
+            ("redirect_uri", home.as_str()),
+            ("client_id", "frood-admin"),
+            ("code_verifier", verifier.as_str()),
+            ("resource", request.resource),
+        ],
+        None,
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.text());
+    let tokens = reply.json();
+    assert!(tokens["scope"].as_str().unwrap().contains("admin"));
+    let access = tokens["access_token"].as_str().unwrap();
+
+    let get = |path: &'static str| {
+        Request::get(path)
+            .header(header::AUTHORIZATION, format!("Bearer {access}"))
+            .body(Body::empty())
+            .unwrap()
+    };
+    let health = send(&app, get("/v1/health")).await;
+    assert_eq!(health.status, StatusCode::OK, "{}", health.text());
+    let health = health.json();
+    assert_eq!(health["runs"]["queued"], 0);
+    assert!(health["version"].is_string());
+    let logs = send(&app, get("/v1/logs?after=0&limit=5")).await;
+    assert_eq!(logs.status, StatusCode::OK);
+    assert!(logs.json().is_array());
+    let metrics = send(&app, get("/metrics")).await;
+    assert_eq!(metrics.status, StatusCode::OK);
+    assert!(
+        metrics
+            .text()
+            .contains("# TYPE frood_dispatcher_lag_seconds gauge")
+    );
+    assert!(metrics.text().contains("frood_runs{status=\"queued\"} 0"));
+    let journal = send(&app, get("/v1/journal?last=5")).await;
+    assert_eq!(journal.status, StatusCode::OK, "{}", journal.text());
+
+    // The token is the API's, not the MCP server's.
+    assert_eq!(
+        mcp(&app, access, 1, "tools/list", json!({})).await.status,
+        StatusCode::UNAUTHORIZED
+    );
+    // Without a token there is no health or metrics.
+    let reply = get_with(&app, "/metrics", None).await;
+    assert_eq!(reply.status, StatusCode::UNAUTHORIZED);
 }

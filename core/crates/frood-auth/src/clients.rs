@@ -31,10 +31,24 @@ pub(crate) struct RegistrationRequest {
     pub token_endpoint_auth_method: Option<String>,
 }
 
+/// Client id of the admin panel the core serves at `/admin/`.
+pub const ADMIN_CLIENT: &str = "frood-admin";
+
 impl Auth {
     /// Looks up a client: an `https://` client id is a metadata document URL, anything else
     /// must have been registered through DCR.
     pub(crate) async fn resolve_client(&self, client_id: &str) -> Result<ClientInfo> {
+        // The installation's own admin panel: it may only come back to this installation.
+        if client_id == ADMIN_CLIENT {
+            return Ok(ClientInfo {
+                client_id: client_id.to_owned(),
+                name: Some("Frood admin panel".to_owned()),
+                redirect_uris: vec![format!(
+                    "{}/admin/",
+                    self.settings().issuer.trim_end_matches('/')
+                )],
+            });
+        }
         if client_id.starts_with("https://") {
             if let Some((info, at)) = self
                 .inner

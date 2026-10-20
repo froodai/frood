@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Frood admin</title>
+<style>
+:root {
+  --bg: #f7f7f5; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6b66; --line: #e3e2dc;
+  --accent: #2f6f4f; --warn: #a15c00; --bad: #b3261e; --ok: #2f6f4f; --chip: #eef2ee;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #151614; --panel: #1d1e1b; --ink: #ecebe6; --muted: #9b9a93; --line: #2f302c;
+          --accent: #79c29a; --warn: #e0a24c; --bad: #ef7a72; --ok: #79c29a; --chip: #242a25; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+       font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { display: flex; align-items: center; gap: 16px; padding: 12px 20px; border-bottom: 1px solid var(--line);
+         background: var(--panel); position: sticky; top: 0; z-index: 2; flex-wrap: wrap; }
+header h1 { font-size: 16px; margin: 0; letter-spacing: .02em; }
+nav { display: flex; gap: 4px; flex-wrap: wrap; }
+nav button { background: none; border: 1px solid transparent; color: var(--muted); padding: 6px 10px;
+             border-radius: 8px; cursor: pointer; font: inherit; }
+nav button[aria-selected="true"] { color: var(--ink); border-color: var(--line); background: var(--bg); }
+.who { margin-left: auto; color: var(--muted); font-size: 12px; }
+main { padding: 20px; max-width: 1200px; margin: 0 auto; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+.card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px; }
+.big { font-size: 26px; font-weight: 600; }
+.row { display: flex; justify-content: space-between; gap: 8px; padding: 3px 0; border-bottom: 1px dashed var(--line); }
+.row:last-child { border-bottom: none; }
+.ok { color: var(--ok); } .bad { color: var(--bad); } .warn { color: var(--warn); } .muted { color: var(--muted); }
+table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 12px; color: var(--muted); font-weight: 600; }
+tr.click { cursor: pointer; } tr.click:hover td { background: var(--bg); }
+.chip { display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--chip); font-size: 12px; }
+.toolbar { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; align-items: center; }
+input, select, textarea { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line);
+                          border-radius: 8px; padding: 6px 8px; }
+button.act { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+             border-radius: 8px; padding: 5px 10px; cursor: pointer; }
+button.act.primary { background: var(--accent); color: var(--panel); border-color: var(--accent); }
+button.act:disabled { opacity: .5; cursor: default; }
+pre { white-space: pre-wrap; word-break: break-word; margin: 0; font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.item { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin-bottom: 10px; }
+.item .head { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
+.item .acts { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+.logline { border-bottom: 1px solid var(--line); padding: 3px 0; }
+.empty { color: var(--muted); padding: 20px; text-align: center; }
+.error { background: var(--panel); border: 1px solid var(--bad); color: var(--bad); border-radius: 10px; padding: 12px; margin-bottom: 12px; }
+.detail { margin-top: 12px; }
+td.time { white-space: nowrap; }
+@media (max-width: 640px) { main { padding: 12px; } .wide { display: none; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Frood</h1>
+  <nav id="tabs" role="tablist"></nav>
+  <span class="who" id="who"></span>
+</header>
+<main id="main"><div class="empty" id="boot"></div></main>
+<script>
+"use strict";
+// The admin panel (C1): signs in like any client (OAuth, PKCE) and uses only the Frood API.
+const RU = (navigator.language || "").toLowerCase().startsWith("ru");
+const T = RU ? {
+  health: "Здоровье", inbox: "Inbox", runs: "Запуски", journal: "Журнал", logs: "Логи",
+  signingIn: "Вход…", modules: "Модули", up: "работает", down: "не отвечает", dispatcher: "Обработка событий",
+  lag: "отставание", waiting: "ждут", queue: "Запуски", queued: "в очереди", running: "работают",
+  waitingInput: "ждут ответа", failedDay: "упали за сутки", okDay: "успешны за сутки", inboxOpen: "Inbox",
+  open: "открыто", alerts: "тревог", accounts: "Расходы за месяц", sources: "Источники", readAgo: "прочитан",
+  never: "ещё не читался", none: "Нет", nothing: "Ничего нет", all: "все", status: "статус", job: "джоба",
+  created: "создан", cost: "стоимость", retry: "Повторить", cancel: "Отменить", send: "Написать агенту",
+  events: "Шаги", input: "Вход", output: "Итог", error: "Ошибка", reload: "Обновить", filter: "фильтр",
+  accept: "Принять", reject: "Отклонить", defer: "Отложить", snooze: "Отложить", done: "Выполнено",
+  postpone: "Перенести на неделю", dismiss: "Скрыть", answer: "Ответить", seen: "Прочитано", for_me: "вам",
+  signOut: "Выйти", ago: "назад", sec: "с", min: "мин", h: "ч", d: "дн", confirmCancel: "Отменить запуск?",
+  message: "Сообщение агенту", sent: "Отправлено", failed: "Не удалось", notAdmin: "Нужно право admin: войдите заново и разрешите его на странице согласия.",
+} : {
+  health: "Health", inbox: "Inbox", runs: "Runs", journal: "Journal", logs: "Logs",
+  signingIn: "Signing in…", modules: "Modules", up: "up", down: "not answering", dispatcher: "Event processing",
+  lag: "lag", waiting: "waiting", queue: "Runs", queued: "queued", running: "running",
+  waitingInput: "waiting for input", failedDay: "failed in a day", okDay: "succeeded in a day", inboxOpen: "Inbox",
+  open: "open", alerts: "alerts", accounts: "Spent this month", sources: "Sources", readAgo: "read",
+  never: "not read yet", none: "None", nothing: "Nothing here", all: "all", status: "status", job: "job",
+  created: "created", cost: "cost", retry: "Retry", cancel: "Cancel", send: "Message the agent",
+  events: "Steps", input: "Input", output: "Output", error: "Error", reload: "Reload", filter: "filter",
+  accept: "Accept", reject: "Reject", defer: "Later", snooze: "Later", done: "Done",
+  postpone: "Move a week", dismiss: "Hide", answer: "Answer", seen: "Seen", for_me: "you",
+  signOut: "Sign out", ago: "ago", sec: "s", min: "min", h: "h", d: "d", confirmCancel: "Cancel this run?",
+  message: "Message to the agent", sent: "Sent", failed: "Failed", notAdmin: "This needs the admin permission: sign in again and allow it on the consent page.",
+};
+const SCOPES = "knowledge:read knowledge:capture knowledge:decide journal:read admin";
+const CLIENT = "frood-admin";
+const store = window.sessionStorage;
+// Where the core is mounted: the page lives at <base>/admin/.
+const BASE = location.pathname.replace(/\/admin\/?$/, "");
+
+// ---------- small DOM helpers: text only, never HTML from data ----------
+function el(tag, attrs, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === "class") node.className = v;
+    else if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
+    else if (v !== undefined && v !== null && v !== false) node.setAttribute(k, v === true ? "" : v);
+  }
+  for (const c of children.flat()) {
+    if (c === null || c === undefined || c === false) continue;
+    node.append(c instanceof Node ? c : document.createTextNode(String(c)));
+  }
+  return node;
+}
+function ago(iso) {
+  if (!iso) return "";
+  const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+  return duration(s) + " " + T.ago;
+}
+function duration(s) {
+  if (s < 90) return s + " " + T.sec;
+  if (s < 5400) return Math.round(s / 60) + " " + T.min;
+  if (s < 172800) return Math.round(s / 3600) + " " + T.h;
+  return Math.round(s / 86400) + " " + T.d;
+}
+function short(text, n) { text = text == null ? "" : String(text); return text.length > n ? text.slice(0, n) + "…" : text; }
+
+// ---------- sign-in: OAuth authorization code with PKCE ----------
+function b64url(bytes) { return btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); }
+async function metadata() {
+  const r = await fetch(BASE + "/.well-known/oauth-authorization-server");
+  if (!r.ok) throw new Error("no authorization server metadata");
+  return r.json();
+}
+function issuerBase(meta) { return meta.issuer.replace(/\/$/, ""); }
+async function signIn() {
+  const meta = await metadata();
+  // The sign-in comes back only to the issuer's own /admin/.
+  const home = issuerBase(meta) + "/admin/";
+  if (location.origin + location.pathname !== home) { location.replace(home); return; }
+  const verifier = b64url(crypto.getRandomValues(new Uint8Array(32)));
+  const challenge = b64url(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)));
+  const state = b64url(crypto.getRandomValues(new Uint8Array(16)));
+  store.setItem("pkce", JSON.stringify({ verifier, state }));
+  const url = new URL(meta.authorization_endpoint);
+  url.search = new URLSearchParams({
+    response_type: "code", client_id: CLIENT, redirect_uri: home, resource: issuerBase(meta) + "/v1",
+    scope: SCOPES, state, code_challenge: challenge, code_challenge_method: "S256",
+  });
+  location.assign(url.toString());
+}
+async function tokenRequest(params) {
+  const meta = await metadata();
+  const r = await fetch(meta.token_endpoint, {
+    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ client_id: CLIENT, resource: issuerBase(meta) + "/v1", ...params }),
+  });
+  if (!r.ok) throw new Error("token: " + r.status);
+  const t = await r.json();
+  store.setItem("tokens", JSON.stringify({ access: t.access_token, refresh: t.refresh_token, scope: t.scope }));
+  return t;
+}
+async function finishSignIn() {
+  const q = new URLSearchParams(location.search);
+  if (!q.has("code")) return false;
+  const saved = JSON.parse(store.getItem("pkce") || "{}");
+  history.replaceState(null, "", location.pathname);
+  if (q.get("state") !== saved.state) throw new Error("state mismatch");
+  await tokenRequest({ grant_type: "authorization_code", code: q.get("code"),
+                       redirect_uri: location.origin + location.pathname, code_verifier: saved.verifier });
+  store.removeItem("pkce");
+  return true;
+}
+function tokens() { return JSON.parse(store.getItem("tokens") || "null"); }
+async function api(path, options = {}) {
+  let t = tokens();
+  if (!t) { await signIn(); throw new Error("signing in"); }
+  const call = (access) => fetch(BASE + path, { ...options,
+    headers: { ...(options.headers || {}), Authorization: "Bearer " + access,
+               ...(options.body ? { "Content-Type": "application/json" } : {}) } });
+  let r = await call(t.access);
+  if (r.status === 401 && t.refresh) {
+    try { await tokenRequest({ grant_type: "refresh_token", refresh_token: t.refresh }); r = await call(tokens().access); }
+    catch (e) { store.removeItem("tokens"); await signIn(); throw e; }
+  }
+  if (r.status === 401) { store.removeItem("tokens"); await signIn(); throw new Error("signing in"); }
+  if (r.status === 403) throw new Error(T.notAdmin);
+  const body = r.status === 204 ? null : await r.json().catch(() => null);
+  if (!r.ok) throw new Error((body && (body.detail || body.title)) || ("HTTP " + r.status));
+  return body;
+}
+
+// ---------- tabs ----------
+const TABS = ["health", "inbox", "runs", "journal", "logs"];
+let current = location.hash.slice(1) || "health";
+let timer = null;
+function renderTabs() {
+  const nav = document.getElementById("tabs");
+  nav.replaceChildren(...TABS.map((name) => el("button", {
+    role: "tab", "aria-selected": String(name === current),
+    onclick: () => { current = name; location.hash = name; show(); },
+  }, T[name])));
+}
+function main() { return document.getElementById("main"); }
+function fail(err) { main().prepend(el("div", { class: "error" }, String(err.message || err))); }
+async function show() {
+  renderTabs();
+  clearInterval(timer);
+  const views = { health, inbox, runs, journal, logs };
+  try { await views[current](); } catch (e) { if (String(e.message) !== "signing in") fail(e); }
+}
+
+// ---------- health ----------
+async function health() {
+  const h = await api("/v1/health");
+  const card = (title, ...rows) => el("div", { class: "card" }, el("h2", {}, title), ...rows);
+  const row = (k, v, cls) => el("div", { class: "row" }, el("span", {}, k), el("span", { class: cls || "" }, v));
+  main().replaceChildren(el("div", { class: "grid" },
+    card(T.modules, ...(h.modules.length ? h.modules.map((m) => row(m.name, m.up ? T.up : T.down, m.up ? "ok" : "bad")) : [el("div", { class: "muted" }, T.none)])),
+    card(T.dispatcher, el("div", { class: "big " + (h.dispatcher_lag_seconds > 600 ? "bad" : "ok") }, duration(h.dispatcher_lag_seconds)),
+         row(T.waiting, h.undispatched_events)),
+    card(T.queue, row(T.queued, h.runs.queued), row(T.running, h.runs.running), row(T.waitingInput, h.runs.waiting_for_input),
+         row(T.failedDay, h.runs.failed_last_day, h.runs.failed_last_day ? "warn" : ""), row(T.okDay, h.runs.succeeded_last_day)),
+    card(T.inboxOpen, el("div", { class: "big" }, h.inbox_open), row(T.alerts, h.alerts_open, h.alerts_open ? "bad" : "ok")),
+    card(T.accounts, ...(h.accounts.length ? h.accounts.map((a) => row(a.account, "$" + a.spent_usd.toFixed(2) + (a.monthly_usd != null ? " / $" + a.monthly_usd : ""),
+         a.monthly_usd && a.spent_usd >= a.monthly_usd * 0.8 ? "warn" : "")) : [el("div", { class: "muted" }, T.none)])),
+    card(T.sources, ...(h.sources.length ? h.sources.map((s) => row(s.job + " · " + s.source,
+         s.seconds_since_read == null ? T.never : T.readAgo + " " + duration(s.seconds_since_read) + " " + T.ago)) : [el("div", { class: "muted" }, T.none)])),
+  ), el("p", { class: "muted" }, "frood " + h.version + " · config " + short(h.config_sha256 || "", 12)));
+  timer = setInterval(() => current === "health" && health().catch(fail), 15000);
+}
+
+// ---------- inbox ----------
+function summary(entry) {
+  const c = entry.content || {}, item = entry.item;
+  if (item.kind === "proposal") {
+    const alternatives = c.alternatives || [];
+    const changes = (a) => (a.changes || []).map((x) => (x.before ? x.before + " → " : "+ ") + (x.after || "×")).join("\n") || "—";
+    const text = alternatives.length > 1
+      ? alternatives.map((a) => (a.label || a.key) + ":\n" + changes(a).replace(/^/gm, "  ")).join("\n")
+      : alternatives.map(changes).join("\n");
+    return text + (c.quote ? "\n«" + short(c.quote, 300) + "»" : "");
+  }
+  if (item.kind === "question") return (c.text || "") + (c.context ? "\n" + short(c.context, 300) : "");
+  if (item.kind === "reminder") return (c.due || "") + " · " + (c.text || "");
+  if (item.kind === "alert") return c.message || ((c.job || "") + ": " + (c.error || ""));
+  return short(JSON.stringify(c), 400);
+}
+function actionLabel(a) {
+  if (a.action === "answer") return a.answer;
+  if (a.action === "accept" && a.alternative && a.alternative !== "default") return T.accept + ": " + (a.label || a.alternative);
+  return T[a.action] || a.action;
+}
+async function inbox() {
+  const entries = await api("/v1/inbox");
+  const list = entries.map((e) => {
+    const acts = el("div", { class: "acts" }, ...(e.actions || []).map((a, i) => el("button", {
+      class: "act" + (i === 0 ? " primary" : ""),
+      onclick: async (ev) => {
+        ev.target.disabled = true;
+        try { await api("/v1/inbox/" + e.item.id + "/act", { method: "POST", body: JSON.stringify(a) }); await inbox(); }
+        catch (err) { fail(err); ev.target.disabled = false; }
+      },
+    }, actionLabel(a))));
+    return el("div", { class: "item" },
+      el("div", { class: "head" }, el("span", { class: "chip" }, e.item.kind), el("span", { class: "chip" }, e.item.urgency),
+         e.for_me ? el("span", { class: "chip" }, T.for_me) : null, el("span", { class: "muted" }, ago(e.item.created_at))),
+      el("pre", {}, summary(e)),
+      e.item.investigation && e.item.investigation.report ? el("pre", { class: "muted" }, "🔎 " + e.item.investigation.report) : null,
+      acts);
+  });
+  main().replaceChildren(...(list.length ? list : [el("div", { class: "empty" }, T.nothing)]));
+}
+
+// ---------- runs ----------
+async function runs() {
+  const status = el("select", {}, ...["", "queued", "running", "waiting_for_input", "succeeded", "failed", "cancelled"]
+    .map((s) => el("option", { value: s }, s || T.all)));
+  const job = el("input", { placeholder: T.job });
+  const table = el("div");
+  const detail = el("div", { class: "detail" });
+  async function load() {
+    const q = new URLSearchParams({ limit: "100" });
+    if (status.value) q.set("status", status.value);
+    if (job.value.trim()) q.set("job", job.value.trim());
+    const list = await api("/v1/runs?" + q);
+    table.replaceChildren(list.length ? el("table", {},
+      el("tr", {}, el("th", {}, T.job), el("th", {}, T.status), el("th", {}, T.created), el("th", { class: "wide" }, T.cost)),
+      ...list.map((r) => el("tr", { class: "click", onclick: () => open(r.id) },
+        el("td", {}, r.job), el("td", { class: r.status === "failed" ? "bad" : r.status === "succeeded" ? "ok" : "" }, r.status),
+        el("td", { class: "time" }, ago(r.created_at)), el("td", { class: "wide" }, r.cost_usd ? "$" + r.cost_usd.toFixed(4) : "")))) : el("div", { class: "empty" }, T.nothing));
+  }
+  async function open(id) {
+    const [r, events] = await Promise.all([api("/v1/runs/" + id), api("/v1/runs/" + id + "/events")]);
+    const message = el("input", { placeholder: T.message, style: "flex:1;min-width:200px" });
+    detail.replaceChildren(el("div", { class: "card" },
+      el("h2", {}, r.job + " · " + r.status),
+      el("div", { class: "toolbar" },
+        el("button", { class: "act", onclick: async () => { try { await api("/v1/runs/" + id + "/retry", { method: "POST" }); await load(); } catch (e) { fail(e); } } }, T.retry),
+        ["queued", "running", "waiting_for_input"].includes(r.status) ? el("button", { class: "act", onclick: async () => {
+          if (!confirm(T.confirmCancel)) return;
+          try { await api("/v1/runs/" + id + "/cancel", { method: "POST" }); await load(); await open(id); } catch (e) { fail(e); } } }, T.cancel) : null,
+        ["running", "waiting_for_input"].includes(r.status) ? [message, el("button", { class: "act", onclick: async () => {
+          if (!message.value.trim()) return;
+          try { await api("/v1/runs/" + id + "/messages", { method: "POST", body: JSON.stringify({ text: message.value }) }); message.value = ""; } catch (e) { fail(e); } } }, T.send)] : null),
+      r.error ? el("div", { class: "row" }, el("span", {}, T.error), el("span", { class: "bad" }, r.error)) : null,
+      el("h2", {}, T.events),
+      el("pre", {}, events.map((e) => e.at.slice(11, 19) + "  " + e.kind + "  " + short(JSON.stringify(e.data), 300)).join("\n") || "—"),
+      el("h2", {}, T.input), el("pre", {}, JSON.stringify(r.input, null, 2)),
+      r.output ? [el("h2", {}, T.output), el("pre", {}, JSON.stringify(r.output, null, 2))] : null));
+  }
+  status.onchange = () => load().catch(fail);
+  job.onchange = () => load().catch(fail);
+  main().replaceChildren(el("div", { class: "toolbar" }, status, job, el("button", { class: "act", onclick: () => load().catch(fail) }, T.reload)), table, detail);
+  await load();
+}
+
+// ---------- journal ----------
+async function journal() {
+  const events = await api("/v1/journal?last=200");
+  const filter = el("input", { placeholder: T.filter });
+  const table = el("div");
+  function render() {
+    const f = filter.value.toLowerCase();
+    const rows = events.slice().reverse().filter((e) => !f || JSON.stringify(e).toLowerCase().includes(f));
+    table.replaceChildren(rows.length ? el("table", {}, ...rows.map((e) => el("tr", {},
+      el("td", { class: "muted wide" }, String(e.position)), el("td", {}, e.type), el("td", { class: "muted wide" }, short(e.actor, 40)),
+      el("td", {}, el("pre", {}, short(JSON.stringify(e.data), 240))), el("td", { class: "muted time" }, ago(e.occurred_at))))) : el("div", { class: "empty" }, T.nothing));
+  }
+  filter.oninput = render;
+  main().replaceChildren(el("div", { class: "toolbar" }, filter, el("button", { class: "act", onclick: () => journal().catch(fail) }, T.reload)), table);
+  render();
+}
+
+// ---------- logs ----------
+async function logs() {
+  let after = 0;
+  const lines = [];
+  const level = el("select", {}, ...["", "ERROR", "WARN", "INFO"].map((l) => el("option", { value: l }, l || T.all)));
+  const filter = el("input", { placeholder: T.filter });
+  const box = el("div", { class: "card" });
+  function render() {
+    const f = filter.value.toLowerCase();
+    const shown = lines.filter((l) => (!level.value || l.level === level.value) && (!f || l.text.toLowerCase().includes(f))).slice(-500).reverse();
+    box.replaceChildren(...(shown.length ? shown.map((l) => el("div", { class: "logline" },
+      el("span", { class: l.level === "ERROR" ? "bad" : l.level === "WARN" ? "warn" : "muted" }, (l.time || "").slice(11, 19) + " " + (l.level || "") + " "),
+      el("span", {}, l.text))) : [el("div", { class: "empty" }, T.nothing)]));
+  }
+  async function poll() {
+    const got = await api("/v1/logs?after=" + after + "&limit=1000");
+    for (const { seq, line } of got) {
+      after = seq;
+      if (typeof line === "string") { lines.push({ text: line }); continue; }
+      const fields = Object.assign({}, line.fields || {});
+      const message = fields.message || ""; delete fields.message;
+      const extra = Object.entries(fields).map(([k, v]) => k + "=" + (typeof v === "string" ? v : JSON.stringify(v))).join(" ");
+      lines.push({ time: line.timestamp, level: line.level, text: (line.target ? line.target + ": " : "") + message + (extra ? "  " + extra : "") });
+    }
+    if (lines.length > 5000) lines.splice(0, lines.length - 5000);
+    render();
+  }
+  level.onchange = render; filter.oninput = render;
+  main().replaceChildren(el("div", { class: "toolbar" }, level, filter), box);
+  await poll();
+  timer = setInterval(() => current === "logs" && poll().catch(fail), 3000);
+}
+
+// ---------- start ----------
+(async () => {
+  document.getElementById("boot").textContent = T.signingIn;
+  try {
+    await finishSignIn();
+    if (!tokens()) { await signIn(); return; }
+    document.getElementById("who").replaceChildren(el("button", { class: "act", onclick: () => { store.clear(); location.reload(); } }, T.signOut));
+    await show();
+  } catch (e) { if (String(e.message) !== "signing in") fail(e); }
+})();
+window.addEventListener("hashchange", () => { const name = location.hash.slice(1); if (TABS.includes(name) && name !== current) { current = name; show(); } });
+</script>
+</body>
+</html>

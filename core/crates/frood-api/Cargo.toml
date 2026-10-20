@@ -21,6 +21,7 @@ frood-store.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
+tracing-subscriber.workspace = true
 url.workspace = true
 uuid.workspace = true
 
