@@ -331,7 +331,7 @@ impl FroodMcp {
     }
 
     #[tool(
-        description = "Search knowledge by words and meaning, across languages. Returns current assertions with their ids, kinds, subjects, slots, validity, evidence and a relevance score.",
+        description = "Search knowledge by words and meaning, across languages. Returns current assertions with their ids, kinds, subjects, slots, validity, a relevance score and the sources they rest on (source id, kind, when said, the quoted words) to cite.",
         annotations(read_only_hint = true)
     )]
     async fn search_knowledge(&self, Parameters(p): Parameters<SearchParams>) -> ToolResult {
@@ -348,7 +348,53 @@ impl FroodMcp {
             valid_at: parse_opt_time(p.valid_at.as_deref())?,
             limit: limit(p.limit, 20),
         };
-        render(self.searcher.search(query).await.map_err(search_error)?)
+        let hits = self.searcher.search(query).await.map_err(search_error)?;
+        render(self.with_sources(hits).await?)
+    }
+
+    /// Search hits with what each rests on — the source, its kind, when it was said, the quoted
+    /// words — so an answer can cite them, not only an evidence id.
+    async fn with_sources(
+        &self,
+        hits: Vec<frood_ledger::SearchHit>,
+    ) -> Result<Vec<serde_json::Value>, String> {
+        let ids: Vec<Uuid> = hits
+            .iter()
+            .flat_map(|h| h.version.evidence.iter().copied())
+            .collect();
+        let evidence = self.ledger.evidence(&ids).await.map_err(ledger_error)?;
+        let mut sources = std::collections::HashMap::new();
+        for e in &evidence {
+            if !sources.contains_key(&e.source_id)
+                && let Ok(source) = self.ledger.source(e.source_id).await
+            {
+                sources.insert(e.source_id, source);
+            }
+        }
+        Ok(hits
+            .into_iter()
+            .map(|hit| {
+                let cites: Vec<serde_json::Value> = evidence
+                    .iter()
+                    .filter(|e| hit.version.evidence.contains(&e.id))
+                    .map(|e| {
+                        let source = sources.get(&e.source_id);
+                        json!({
+                            "source_id": e.source_id,
+                            "kind": source.map(|s| s.kind.as_str()),
+                            "title": source.and_then(|s| s.title.as_deref()),
+                            "uri": source.and_then(|s| s.uri.as_deref()),
+                            "said_at": source.and_then(|s| s.said_at),
+                            "captured_by": source.map(|s| s.captured_by.as_str()),
+                            "quote": e.quote.as_deref().or_else(|| source.and_then(|s| s.content.as_deref())),
+                        })
+                    })
+                    .collect();
+                let mut value = serde_json::to_value(&hit).unwrap_or_default();
+                value["sources"] = json!(cites);
+                value
+            })
+            .collect())
     }
 
     #[tool(
