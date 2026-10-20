@@ -17,6 +17,25 @@ pub struct Health {
     pub accounts: Vec<AccountSpend>,
     /// Per job and source: seconds since it was last read successfully.
     pub sources: Vec<SourceAge>,
+    /// When backups are configured.
+    pub backups: Option<BackupHealth>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BackupHealth {
+    pub targets: Vec<String>,
+    /// Seconds since the last backup that succeeded.
+    pub seconds_since_backup: Option<i64>,
+    pub last_backup: Option<Finished>,
+    pub last_verify: Option<Finished>,
+}
+
+/// How a job's latest finished run ended.
+#[derive(Debug, Serialize)]
+pub struct Finished {
+    pub status: String,
+    pub finished_at: Option<chrono::DateTime<Utc>>,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -120,8 +139,41 @@ impl Dispatch {
         )
         .fetch_all(pool)
         .await?;
+        let latest = |job: &'static str| async move {
+            sqlx::query_as::<_, (String, Option<chrono::DateTime<Utc>>, Option<String>)>(
+                "SELECT status, finished_at, error FROM runs WHERE job = $1 \
+                 AND status IN ('succeeded', 'failed') ORDER BY finished_at DESC NULLS LAST LIMIT 1",
+            )
+            .bind(job)
+            .fetch_optional(pool)
+            .await
+            .map(|row| {
+                row.map(|(status, finished_at, error)| Finished {
+                    status,
+                    finished_at,
+                    error,
+                })
+            })
+        };
+        let backups = match self.ctx.backup.as_ref() {
+            Some(setup) => {
+                let last_ok: Option<chrono::DateTime<Utc>> = sqlx::query_scalar(
+                    "SELECT max(finished_at) FROM runs WHERE job = 'backup' AND status = 'succeeded'",
+                )
+                .fetch_one(pool)
+                .await?;
+                Some(BackupHealth {
+                    targets: setup.settings.targets.keys().cloned().collect(),
+                    seconds_since_backup: last_ok.map(|at| (Utc::now() - at).num_seconds().max(0)),
+                    last_backup: latest("backup").await?,
+                    last_verify: latest("backup-verify").await?,
+                })
+            }
+            None => None,
+        };
         Ok(Health {
             modules,
+            backups,
             dispatcher_lag_seconds: oldest.map_or(0, |at| (Utc::now() - at).num_seconds().max(0)),
             undispatched_events: undispatched,
             runs,

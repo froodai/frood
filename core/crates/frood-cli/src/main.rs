@@ -5,6 +5,7 @@ mod export;
 mod init;
 mod lifecycle;
 mod modules;
+mod recovery;
 mod serve;
 mod token;
 
@@ -69,6 +70,16 @@ enum Command {
     Serve,
     /// Show server health and the applied config revision.
     Status,
+    /// Logs of the server, PostgreSQL or a module (by its name in frood.yaml); all by default.
+    Logs {
+        service: Option<String>,
+        /// Keep printing new lines.
+        #[arg(long, short)]
+        follow: bool,
+        /// How many recent lines of each.
+        #[arg(long, default_value_t = 200)]
+        lines: u32,
+    },
     /// Personal tokens for scripts and bots.
     Token {
         #[command(subcommand)]
@@ -81,6 +92,30 @@ enum Command {
         /// Whose account it is; the user is created if new.
         #[arg(long)]
         email: String,
+    },
+    /// Backups: the recovery key.
+    Backup {
+        #[command(subcommand)]
+        command: BackupCommand,
+    },
+    /// A new installation from a backup: frood.yaml, the secrets and the database. Run it in
+    /// an empty folder (or pass --config <folder>/frood.yaml), with RESTIC_PASSWORD set.
+    Restore {
+        /// The restic repository: a folder on this machine, s3:…, b2:…, sftp:…, rest:….
+        #[arg(long)]
+        repository: String,
+        /// The recovery key file (`frood backup key --out`).
+        #[arg(long)]
+        identity: PathBuf,
+        /// The backup module's image, which has restic, e.g. ghcr.io/froodai/backup-restic:0.0.1.
+        #[arg(long)]
+        image: String,
+        /// KEY=VALUE the repository needs, e.g. AWS_ACCESS_KEY_ID=…; repeatable.
+        #[arg(long)]
+        env: Vec<String>,
+        /// A snapshot id. Default: the latest.
+        #[arg(long)]
+        snapshot: Option<String>,
     },
     /// Write all knowledge into a new folder, in a form that does not depend on the database.
     Export {
@@ -124,6 +159,17 @@ enum TokenCommand {
         #[arg(long)]
         email: String,
         id: uuid::Uuid,
+    },
+}
+
+#[derive(Subcommand)]
+enum BackupCommand {
+    /// Make a recovery key. Its secret half stays with you, off the server; the public half
+    /// goes into frood.yaml as backup.recovery_key.
+    Key {
+        /// Write the secret half to this file (only you can read it) instead of printing it.
+        #[arg(long)]
+        out: Option<PathBuf>,
     },
 }
 
@@ -172,7 +218,34 @@ async fn main() -> ExitCode {
         Command::Apply { render_only } => lifecycle::apply(&paths, render_only).await,
         Command::Serve => serve::run(&paths).await,
         Command::Status => lifecycle::status(&paths).await,
+        Command::Logs {
+            service,
+            follow,
+            lines,
+        } => lifecycle::logs(&paths, service.as_deref(), follow, lines).await,
         Command::Export { dir } => lifecycle::export(&paths, &dir).await,
+        Command::Backup {
+            command: BackupCommand::Key { out },
+        } => recovery::key(out.as_deref()),
+        Command::Restore {
+            repository,
+            identity,
+            image,
+            env,
+            snapshot,
+        } => {
+            recovery::restore(
+                &paths,
+                &recovery::RestoreOptions {
+                    repository,
+                    identity,
+                    image,
+                    env,
+                    snapshot,
+                },
+            )
+            .await
+        }
         Command::Link { channel, email } => token::link(&paths, &channel, &email).await,
         Command::Token { command } => match command {
             TokenCommand::Create {

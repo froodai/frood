@@ -152,6 +152,27 @@ async fn metrics(
             })
             .collect(),
     );
+    if let Some(backups) = &h.backups {
+        gauge(
+            "frood_backup_age_seconds",
+            "Seconds since the last backup that succeeded.",
+            backups
+                .seconds_since_backup
+                .map(|age| (String::new(), age as f64))
+                .into_iter()
+                .collect(),
+        );
+        gauge(
+            "frood_backup_verify_ok",
+            "Whether the latest restore check passed.",
+            backups
+                .last_verify
+                .as_ref()
+                .map(|v| (String::new(), f64::from(u8::from(v.status == "succeeded"))))
+                .into_iter()
+                .collect(),
+        );
+    }
     Ok((
         StatusCode::OK,
         [(header::CONTENT_TYPE, "text/plain; version=0.0.4")],

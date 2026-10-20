@@ -56,6 +56,20 @@ pub(crate) fn schedules(jobs: &[JobSpec]) -> Vec<Schedule> {
     out
 }
 
+/// Time between a job's next two scheduled runs, by its first schedule.
+pub(crate) fn interval(
+    jobs: &[JobSpec],
+    job: &str,
+    now: DateTime<Utc>,
+) -> Option<chrono::Duration> {
+    let schedule = schedules(jobs).into_iter().find(|s| s.job == job)?;
+    let mut times = schedule
+        .cron
+        .iter_after(now.with_timezone(&schedule.timezone));
+    let (a, b) = (times.next()?, times.next()?);
+    Some(b.with_timezone(&Utc) - a.with_timezone(&Utc))
+}
+
 impl Schedule {
     /// The latest scheduled time at or before `now`.
     fn latest_due(&self, now: DateTime<Utc>) -> Option<DateTime<Utc>> {

@@ -21,6 +21,7 @@ frood-modhost = { path = "crates/frood-modhost" }
 frood-search = { path = "crates/frood-search" }
 frood-store = { path = "crates/frood-store" }
 
+age = "0.12"
 anyhow = "1"
 base64 = "0.23"
 axum = { version = "0.8", features = ["multipart"] }

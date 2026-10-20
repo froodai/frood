@@ -13,9 +13,9 @@ use sha2::{Digest, Sha256};
 pub use interpolate::Secrets;
 pub use model::{
     Account, AccountBudget, AskUser, Attention, AttentionPerson, AttentionRoute, Auth, AutoAccept,
-    BeforeNotify, Budget, Config, Deploy, Detectors, Embeddings, Installation, Job, ModelProvider,
-    Module, OnExpire, Policies, Provider, Reminder, Search, Server, ServerPlacement,
-    SituationMatch, Source, Storage, Trigger,
+    Backup, BackupKeep, BackupTarget, BeforeNotify, Budget, Config, Deploy, Detectors, Embeddings,
+    Installation, Job, ModelProvider, Module, OnExpire, Policies, Provider, Reminder, Search,
+    Server, ServerPlacement, SituationMatch, Source, Storage, Trigger,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -75,7 +75,7 @@ pub fn parse(raw: &str, secrets: &Secrets) -> Result<Loaded, ConfigError> {
         serde_yaml_ng::from_value(document).map_err(|e| ConfigError::Schema(e.to_string()))?;
     validate(&config)?;
 
-    let warnings = config
+    let mut warnings: Vec<String> = config
         .reserved_present()
         .into_iter()
         .map(|section| {
@@ -86,6 +86,7 @@ pub fn parse(raw: &str, secrets: &Secrets) -> Result<Loaded, ConfigError> {
             format!("section `{section}` is not used yet (arrives in {milestone}); it is ignored")
         })
         .collect();
+    warnings.extend(backup_warnings(&config));
 
     Ok(Loaded {
         config,
@@ -144,6 +145,7 @@ fn validate(config: &Config) -> Result<(), ConfigError> {
     }
     validate_auth(config, &mut problems);
     validate_work(config, &mut problems);
+    validate_backup(config, &mut problems);
     if config.deploy.target != "compose" {
         problems.push(format!(
             "deploy.target {:?} is not available yet; only `compose` exists",
@@ -164,6 +166,88 @@ fn validate(config: &Config) -> Result<(), ConfigError> {
     } else {
         Err(ConfigError::Invalid(problems))
     }
+}
+
+fn validate_backup(config: &Config, problems: &mut Vec<String>) {
+    let Some(backup) = &config.backup else {
+        for job in ["backup", "backup-verify"] {
+            if config.jobs.contains_key(job) {
+                problems.push(format!(
+                    "job {job}: there is no `backup` section saying where backups go"
+                ));
+            }
+        }
+        return;
+    };
+    let key = backup.recovery_key.trim();
+    if !key.starts_with("age1") || key.len() < 20 {
+        problems.push(
+            "backup.recovery_key must be the public half of an age key (age1…); `frood backup key` makes one"
+                .to_owned(),
+        );
+    }
+    if backup.targets.is_empty() {
+        problems.push("backup.targets is empty: name where backups go".to_owned());
+    }
+    for (name, target) in &backup.targets {
+        if !is_valid_name(name) {
+            problems.push(format!(
+                "backup target name {name:?} must be lowercase letters, digits or dashes"
+            ));
+        }
+        if target.repository.trim().is_empty() {
+            problems.push(format!("backup target {name}: repository is empty"));
+        }
+        if target.password.is_empty() {
+            problems.push(format!("backup target {name}: password is empty"));
+        }
+    }
+    let rules = backup.keep.rules();
+    if rules.is_empty() {
+        problems.push(
+            "backup.keep says nothing: name what to keep, e.g. { daily: 30, monthly: 12 }"
+                .to_owned(),
+        );
+    }
+    if rules.iter().any(|(_, n)| *n == 0) {
+        problems.push("backup.keep: every number must be at least 1".to_owned());
+    }
+    if let Some(module) = &backup.module
+        && !config.modules.contains_key(module)
+    {
+        problems.push(format!("backup.module {module} is not in modules"));
+    }
+}
+
+/// What `frood plan` should point out about backups, though the config is valid.
+fn backup_warnings(config: &Config) -> Vec<String> {
+    let Some(backup) = &config.backup else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    if backup.targets.len() == 1 {
+        out.push(
+            "backup has one target: a second, independent one protects against losing it"
+                .to_owned(),
+        );
+    }
+    let scheduled = |job: &str| {
+        config
+            .jobs
+            .get(job)
+            .and_then(|j| j.on.as_ref())
+            .is_some_and(|on| on.iter().any(|t| t.schedule.is_some()))
+    };
+    if !scheduled("backup") {
+        out.push("backups run only when started by hand: give jobs.backup a schedule".to_owned());
+    }
+    if !scheduled("backup-verify") {
+        out.push(
+            "restoring from backups is never checked: give jobs.backup-verify a schedule"
+                .to_owned(),
+        );
+    }
+    out
 }
 
 fn validate_auth(config: &Config, problems: &mut Vec<String>) {
@@ -309,6 +393,16 @@ fn validate_work(config: &Config, problems: &mut Vec<String>) {
             && !ports.insert(port)
         {
             problems.push(format!("module {name}: port {port} is used twice"));
+        }
+        for volume in &module.volumes {
+            let ok = volume
+                .split_once(':')
+                .is_some_and(|(host, inside)| !host.is_empty() && inside.starts_with('/'));
+            if !ok {
+                problems.push(format!(
+                    "module {name}: volume {volume:?} must be host-path:/path/in/module"
+                ));
+            }
         }
     }
     for (name, job) in &config.jobs {
@@ -1117,5 +1211,45 @@ jobs:
             parse(&raw, &secrets()),
             Err(ConfigError::Invalid(_))
         ));
+    }
+
+    #[test]
+    fn backups_say_where_and_what_to_keep() {
+        let key = "age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p";
+        let ok = format!(
+            "{}\nbackup:\n  recovery_key: {key}\n  targets:\n    disk: {{ repository: /repos/disk, password: '${{secret:POSTGRES_PASSWORD}}' }}\n  keep: {{ daily: 7 }}\n",
+            template_for(ServerPlacement::Host)
+        );
+        let loaded = parse(&ok, &secrets()).unwrap();
+        let backup = loaded.config.backup.as_ref().unwrap();
+        assert_eq!(backup.targets["disk"].password, "pw");
+        assert_eq!(backup.keep.rules(), [("daily", 7)]);
+        // One target, no schedules: said, not refused.
+        assert_eq!(loaded.warnings.len(), 3, "{:?}", loaded.warnings);
+        assert!(loaded.warnings[0].contains("one target"));
+
+        let scheduled = format!(
+            "{ok}jobs:\n  backup: {{ on: [{{ schedule: '0 */6 * * *', timezone: Europe/Amsterdam }}] }}\n  backup-verify: {{ on: [{{ schedule: '0 4 * * 0', timezone: Europe/Amsterdam }}] }}\n"
+        );
+        assert_eq!(parse(&scheduled, &secrets()).unwrap().warnings.len(), 1);
+
+        let problems = |raw: &str| match parse(raw, &secrets()) {
+            Err(ConfigError::Invalid(problems)) => problems.join("\n"),
+            other => panic!("expected problems, got {other:?}"),
+        };
+        assert!(problems(&ok.replace("{ daily: 7 }", "{}")).contains("backup.keep says nothing"));
+        assert!(problems(&ok.replace(key, "ssh-ed25519 AAAA")).contains("recovery_key"));
+        assert!(
+            problems(&format!(
+                "{}\njobs:\n  backup: {{ on: [{{ schedule: '0 3 * * *', timezone: UTC }}] }}\n",
+                template_for(ServerPlacement::Host)
+            ))
+            .contains("no `backup` section")
+        );
+        let volume = format!(
+            "{}\nmodules:\n  backup: {{ image: b, volumes: [relative-only] }}\n",
+            template_for(ServerPlacement::Host)
+        );
+        assert!(problems(&volume).contains("host-path:/path/in/module"));
     }
 }

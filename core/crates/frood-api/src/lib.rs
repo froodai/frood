@@ -71,7 +71,7 @@ pub fn assemble(
         base_dir,
     };
     let (jobs, warnings) = frood_dispatch::resolve(config, &caps);
-    let dispatch = frood_dispatch::Dispatch::new(
+    let mut dispatch = frood_dispatch::Dispatch::new(
         ledger.clone(),
         auth.clone(),
         searcher.clone(),
@@ -81,6 +81,15 @@ pub fn assemble(
     )
     .with_sources(config.sources.clone())
     .with_attention(config.attention.clone());
+    if let Some(backup) = &config.backup {
+        dispatch = dispatch.with_backup(frood_dispatch::BackupSetup {
+            settings: backup.clone(),
+            installation: config.installation.name.clone(),
+            database_url: frood_modhost::database_url(config),
+            config_yaml: None,
+            secrets_path: None,
+        });
+    }
     Assembly {
         state: AppState {
             ledger,

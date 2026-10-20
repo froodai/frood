@@ -84,10 +84,8 @@ pub async fn plan(paths: &Paths) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn apply(paths: &Paths, render_only: bool) -> anyhow::Result<()> {
-    let loaded = paths.load()?;
-    print_summary(&loaded);
-
+/// Writes the deployment files (module env files, compose.yaml); returns compose.yaml's path.
+pub(crate) fn write_deploy(paths: &Paths, loaded: &Loaded) -> anyhow::Result<PathBuf> {
     let config_abs = absolute(&paths.config)?;
     let secrets_abs = absolute(&paths.secrets())?;
     if !secrets_abs.exists() {
@@ -99,17 +97,24 @@ pub async fn apply(paths: &Paths, render_only: bool) -> anyhow::Result<()> {
     let deploy_dir = absolute(&loaded.base_dir.join(".frood").join("deploy"))?;
     std::fs::create_dir_all(&deploy_dir)
         .with_context(|| format!("cannot create {}", deploy_dir.display()))?;
-    for module in modules::ensure_tokens(&loaded, &secrets_abs)? {
+    for module in modules::ensure_tokens(loaded, &secrets_abs)? {
         println!("added a service token for module {module} to the secrets file");
     }
-    modules::write_env_files(&loaded, &secrets_abs, &deploy_dir)?;
+    modules::write_env_files(loaded, &secrets_abs, &deploy_dir)?;
     let compose_path = deploy_dir.join("compose.yaml");
     std::fs::write(
         &compose_path,
-        compose::render(&loaded, &config_abs, &secrets_abs, &deploy_dir),
+        compose::render(loaded, &config_abs, &secrets_abs, &deploy_dir),
     )
     .with_context(|| format!("cannot write {}", compose_path.display()))?;
     println!("wrote {}", compose_path.display());
+    Ok(compose_path)
+}
+
+pub async fn apply(paths: &Paths, render_only: bool) -> anyhow::Result<()> {
+    let loaded = paths.load()?;
+    print_summary(&loaded);
+    let compose_path = write_deploy(paths, &loaded)?;
     if render_only {
         return Ok(());
     }
@@ -182,6 +187,45 @@ pub async fn export(paths: &Paths, dir: &std::path::Path) -> anyhow::Result<()> 
     println!("entity pages: {}", exported.entities);
     println!("wrote {}", dir.display());
     Ok(())
+}
+
+/// Logs of the deployment's containers: the server, PostgreSQL, a module (`module-<name>`).
+pub async fn logs(
+    paths: &Paths,
+    service: Option<&str>,
+    follow: bool,
+    lines: u32,
+) -> anyhow::Result<()> {
+    let loaded = paths.load()?;
+    let compose_path = absolute(
+        &loaded
+            .base_dir
+            .join(".frood")
+            .join("deploy")
+            .join("compose.yaml"),
+    )?;
+    if !compose_path.exists() {
+        bail!(
+            "{} does not exist; run `frood apply` first",
+            compose_path.display()
+        );
+    }
+    let service = service.map(|name| {
+        if name == "frood" || name == "postgres" || name.starts_with("module-") {
+            name.to_owned()
+        } else {
+            frood_modhost::service_name(name)
+        }
+    });
+    let tail = lines.to_string();
+    let mut args = vec!["logs", "--tail", tail.as_str(), "--timestamps"];
+    if follow {
+        args.push("--follow");
+    }
+    if let Some(service) = &service {
+        args.push(service);
+    }
+    docker_compose(&compose_path, &args).await
 }
 
 pub async fn status(paths: &Paths) -> anyhow::Result<()> {
@@ -314,7 +358,7 @@ async fn snapshot_before_migrations(loaded: &Loaded, compose_path: &Path) -> any
     Ok(())
 }
 
-async fn docker_compose(compose_path: &Path, args: &[&str]) -> anyhow::Result<()> {
+pub(crate) async fn docker_compose(compose_path: &Path, args: &[&str]) -> anyhow::Result<()> {
     let status = tokio::process::Command::new("docker")
         .args(["compose", "-f"])
         .arg(compose_path)
@@ -390,6 +434,6 @@ async fn http_status(url: &str) -> anyhow::Result<u16> {
     Ok(response.status().as_u16())
 }
 
-fn absolute(path: &Path) -> anyhow::Result<PathBuf> {
+pub(crate) fn absolute(path: &Path) -> anyhow::Result<PathBuf> {
     std::path::absolute(path).with_context(|| format!("cannot resolve {}", path.display()))
 }

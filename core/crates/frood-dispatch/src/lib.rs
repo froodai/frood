@@ -31,6 +31,7 @@ use tokio::sync::watch;
 use uuid::Uuid;
 
 pub use inbox::{Act, ActOutcome, InboxItem, Shown};
+pub use jobs::backup::BackupSetup;
 pub use jobs::{AgentSettings, Capabilities, JobError, JobSpec, Task, resolve};
 pub use questions::Question;
 pub use runs::Run;
@@ -49,6 +50,7 @@ pub(crate) struct Ctx {
     pub modules: Modules,
     pub sources: Arc<BTreeMap<String, frood_config::Source>>,
     pub attention: Arc<frood_config::Attention>,
+    pub backup: Arc<Option<jobs::backup::BackupSetup>>,
 }
 
 #[derive(Clone)]
@@ -88,6 +90,7 @@ impl Dispatch {
                 modules,
                 sources: Arc::new(BTreeMap::new()),
                 attention: Arc::new(frood_config::Attention::default()),
+                backup: Arc::new(None),
             },
             jobs: Arc::new(jobs),
             down_since: Arc::default(),
@@ -97,6 +100,25 @@ impl Dispatch {
     /// Who is told what, when and where.
     pub fn with_attention(mut self, attention: frood_config::Attention) -> Self {
         self.ctx.attention = Arc::new(attention);
+        self
+    }
+
+    /// Where backups go (C4).
+    pub fn with_backup(mut self, setup: BackupSetup) -> Self {
+        self.ctx.backup = Arc::new(Some(setup));
+        self
+    }
+
+    /// What a backup takes besides the database: the config as written and the secrets file.
+    pub fn with_backup_files(
+        mut self,
+        config_yaml: String,
+        secrets_path: std::path::PathBuf,
+    ) -> Self {
+        if let Some(setup) = Arc::make_mut(&mut self.ctx.backup) {
+            setup.config_yaml = Some(config_yaml);
+            setup.secrets_path = Some(secrets_path);
+        }
         self
     }
 
@@ -201,6 +223,8 @@ impl Dispatch {
             Task::Transcribe => jobs::transcribe::run(&self.ctx, spec, &run).await,
             Task::Embed => jobs::embed::run(&self.ctx).await,
             Task::Digest => self.run_digest(&run).await,
+            Task::Backup => jobs::backup::run(&self.ctx, false).await,
+            Task::BackupVerify => jobs::backup::run(&self.ctx, true).await,
             Task::Agent => unreachable!("handled above"),
         };
         match result {

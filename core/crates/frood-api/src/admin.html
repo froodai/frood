@@ -79,6 +79,8 @@ const T = RU ? {
   accept: "Принять", reject: "Отклонить", defer: "Отложить", snooze: "Отложить", done: "Выполнено",
   postpone: "Перенести на неделю", dismiss: "Скрыть", answer: "Ответить", seen: "Прочитано", for_me: "вам",
   signOut: "Выйти", ago: "назад", sec: "с", min: "мин", h: "ч", d: "дн", confirmCancel: "Отменить запуск?",
+  backups: "Резервные копии", lastBackup: "последняя", lastVerify: "проверка восстановления", backupNow: "Сделать сейчас",
+  verifyNow: "Проверить", passed: "прошла", notPassed: "не прошла", started: "Запущено — см. «Запуски»", targets: "хранилища",
   message: "Сообщение агенту", sent: "Отправлено", failed: "Не удалось", notAdmin: "Нужно право admin: войдите заново и разрешите его на странице согласия.",
 } : {
   health: "Health", inbox: "Inbox", runs: "Runs", journal: "Journal", logs: "Logs",
@@ -92,6 +94,8 @@ const T = RU ? {
   accept: "Accept", reject: "Reject", defer: "Later", snooze: "Later", done: "Done",
   postpone: "Move a week", dismiss: "Hide", answer: "Answer", seen: "Seen", for_me: "you",
   signOut: "Sign out", ago: "ago", sec: "s", min: "min", h: "h", d: "d", confirmCancel: "Cancel this run?",
+  backups: "Backups", lastBackup: "last", lastVerify: "restore check", backupNow: "Back up now",
+  verifyNow: "Check restore", passed: "passed", notPassed: "failed", started: "Started — see Runs", targets: "targets",
   message: "Message to the agent", sent: "Sent", failed: "Failed", notAdmin: "This needs the admin permission: sign in again and allow it on the consent page.",
 };
 const SCOPES = "knowledge:read knowledge:capture knowledge:decide journal:read admin";
@@ -228,8 +232,30 @@ async function health() {
          a.monthly_usd && a.spent_usd >= a.monthly_usd * 0.8 ? "warn" : "")) : [el("div", { class: "muted" }, T.none)])),
     card(T.sources, ...(h.sources.length ? h.sources.map((s) => row(s.job + " · " + s.source,
          s.seconds_since_read == null ? T.never : T.readAgo + " " + duration(s.seconds_since_read) + " " + T.ago)) : [el("div", { class: "muted" }, T.none)])),
+    h.backups ? backupCard(h.backups, card, row) : null,
   ), el("p", { class: "muted" }, "frood " + h.version + " · config " + short(h.config_sha256 || "", 12)));
   timer = setInterval(() => current === "health" && health().catch(fail), 15000);
+}
+
+function backupCard(b, card, row) {
+  const start = (job) => async (ev) => {
+    ev.target.disabled = true;
+    try { await api("/v1/runs", { method: "POST", body: JSON.stringify({ job }) }); ev.target.textContent = T.started; }
+    catch (e) { fail(e); ev.target.disabled = false; }
+  };
+  const lastBackup = b.seconds_since_backup == null ? T.never : duration(b.seconds_since_backup) + " " + T.ago;
+  const failedBackup = b.last_backup && b.last_backup.status === "failed";
+  const verify = b.last_verify;
+  return card(T.backups,
+    row(T.targets, b.targets.join(", ")),
+    row(T.lastBackup, lastBackup, failedBackup ? "bad" : b.seconds_since_backup == null ? "warn" : "ok"),
+    failedBackup ? el("div", { class: "bad" }, short(b.last_backup.error, 200)) : null,
+    row(T.lastVerify, verify ? (verify.status === "succeeded" ? T.passed : T.notPassed) + " · " + ago(verify.finished_at) : T.never,
+        verify ? (verify.status === "succeeded" ? "ok" : "bad") : "warn"),
+    verify && verify.status === "failed" ? el("div", { class: "bad" }, short(verify.error, 200)) : null,
+    el("div", { class: "toolbar", style: "margin:10px 0 0" },
+      el("button", { class: "act", onclick: start("backup") }, T.backupNow),
+      el("button", { class: "act", onclick: start("backup-verify") }, T.verifyNow)));
 }
 
 // ---------- inbox ----------
