@@ -258,6 +258,8 @@ async fn submit_verdict(
 struct JournalQuery {
     after: Option<i64>,
     limit: Option<i64>,
+    /// Instead of `after`: the newest this many events.
+    last: Option<i64>,
 }
 
 async fn journal(
@@ -265,6 +267,13 @@ async fn journal(
     _caller: Caller<Journal>,
     Query(query): Query<JournalQuery>,
 ) -> ApiResult<Vec<JournalEvent>> {
+    if let Some(last) = query.last {
+        let last = last.clamp(1, 1000);
+        let head = state.ledger.journal_head().await?;
+        return Ok(Json(
+            state.ledger.journal((head - last).max(0), last).await?,
+        ));
+    }
     Ok(Json(
         state
             .ledger

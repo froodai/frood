@@ -25,6 +25,7 @@ pub fn routes() -> Router<AppState> {
         .route("/v1/runs/{id}/events", get(run_events))
         .route("/v1/runs/{id}/messages", post(send_message))
         .route("/v1/runs/{id}/cancel", post(cancel_run))
+        .route("/v1/runs/{id}/retry", post(retry_run))
         .route("/v1/questions", get(list_questions))
         .route("/v1/questions/{id}", get(question))
         .route("/v1/questions/{id}/answer", post(answer_question))
@@ -130,6 +131,27 @@ async fn cancel_run(
         .await
         .map(|()| StatusCode::NO_CONTENT)
         .map_err(conflict)
+}
+
+/// A new run of the same job with the same input. Runs cost money, so it takes `admin`.
+async fn retry_run(
+    State(state): State<AppState>,
+    _caller: Caller<Admin>,
+    Path(id): Path<Uuid>,
+) -> Result<(StatusCode, Json<Run>), ApiError> {
+    let run = state.dispatch.run(id).await.map_err(db)?.ok_or_else(|| {
+        ApiError::new(
+            StatusCode::NOT_FOUND,
+            "not-found",
+            format!("run {id} not found"),
+        )
+    })?;
+    state
+        .dispatch
+        .start_manual(&run.job, &run.input)
+        .await
+        .map(|run| (StatusCode::ACCEPTED, Json(run)))
+        .map_err(ApiError::bad_request)
 }
 
 #[derive(Deserialize)]

@@ -2,12 +2,14 @@
 //! the OAuth endpoints and `/mcp`, all on one origin.
 
 mod account;
+mod admin;
 mod auth;
 mod capture;
 mod channels;
 mod error;
 mod inbox;
 mod ledger;
+pub mod logs;
 mod work;
 
 use axum::extract::State;
@@ -119,6 +121,7 @@ pub fn router(state: AppState) -> Router {
         .merge(channels::routes())
         .merge(work::routes())
         .merge(inbox::routes())
+        .merge(admin::routes())
         .with_state(state)
         .merge(mcp)
         .merge(oauth)
