@@ -253,25 +253,6 @@ pub(crate) async fn entities_in(
     rows.iter().map(rows::entity).collect()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn query_words_become_prefix_terms() {
-        assert_eq!(
-            tsquery("Релиз 2.4 — 14 ноября, deadlines!").as_deref(),
-            Some("релиз:* | 14 | нояб:* | deadlin:*")
-        );
-        assert_eq!(tsquery("— ! ?"), None);
-    }
-
-    #[test]
-    fn vectors_print_as_pgvector_literals() {
-        assert_eq!(vector_literal(&[0.5, -1.0]), "[0.5,-1]");
-    }
-}
-
 /// Proposals that still wait for a verdict and whose texts share words with `text`, newest
 /// first: what an agent should not propose again.
 pub(crate) async fn pending_proposals(
@@ -291,4 +272,23 @@ pub(crate) async fn pending_proposals(
     .bind(limit)
     .fetch_all(pool)
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn query_words_become_prefix_terms() {
+        assert_eq!(
+            tsquery("Релиз 2.4 — 14 ноября, deadlines!").as_deref(),
+            Some("релиз:* | 14 | нояб:* | deadlin:*")
+        );
+        assert_eq!(tsquery("— ! ?"), None);
+    }
+
+    #[test]
+    fn vectors_print_as_pgvector_literals() {
+        assert_eq!(vector_literal(&[0.5, -1.0]), "[0.5,-1]");
+    }
 }
