@@ -1,0 +1,31 @@
+[package]
+name = "frood-backup-restic"
+description = "Frood module: backup.target@1 with restic and the PostgreSQL client tools"
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.99"
+license = "Apache-2.0"
+repository = "https://github.com/froodai/frood"
+publish = false
+
+[dependencies]
+axum = "0.8"
+base64 = "0.23"
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml_ng = "0.10"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "process", "io-util", "fs", "sync"] }
+tokio-postgres = "0.7"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+url = "2"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }

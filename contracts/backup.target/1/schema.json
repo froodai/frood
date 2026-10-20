@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://frood.dev/contracts/backup.target/1/schema.json",
+  "title": "backup.target@1",
+  "$defs": {
+    "target": {
+      "type": "object",
+      "required": ["name", "repository", "password"],
+      "properties": {
+        "name": { "type": "string" },
+        "repository": { "type": "string" },
+        "password": { "type": "string" },
+        "env": { "type": "object", "additionalProperties": { "type": "string" } }
+      }
+    },
+    "database": {
+      "type": "object",
+      "required": ["url"],
+      "properties": { "url": { "type": "string" } }
+    },
+    "request": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["op", "installation", "database", "files", "targets", "keep"],
+          "properties": {
+            "op": { "const": "backup" },
+            "installation": { "type": "string" },
+            "database": { "$ref": "#/$defs/database" },
+            "files": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["name", "data_base64"],
+                "properties": {
+                  "name": { "type": "string", "pattern": "^[A-Za-z0-9._-]+$" },
+                  "data_base64": { "type": "string", "contentEncoding": "base64" }
+                }
+              }
+            },
+            "about": { "type": "object" },
+            "targets": { "type": "array", "items": { "$ref": "#/$defs/target" } },
+            "keep": {
+              "type": "object",
+              "propertyNames": { "enum": ["last", "hourly", "daily", "weekly", "monthly", "yearly"] },
+              "additionalProperties": { "type": "integer", "minimum": 1 }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["op", "installation", "database", "targets"],
+          "properties": {
+            "op": { "const": "verify" },
+            "installation": { "type": "string" },
+            "database": { "$ref": "#/$defs/database" },
+            "targets": { "type": "array", "items": { "$ref": "#/$defs/target" } }
+          }
+        }
+      ]
+    },
+    "response": {
+      "type": "object",
+      "required": ["targets"],
+      "properties": {
+        "made_at": { "type": "string", "format": "date-time" },
+        "dump_bytes": { "type": "integer" },
+        "tables": { "type": "integer" },
+        "targets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "ok"],
+            "properties": {
+              "name": { "type": "string" },
+              "ok": { "type": "boolean" },
+              "snapshot": { "type": "string" },
+              "made_at": { "type": "string", "format": "date-time" },
+              "added_bytes": { "type": "integer" },
+              "tables": { "type": "integer" },
+              "error": { "type": "string" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

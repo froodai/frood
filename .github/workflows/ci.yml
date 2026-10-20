@@ -45,7 +45,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        module: [stt-openai, telegram, runtime-docker]
+        module: [stt-openai, telegram, runtime-docker, backup-restic]
     defaults:
       run:
         working-directory: modules/${{ matrix.module }}
