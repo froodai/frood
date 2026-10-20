@@ -162,6 +162,25 @@ pub mod testing {
     /// Creates a fresh, migrated database named after `prefix` and returns a pool to it.
     pub async fn fresh_database(admin_url: &str, prefix: &str) -> Result<PgPool, StoreError> {
         let admin = connect(admin_url, Duration::from_secs(10)).await?;
+        // Databases of this test from earlier runs: nothing drops them when a test ends, and
+        // hundreds of them fill the disk. Those of this run (this process) stay: other tests use
+        // them now, and one prefix may begin another.
+        let stale: Vec<String> = sqlx::query_scalar(
+            "SELECT datname FROM pg_database WHERE datname LIKE $1 || '\\_%' AND datname NOT LIKE $2",
+        )
+        .bind(prefix)
+        .bind(format!("%\\_{}\\_%", std::process::id()))
+        .fetch_all(&admin)
+        .await?;
+        for name in stale {
+            // Names are read from the server and quoted: safe to splice.
+            let _ = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "DROP DATABASE IF EXISTS \"{}\" WITH (FORCE)",
+                name.replace('"', "\"\"")
+            )))
+            .execute(&admin)
+            .await;
+        }
         let name = format!(
             "{prefix}_{}_{}",
             std::process::id(),
