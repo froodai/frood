@@ -331,7 +331,7 @@ impl FroodMcp {
     }
 
     #[tool(
-        description = "Search knowledge by words and meaning, across languages. Returns current assertions with their ids, kinds, subjects, slots, validity, a relevance score and the sources they rest on (source id, kind, when said, the quoted words) to cite.",
+        description = "Search knowledge by words and meaning, across languages. Returns current assertions with their ids, kinds, subjects, slots, validity, a relevance score and the sources they rest on (source id, kind, when said, the quoted words) to cite; after them, proposals matching the words that still wait for a person's verdict, marked `pending`.",
         annotations(read_only_hint = true)
     )]
     async fn search_knowledge(&self, Parameters(p): Parameters<SearchParams>) -> ToolResult {
@@ -348,8 +348,37 @@ impl FroodMcp {
             valid_at: parse_opt_time(p.valid_at.as_deref())?,
             limit: limit(p.limit, 20),
         };
+        let text = query.text.clone();
         let hits = self.searcher.search(query).await.map_err(search_error)?;
-        render(self.with_sources(hits).await?)
+        let mut out = self.with_sources(hits).await?;
+        // What already waits for a person's verdict, so it is not proposed again.
+        let pending = self
+            .ledger
+            .pending_proposals(&text, 10)
+            .await
+            .map_err(ledger_error)?;
+        out.extend(pending.into_iter().map(|p| {
+            let changes: Vec<Value> = p
+                .alternatives
+                .iter()
+                .flat_map(|a| a.operations.iter())
+                .filter_map(|op| match op {
+                    Operation::Create { assertion, .. } | Operation::Supersede { assertion, .. } => {
+                        Some(json!({ "kind": assertion.kind, "text": assertion.text }))
+                    }
+                    _ => None,
+                })
+                .collect();
+            json!({
+                "pending": "a proposal waiting for a person's verdict: do not propose the same again",
+                "proposal_id": p.id,
+                "risk": p.risk,
+                "author": p.author,
+                "created_at": p.created_at,
+                "changes": changes,
+            })
+        }));
+        render(out)
     }
 
     /// Search hits with what each rests on — the source, its kind, when it was said, the quoted

@@ -818,6 +818,15 @@ impl Ledger {
         search::search(&self.pool, query).await
     }
 
+    /// Proposals still waiting for a verdict whose texts share words with `text`.
+    pub async fn pending_proposals(&self, text: &str, limit: i64) -> Result<Vec<Proposal>> {
+        let mut out = Vec::new();
+        for id in search::pending_proposals(&self.pool, text, limit).await? {
+            out.push(self.proposal(id).await?);
+        }
+        Ok(out)
+    }
+
     /// Current versions without an embedding from `model`: (assertion, version, text).
     pub async fn missing_embeddings(
         &self,
