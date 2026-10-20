@@ -650,6 +650,19 @@ impl FroodMcp {
         Parameters(p): Parameters<ProposeParams>,
     ) -> ToolResult {
         let principal = principal(&parts)?;
+        // A model sometimes runs the next parameter of its call into a text value: refuse the
+        // call, so it is sent again, rather than keep markup as knowledge.
+        let leaked =
+            |text: &str| text.contains("<parameter name=") || text.contains("</parameter>");
+        if leaked(&p.rationale)
+            || p.source_text.as_deref().is_some_and(leaked)
+            || serde_json::to_string(&p.operations).is_ok_and(|ops| leaked(&ops))
+        {
+            return Err(
+                "a value in this call contains tool-call markup (<parameter name=…>): send the call again with clean values"
+                    .into(),
+            );
+        }
         let actor = actor(&principal);
         // An agent's run: the source it reads goes with the quote, and may let a policy accept.
         let (run_source, context) = match &principal.run {

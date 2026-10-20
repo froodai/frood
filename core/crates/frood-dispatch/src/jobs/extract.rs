@@ -289,6 +289,11 @@ pub(crate) async fn run(ctx: &Ctx, spec: &JobSpec, run: &Run) -> Result<Value, J
         .and_then(|s| s.parse().ok())
         .ok_or_else(|| JobError::permanent("the event names no source"))?;
     let source = ctx.ledger.source(source_id).await?;
+    // What an agent captured is its own material: it proposes from it itself, and a second
+    // reading would only repeat its proposals.
+    if source.captured_by.starts_with("agent:") {
+        return Ok(json!({ "skipped": "an agent's source: the agent proposes from it itself" }));
+    }
     let Some(text) = source.content.clone().filter(|t| !t.trim().is_empty()) else {
         return Ok(json!({ "skipped": "the source has no text" }));
     };
