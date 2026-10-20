@@ -1,5 +1,5 @@
 name: stt-openai
-version: 0.0.1
+version: 0.1.0
 description: Speech to text through OpenAI or any server with the same API; converts formats OpenAI does not take, such as Telegram's OGG/Opus voice messages.
 license: Apache-2.0
 provides:

@@ -36,7 +36,7 @@ auth:
 # Backups into two independent storages, with a restore check (docs/16 §7, modules/README.md).
 # `frood backup key --out recovery-key.txt` makes the recovery key: keep that file off the server.
 # modules:
-#   backup: { image: ghcr.io/froodai/backup-restic:0.0.1, volumes: ["/Volumes/Backup/frood:/repos/disk"] }
+#   backup: { image: ghcr.io/froodai/backup-restic:__VERSION__, volumes: ["/Volumes/Backup/frood:/repos/disk"] }
 # backup:
 #   recovery_key: age1…
 #   targets:

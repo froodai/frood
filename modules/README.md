@@ -95,7 +95,7 @@ On a clean machine, in an empty folder:
 
 ```sh
 RESTIC_PASSWORD=… frood restore --repository /Volumes/Backup/frood --identity recovery-key.txt \
-  --image ghcr.io/froodai/backup-restic:0.0.1
+  --image ghcr.io/froodai/backup-restic:0.1.0
 frood apply
 ```
 
