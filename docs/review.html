@@ -301,7 +301,7 @@ details.area[open] summary .tw{transform:rotate(90deg)}
     </header>
 
     <div class="tabs" role="tablist" aria-label="Этапы ревью">
-      <button class="tab" role="tab" id="t-now" data-tab="now" aria-controls="now" aria-selected="true">Сейчас на ревью <span class="n">1</span></button>
+      <button class="tab" role="tab" id="t-now" data-tab="now" aria-controls="now" aria-selected="true">Сейчас на ревью <span class="n">7</span></button>
       <button class="tab" role="tab" id="t-mvp" data-tab="mvp" aria-controls="mvp" aria-selected="false">План MVP</button>
       <button class="tab" role="tab" id="t-platform" data-tab="platform" aria-controls="platform" aria-selected="false">Платформа</button>
       <button class="tab" role="tab" id="t-notify" data-tab="notify" aria-controls="notify" aria-selected="false">Inbox и уведомления</button>
@@ -320,16 +320,37 @@ details.area[open] summary .tw{transform:rotate(90deg)}
         <div class="prose">
           <p>Раунд 15. Раунд 14 принят: A4′ (вход подпиской кнопкой; принести токен или ключ тоже можно), B1–B3. По B4 вы написали, что напоминания должен настраивать человек, — переделал, ниже B4′.</p>
           <p><b>M5 проверен вживую на вашем боте:</b> тестовый конфликт пришёл в Telegram с кнопками, «Отклонить» записало вердикт от вашего имени через Telegram, знание не изменилось, сообщение поправилось. По ходу нашлась и исправлена утечка токена бота в логи ошибок — токен лучше сменить через @BotFather.</p>
+          <p><b>Начат M6 — эксплуатация</b> (план — docs/23): админ-панель, детекторы «заглохло», бэкапы в два хранилища с проверкой, восстановление, экспорт. На ревью C1–C5 и вопрос про хранилища для живой проверки бэкапа; части, которые от решений не зависят, уже в работе.</p>
           <p>Отметки сохраняются в странице. Напишите в чат «готово», и я их прочитаю.</p>
         </div>
         <div class="locked"><span class="caption">Принято:</span><span class="chip">Фазы 1–6</span><span class="chip">M0–M4</span><span class="chip">R1′, R2</span><span class="chip">D1–D4</span><span class="chip">A1–A7, A4′</span><span class="chip">B1–B3</span></div>
       </section>
 
       <section id="now-decisions">
-        <div class="sh"><span class="tag need">нужно ваше решение</span><h2>Решение</h2></div>
+        <div class="sh"><span class="tag need">нужно ваше решение</span><h2>Решения</h2></div>
         <div class="rv-list">
           <div class="rv" data-id="impl06_B4" data-kind="decision" data-label="B4′ Напоминания — список правил у каждого">
             <div class="txt"><span class="id">B4′</span><h3>Напоминания о сроках — список правил «сколько дней от срока и во сколько»: общий для инсталляции и/или свой у каждого человека, сколько угодно; без списка напоминаний нет</h3><p class="why">Например: <code>reminders: [{ days: -3, at: "18:00" }, { days: 0, at: "09:00" }, { days: 1, at: "09:00" }]</code> — за три дня вечером, в день срока утром и на следующий день. Время — по часовому поясу человека (<code>attention.people.&lt;email&gt;.timezone</code>). Свой список человека заменяет общий <code>attention.reminders</code>. Каждое новое напоминание закрывает предыдущее по тому же сроку; «Выполнено» и «Перенести на неделю» работают как раньше.</p></div><div class="ctl"></div>
+          </div>
+          <div class="rv" data-id="impl06_C1" data-kind="decision" data-label="C1 Админ-панель — страница ядра">
+            <div class="txt"><span class="id">C1</span><h3>Админ-панель — веб-страница, которую отдаёт само ядро по <code>/admin</code>; вход — тот же, что у AI-клиентов; открыть её может любой человек инсталляции</h3><p class="why">Отдельный контейнер ради нескольких экранов — лишняя сборка и ещё один токен; панель работает только через API, поэтому позже её можно заменить модулем. Ролей нет (D9″): кто может войти в инсталляцию, тот видит здоровье, запуски и журнал и может повторить или отменить запуск.</p></div><div class="ctl"></div>
+          </div>
+          <div class="rv" data-id="impl06_C2" data-kind="decision" data-label="C2 Логи в панели — последние логи ядра">
+            <div class="txt"><span class="id">C2</span><h3>В панели — последние логи ядра (в памяти, около суток) и шаги каждого запуска; логи модулей — командой <code>frood logs</code>; долгое хранение — внешними системами позже</h3><p class="why">Ядро не видит логи чужих контейнеров без доступа к Docker, а хранить всё в базе — тяжело. Для отладки «что заглохло» обычно хватает логов ядра, шагов запуска и журнала.</p></div><div class="ctl"></div>
+          </div>
+          <div class="rv" data-id="impl06_C3" data-kind="decision" data-label="C3 Детекторы со встроенными порогами">
+            <div class="txt"><span class="id">C3</span><h3>Детекторы «заглохло» со встроенными порогами, которые меняются в конфиге: dispatcher отстаёт больше 10 минут; запуск в очереди больше 30 минут или работает дольше своего бюджета времени; джоба упала 3 раза подряд; источник не читался успешно больше 2 суток; бюджет аккаунта израсходован на 80%; модуль не отвечает 5 минут; бэкап старше двух интервалов или проверка восстановления не прошла</h3><p class="why">Как B2: без порогов детекторы просто не работали бы, а это поведение платформы, не личная настройка. Тревога закрывается сама, когда всё наладилось.</p></div><div class="ctl"></div>
+          </div>
+          <div class="rv" data-id="impl06_C4" data-kind="decision" data-label="C4 Бэкапы: restic, база + конфиг + секреты под ключом">
+            <div class="txt"><span class="id">C4</span><h3>Бэкап — модуль <code>backup-restic</code> и джоба <code>backup</code> по расписанию из конфига: дамп базы, <code>frood.yaml</code> и файл секретов, зашифрованный вашим ключом восстановления (age), в несколько хранилищ restic; проверка восстановления — в отдельную базу рядом с рабочей</h3><p class="why">В базе уже всё: знания, журнал, файлы, ревизии конфига, Inbox. Ключ восстановления хранится у вас вне сервера: без него посторонний не прочтёт секреты из бэкапа. Хранилищ в конфиге можно сколько угодно; <code>frood plan</code> предупредит, если оно одно. Расписание, хранение и проверка — только явно в конфиге, без значений по умолчанию (как A6).</p></div><div class="ctl"></div>
+          </div>
+          <div class="rv" data-id="impl06_C5" data-kind="decision" data-label="C5 Снапшот перед новыми миграциями">
+            <div class="txt"><span class="id">C5</span><h3><code>frood apply</code> перед новыми миграциями базы сам делает локальный дамп в <code>.frood/snapshots</code> и хранит последние 5</h3><p class="why">Обновление ядра меняет схему базы; если что-то пойдёт не так, откат — из этого дампа, даже без настроенных бэкапов.</p></div><div class="ctl"></div>
+          </div>
+        </div>
+        <div class="rv-list" style="margin-top:16px">
+          <div class="rv q" data-id="impl06_Q1" data-kind="question" data-label="QM6 Хранилища для живой проверки бэкапа">
+            <div class="txt"><span class="id">QM6</span><h3>Для живой проверки бэкапа нужны хранилища. Какие дать: локальный диск (папка на Mac или внешний диск) и/или S3-совместимое (Backblaze B2, Cloudflare R2, Hetzner Storage Box)? Для S3 понадобятся бакет и ключи — их вы положите в секреты сами</h3><p class="affects">До этого бэкап проверяется на локальных хранилищах в тестах.</p></div><div class="ctl"></div>
           </div>
         </div>
         <div class="overall" data-id="impl06_overall" data-kind="overall" data-label="Общий вердикт по раунду 15">
@@ -1694,7 +1715,7 @@ jobs:
             <tr><td class="k">12</td><td>M3: D1–D4, QM1</td><td>D1–D3 приняты; D4 — без моделей по умолчанию; ключи только для проверок</td></tr>
             <tr><td class="k">13</td><td>M4: A1–A7, QA1</td><td>A1–A3, A5–A7 приняты; A4 → A4′; проверка на YouTrack, платит подписка</td></tr>
             <tr><td class="k">14</td><td>A4′ вход подпиской; M5: B1–B4</td><td>A4′, B1–B3 приняты; B4 → B4′</td></tr>
-            <tr><td class="k">15</td><td>B4′ напоминания</td><td><span class="st wait">идёт</span></td></tr>
+            <tr><td class="k">15</td><td>B4′ напоминания; M6: C1–C5, QM6</td><td><span class="st wait">идёт</span></td></tr>
           </tbody>
         </table></div>
         <p class="caption">Все отметки хранятся в странице и продублированы в docs/README.md.</p>
@@ -1962,7 +1983,7 @@ jobs:
   }
 
   function compose(){
-    var lines = ["Ревью Frood, раунд 15: напоминания"];
+    var lines = ["Ревью Frood, раунд 15: напоминания и M6"];
     var o = state.impl06_overall || {};
     lines.push("Общее по раунду 15: " + (o.verdict ? LABEL[o.verdict] : "без вердикта") + (o.comment ? ". " + o.comment.trim() : ""));
     items.forEach(function(el){
