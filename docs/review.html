@@ -295,13 +295,13 @@ details.area[open] summary .tw{transform:rotate(90deg)}
         <span class="pill done">Inbox и уведомления v0.2</span>
         <span class="pill done">платформа v0.2</span>
         <span class="pill done">план MVP</span>
-        <span class="pill wait">MVP · прогон пройден</span>
+        <span class="pill wait">MVP принят</span>
         <span class="pill">исходники: docs/*.md</span>
       </div>
     </header>
 
     <div class="tabs" role="tablist" aria-label="Этапы ревью">
-      <button class="tab" role="tab" id="t-now" data-tab="now" aria-controls="now" aria-selected="true">Сейчас на ревью <span class="n">3</span></button>
+      <button class="tab" role="tab" id="t-now" data-tab="now" aria-controls="now" aria-selected="true">Сейчас на ревью <span class="n">1</span></button>
       <button class="tab" role="tab" id="t-mvp" data-tab="mvp" aria-controls="mvp" aria-selected="false">План MVP</button>
       <button class="tab" role="tab" id="t-platform" data-tab="platform" aria-controls="platform" aria-selected="false">Платформа</button>
       <button class="tab" role="tab" id="t-notify" data-tab="notify" aria-controls="notify" aria-selected="false">Inbox и уведомления</button>
@@ -318,40 +318,35 @@ details.area[open] summary .tw{transform:rotate(90deg)}
       <section id="now-intro">
         <div class="sh"><h2>Что нужно от вас</h2></div>
         <div class="prose">
-          <p>Раунд 19 — итог MVP. <b>Сценарий пройден целиком вживую</b> на сервере с выпуском 0.1.0, с настоящими клиентами и сервисами, и автоматически в CI (сценарный тест шагов 1–5 и прогон шага 6 в Docker — зелёные).</p>
-          <ol>
-            <li><b>Голосовое в Telegram</b> стало решением — распознано, извлечено, принято как ваше.</li>
-            <li><b>Claude</b> подключил Frood коннектором (вход через Google) и нашёл решение по смыслу, со ссылкой на голосовое.</li>
-            <li><b>Агент</b> на Claude Code по вашей подписке прошёл YouTrack, а после того как вы перевели AIRM-177/228 в Ready to Test, сам заметил расхождение — и оно пришло в Telegram с кнопками.</li>
-            <li><b>Перезагрузка всей машины</b> — всё на месте, повторно ничего не отправлено.</li>
-            <li><b>«Принять» в Telegram</b> — новые версии знаний от вашего имени, старые сохранены в истории.</li>
-            <li><b>Бэкап сервера</b> в его диск и в B2, проверка восстановления, восстановление из B2 на Mac — все знания и файл голосового совпали.</li>
-          </ol>
-          <p><b>Прогон нашёл четыре ошибки — исправлены</b>, уходят выпуском 0.1.1 этой ночью: файл секретов не читался на Linux (его же поймал CI), агентские цитаты разбирались дважды за деньги, в обоснование попадал мусор из вызова инструмента, тестовые базы заполнили диск Docker (локальная установка дважды ненадолго ложилась, данные целы). Протокол — docs/18.</p>
-          <p><b>Уберите за собой:</b> перенесите <code>~/frood-local/recovery-kit.txt</code> и <code>~/frood-server-recovery-kit.txt</code> в менеджер паролей и удалите их с Mac; <code>~/frood-server.env</code> и <code>~/frood-server-kit.sh</code> больше не нужны — секреты уже на сервере.</p>
-          <p><b>Позиционирование</b> — отдельные страницы исследования: <a href="https://claude.ai/artifact/6GnqkFPMxux19Ud7t6c8ui" target="_blank" rel="noopener">«Frood среди соседей»</a> и <a href="https://claude.ai/artifact/4V6pGzaKZmhhVXW8VybC2d" target="_blank" rel="noopener">«Frood как хаб»</a>.</p>
+          <p>Раунд 20. <b>MVP принят.</b> F1 и F2 сделаны и проверены, бот остаётся у сервера — в конфиге локальной установки Telegram закомментирован.</p>
+          <ul>
+            <li><b>F1:</b> <code>frood restore</code> сначала проверяет порты и ничего не пишет, если база или сервер не встанут; <code>--postgres-port</code> и <code>--listen</code> меняют их. Проверил на бэкапе сервера из B2 — отказ с подсказкой, потом с <code>--listen</code> до конца.</li>
+            <li><b>F2:</b> поиск показывает агентам и клиентам предложения, которые ещё ждут решения, с пометкой «pending»; ночной проход их не повторяет.</li>
+          </ul>
+          <p><b>Выпуск 0.1.1</b> — исправления прогона, F1 и F2 — публикуется этой ночью. После него обновлю сервер.</p>
           <p>Отметки сохраняются в странице. Напишите в чат «готово», и я их прочитаю.</p>
         </div>
-        <div class="locked"><span class="caption">Принято:</span><span class="chip">Фазы 1–6</span><span class="chip">M0–M7</span><span class="chip">R1′, R2</span><span class="chip">D1–D4</span><span class="chip">A1–A7, A4′</span><span class="chip">B1–B3, B4′</span><span class="chip">C1–C5</span><span class="chip">E1, E2, E3′</span></div>
+        <div class="locked"><span class="caption">Принято:</span><span class="chip">MVP</span><span class="chip">Фазы 1–6</span><span class="chip">M0–M7</span><span class="chip">E1, E2, E3′</span><span class="chip">F1, F2</span></div>
       </section>
 
       <section id="now-decisions">
-        <div class="sh"><span class="tag need">нужно ваше решение</span><h2>Решения</h2></div>
-        <div class="rv-list">
-          <div class="rv" data-id="impl10_F1" data-kind="decision" data-label="F1 restore спрашивает порты и проверяет их">
-            <div class="txt"><span class="id">F1</span><h3><code>frood restore</code> проверяет, свободны ли на новой машине порты из бэкапа, и даёт их сменить (<code>--postgres-port</code>, <code>--listen</code>) — до того, как что-то записано</h3><p class="why">На Mac порт базы 5432 оказался занят, и восстановление остановилось на полпути — довёл вручную. На чистом сервере такого не будет, но восстанавливают часто как раз туда, где что-то уже работает.</p></div><div class="ctl"></div>
-          </div>
-          <div class="rv" data-id="impl10_F2" data-kind="decision" data-label="F2 Агенты видят ждущие решения предложения">
-            <div class="txt"><span class="id">F2</span><h3>Агенты видят предложения, которые ещё ждут решения: поиск возвращает и их с пометкой «ждёт решения», а инструкция прохода говорит не предлагать то же снова</h3><p class="why">Второй проход по YouTrack заново предложил две вещи, которые с первого прохода лежали в Inbox неразобранными: агент видит только принятые знания. Без этого каждую ночь Inbox будет обрастать дублями.</p></div><div class="ctl"></div>
-          </div>
+        <div class="sh"><span class="tag need">нужно ваше решение</span><h2>Что дальше</h2></div>
+        <div class="prose">
+          <p>Варианты (можно несколько, в каком порядке — напишите):</p>
+          <ol>
+            <li><b>Пожить с Frood неделю</b> (рекомендую первым): ночной проход по YouTrack по расписанию, утренняя сводка, напоминания о сроках — и я по ходу чиню, что всплывёт. Нужен будет только ваш часовой пояс для расписания — он уже в конфиге.</li>
+            <li><b>Frood как хаб</b> — стать провайдером памяти для OpenClaw и Hermes, как в исследовании <a href="https://claude.ai/artifact/4V6pGzaKZmhhVXW8VybC2d" target="_blank" rel="noopener">«Frood как хаб»</a>.</li>
+            <li><b>Открыть проект</b> — README и страница проекта, демо «pull request'ы для памяти ИИ», открытый репозиторий (см. <a href="https://claude.ai/artifact/6GnqkFPMxux19Ud7t6c8ui" target="_blank" rel="noopener">«Frood среди соседей»</a>).</li>
+            <li><b>Возможности из «Позже»</b> плана MVP: Slack и другие каналы, Explorer знаний в админке, вход подпиской кнопкой (A4′).</li>
+          </ol>
         </div>
         <div class="rv-list" style="margin-top:16px">
-          <div class="rv q" data-id="impl10_Q1" data-kind="question" data-label="QX1 Где остаётся бот">
-            <div class="txt"><span class="id">QX1</span><h3>Бот сейчас у сервера, Telegram локальной установки остановлен. Оставить так (основная установка — сервер) или вернуть бота на Mac, а сервер выключить?</h3><p class="affects">Одного бота может слушать только одна установка. Сервер стоит около €6,5 в месяц.</p></div><div class="ctl"></div>
+          <div class="rv q" data-id="impl11_Q1" data-kind="question" data-label="QN1 Что дальше после MVP">
+            <div class="txt"><span class="id">QN1</span><h3>Что делаем дальше и в каком порядке?</h3><p class="affects">Следующий план — docs/25.</p></div><div class="ctl"></div>
           </div>
         </div>
-        <div class="overall" data-id="impl10_overall" data-kind="overall" data-label="MVP принят?">
-          <h3>MVP принят?</h3>
+        <div class="overall" data-id="impl11_overall" data-kind="overall" data-label="Общий вердикт по раунду 20">
+          <h3>Общий вердикт по раунду 20</h3>
           <div class="ctl"></div>
         </div>
       </section>
@@ -1684,7 +1679,7 @@ jobs:
               <li>Inbox, уведомления, внимание — приняты</li>
               <li>Ядро, реестр, деплой, бэкапы, версии — приняты</li>
               <li>План реализации MVP — принят</li>
-              <li class="cur">MVP: M0–M7, сценарий пройден вживую и в CI</li>
+              <li class="cur">MVP принят; выбор следующего шага</li>
             </ol>
           </div>
         </div>
@@ -1716,7 +1711,8 @@ jobs:
             <tr><td class="k">16</td><td>B2 для бэкапа; M7: E1–E3, QV1–QV4</td><td>E1, E2 приняты; E3 → E3′; B2 подключён</td></tr>
             <tr><td class="k">17</td><td>M7: E3′, QV1′, QV4, QV5</td><td>всё принято: Hetzner, открытые образы, траты до $0.50</td></tr>
             <tr><td class="k">18</td><td>Сервер, бот, вход Google; QS1–QS3</td><td>сервер поднят, прогон пройден</td></tr>
-            <tr><td class="k">19</td><td>Итог MVP; F1, F2, QX1</td><td><span class="st wait">идёт</span></td></tr>
+            <tr><td class="k">19</td><td>Итог MVP; F1, F2, QX1</td><td>MVP принят; F1, F2 сделаны; бот у сервера</td></tr>
+            <tr><td class="k">20</td><td>Что дальше (QN1)</td><td><span class="st wait">идёт</span></td></tr>
           </tbody>
         </table></div>
         <p class="caption">Все отметки хранятся в странице и продублированы в docs/README.md.</p>
@@ -1883,7 +1879,7 @@ jobs:
     overall: [["approve","Апрув"],["approve_changes","С правками"],["redo","Переделать"]]
   };
   var LABEL = {ok:"принять",discuss:"обсудить",no:"против",approve:"апрув",approve_changes:"апрув с правками",redo:"переделать"};
-  var LKEY = "frood-review-v19";
+  var LKEY = "frood-review-v20";
   var items = Array.prototype.slice.call(document.querySelectorAll("[data-id]"));
   var ids = {}; items.forEach(function(el){ ids[el.dataset.id] = true; });
   var state = {}, db = null, canWrite = true;
@@ -1951,13 +1947,13 @@ jobs:
     var a = 0, m = 0, q = 0;
     items.forEach(function(el){
       var id = el.dataset.id, s = state[id] || {};
-      if (el.dataset.kind === "decision" && s.verdict) { if (id.indexOf("impl10_") === 0) m++; else a++; }
+      if (el.dataset.kind === "decision" && s.verdict) { if (id.indexOf("impl11_") === 0) m++; else a++; }
       if (el.dataset.kind === "question" && (s.comment || "").trim()) q++;
     });
     var na = document.getElementById("n-arch"); if (na) na.textContent = a;
     document.getElementById("n-model").textContent = m;
     document.getElementById("n-q").textContent = q;
-    var o = state.impl10_overall || {};
+    var o = state.impl11_overall || {};
     document.getElementById("n-all").textContent = o.verdict ? LABEL[o.verdict] : "—";
   }
 
@@ -1984,9 +1980,9 @@ jobs:
   }
 
   function compose(){
-    var lines = ["Ревью Frood, раунд 19: итог MVP"];
-    var o = state.impl10_overall || {};
-    lines.push("Общее по раунду 19: " + (o.verdict ? LABEL[o.verdict] : "без вердикта") + (o.comment ? ". " + o.comment.trim() : ""));
+    var lines = ["Ревью Frood, раунд 20: что дальше"];
+    var o = state.impl11_overall || {};
+    lines.push("Общее по раунду 20: " + (o.verdict ? LABEL[o.verdict] : "без вердикта") + (o.comment ? ". " + o.comment.trim() : ""));
     items.forEach(function(el){
       var k = el.dataset.kind, s = state[el.dataset.id] || {}, c = (s.comment || "").trim();
       if (k === "decision") lines.push(el.dataset.label + ": " + (s.verdict ? LABEL[s.verdict] : "без отметки") + (c ? ". " + c : ""));
