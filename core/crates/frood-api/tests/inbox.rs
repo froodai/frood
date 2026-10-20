@@ -29,6 +29,7 @@ async fn fake_telegram(channel: Shared) -> String {
             "/manifest",
             get(|| async { Json(json!({ "name": "telegram", "version": "0.0.1", "provides": ["notify.send@1", "notify.update@1"], "frood_api": [] })) }),
         )
+        .route("/healthz", get(|| async { Json(json!({ "status": "ok" })) }))
         .route(
             "/v1/capabilities/notify.send@1",
             post(|State(c): State<Shared>, headers: HeaderMap, Json(body): Json<Value>| async move {
@@ -794,4 +795,130 @@ async fn digests_and_investigations() {
     );
     let (_, again) = call(&app, get_json("/v1/digest", &pat)).await;
     assert_eq!(again["accepted"], json!([]), "since the last digest");
+}
+
+#[tokio::test]
+async fn detectors_raise_and_clear_alerts() {
+    let Some(url) = frood_store::testing::database_url() else {
+        eprintln!("FROOD_TEST_DATABASE_URL is not set; skipping");
+        return;
+    };
+    let pool = frood_store::testing::fresh_database(&url, "inbox_detectors")
+        .await
+        .expect("test database");
+    let channel = Shared::default();
+    let fake = fake_telegram(channel.clone()).await;
+    // A speech module that never answers, next to the working Telegram one.
+    let config = config_with_jobs(&fake, "", "  stt: { url: 'http://127.0.0.1:1' }\n");
+    let Setup { dispatch, .. } = setup(&config, pool.clone()).await;
+    let now = chrono::Utc::now();
+    let alerts = |dispatch: frood_dispatch::Dispatch| async move {
+        let mut keys: Vec<String> = dispatch
+            .inbox(false, 50)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|i| i.kind == "alert")
+            .map(|i| i.data["key"].as_str().unwrap().to_owned())
+            .collect();
+        keys.sort();
+        keys
+    };
+
+    // The module went quiet: an alert only after five minutes.
+    dispatch.detect_once(now).await.unwrap();
+    assert!(alerts(dispatch.clone()).await.is_empty());
+    // Three failed transcriptions in a row and a run stuck in the queue.
+    for i in 0..3 {
+        frood_store::sqlx::query(
+            "INSERT INTO runs (id, job, idempotency_key, input, status, error, finished_at) \
+             VALUES ($1, 'transcribe', $2, '{}', 'failed', 'ffmpeg missing', now() - make_interval(mins => $3))",
+        )
+        .bind(uuid::Uuid::now_v7())
+        .bind(format!("t{i}"))
+        .bind(i)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    frood_store::sqlx::query(
+        "INSERT INTO runs (id, job, idempotency_key, input, status, created_at) \
+         VALUES ($1, 'transcribe', 'stuck', '{}', 'queued', now() - interval '2 hours')",
+    )
+    .bind(uuid::Uuid::now_v7())
+    .execute(&pool)
+    .await
+    .unwrap();
+    let later = now + chrono::Duration::minutes(6);
+    dispatch.detect_once(later).await.unwrap();
+    let keys = alerts(dispatch.clone()).await;
+    assert_eq!(keys.len(), 3, "{keys:?}");
+    assert!(keys.contains(&"module/stt".to_owned()));
+    assert!(keys.contains(&"failing/transcribe".to_owned()));
+    assert!(keys.iter().any(|k| k.starts_with("queued/")));
+    // Everyone with a linked channel would get them; nobody is linked here, so nothing is sent.
+    assert_eq!(dispatch.deliver_once().await.unwrap(), 0);
+
+    // A person hides the module alert: it stays hidden while the module is down.
+    let module_alert = dispatch
+        .inbox(false, 50)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|i| i.data["key"] == "module/stt")
+        .unwrap();
+    let someone = uuid::Uuid::now_v7();
+    frood_store::sqlx::query("INSERT INTO users (id, email) VALUES ($1, 'ops@example.com')")
+        .bind(someone)
+        .execute(&pool)
+        .await
+        .unwrap();
+    dispatch
+        .inbox_act(
+            module_alert.id,
+            someone,
+            &format!("user:{someone}"),
+            &frood_dispatch::Act {
+                action: "dismiss".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    dispatch
+        .detect_once(later + chrono::Duration::minutes(5))
+        .await
+        .unwrap();
+    assert!(
+        !alerts(dispatch.clone())
+            .await
+            .contains(&"module/stt".to_owned())
+    );
+
+    // Transcription works again and the queue moves: those alerts close themselves.
+    frood_store::sqlx::query(
+        "INSERT INTO runs (id, job, idempotency_key, input, status, finished_at) \
+         VALUES ($1, 'transcribe', 'ok', '{}', 'succeeded', now())",
+    )
+    .bind(uuid::Uuid::now_v7())
+    .execute(&pool)
+    .await
+    .unwrap();
+    frood_store::sqlx::query(
+        "UPDATE runs SET status = 'cancelled' WHERE idempotency_key = 'stuck'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    dispatch
+        .detect_once(later + chrono::Duration::minutes(10))
+        .await
+        .unwrap();
+    assert!(alerts(dispatch.clone()).await.is_empty());
+    let resolved = dispatch.inbox(true, 50).await.unwrap();
+    let failing = resolved
+        .iter()
+        .find(|i| i.data["key"] == "failing/transcribe")
+        .unwrap();
+    assert_eq!(failing.resolution.as_ref().unwrap()["action"], "recovered");
 }

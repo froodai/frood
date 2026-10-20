@@ -568,6 +568,36 @@ pub struct Attention {
     /// it. No list, no reminders.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reminders: Vec<Reminder>,
+    /// When something counts as stalled (C3); each has a built-in value.
+    #[serde(default)]
+    pub detectors: Detectors,
+}
+
+/// Thresholds of the "something stalled" detectors (C3). Durations like 10m, 48h.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Detectors {
+    /// Journal events wait for the dispatcher longer than this. Default 10m.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dispatcher_lag: Option<String>,
+    /// A run waits in the queue longer than this. Default 30m.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queued: Option<String>,
+    /// An agent run works this much longer than its time budget (or an hour without one). Default 10m.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overrun: Option<String>,
+    /// A job failed this many times in a row. Default 3.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failures_in_a_row: Option<u32>,
+    /// A source was not read successfully for this long. Default 48h.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_stale: Option<String>,
+    /// Share of an account's monthly budget spent. Default 0.8.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget_share: Option<f64>,
+    /// A module does not answer for this long. Default 5m.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module_down: Option<String>,
 }
 
 /// One reminder of a due date.
