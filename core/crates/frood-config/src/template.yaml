@@ -32,3 +32,18 @@ auth:
   #    client_secret: ${secret:GOOGLE_CLIENT_SECRET}
   #  - kind: dev             # development only: type an email; local servers only
   #    id: dev
+
+# Backups into two independent storages, with a restore check (docs/16 §7, modules/README.md).
+# `frood backup key --out recovery-key.txt` makes the recovery key: keep that file off the server.
+# modules:
+#   backup: { image: ghcr.io/froodai/backup-restic:0.0.1, volumes: ["/Volumes/Backup/frood:/repos/disk"] }
+# backup:
+#   recovery_key: age1…
+#   targets:
+#     disk: { repository: /repos/disk, password: '${secret:BACKUP_DISK_PASSWORD}' }
+#     b2: { repository: 's3:https://s3.eu-central-003.backblazeb2.com/my-bucket', password: '${secret:BACKUP_B2_PASSWORD}',
+#           env: { AWS_ACCESS_KEY_ID: '${secret:B2_KEY_ID}', AWS_SECRET_ACCESS_KEY: '${secret:B2_KEY}' } }
+#   keep: { daily: 30, monthly: 12 }
+# jobs:
+#   backup: { on: [{ schedule: '0 */6 * * *', timezone: Europe/Amsterdam }] }
+#   backup-verify: { on: [{ schedule: '30 4 * * 0', timezone: Europe/Amsterdam }] }

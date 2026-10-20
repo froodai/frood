@@ -66,7 +66,7 @@ pub fn render(
         let source = match (&deploy.build, &deploy.image) {
             (Some(build), _) => {
                 let path = loaded.base_dir.join(build);
-                let path = path.canonicalize().unwrap_or(path);
+                let path = host_path(&path);
                 format!("    build: {}\n", quote(&path.display().to_string()))
             }
             (None, Some(image)) => format!("    image: {}\n", quote(image)),
@@ -84,6 +84,7 @@ pub fn render(
              \x20     - {secrets}\n\
              \x20   volumes:\n\
              \x20     - {config_mount}\n\
+             \x20     - {secrets_mount}\n\
              \x20   ports:\n\
              \x20     - \"127.0.0.1:{port}:{port}\"\n\
              \x20   depends_on:\n\
@@ -98,6 +99,11 @@ pub fn render(
                 "{}:/etc/frood/frood.yaml:ro",
                 config_path.display()
             )),
+            // Where `serve` looks for it next to the config: backups take a copy (C4).
+            secrets_mount = quote(&format!(
+                "{}:/etc/frood/.frood/secrets.env:ro",
+                secrets_path.display()
+            )),
         ));
     }
 
@@ -106,7 +112,7 @@ pub fn render(
         let source = match (&module.build, &module.image) {
             (Some(build), _) => {
                 let path = loaded.base_dir.join(build);
-                let path = path.canonicalize().unwrap_or(path);
+                let path = host_path(&path);
                 format!("    build: {}\n", quote(&path.display().to_string()))
             }
             (None, Some(image)) => format!("    image: {}\n", quote(image)),
@@ -122,16 +128,32 @@ pub fn render(
             service = frood_modhost::service_name(name),
             env = quote(&env.display().to_string()),
         ));
+        let mut mounts = Vec::new();
         if module.host_docker {
             // The host's Docker (root on the host, A2), a volume for the module's state, and
             // the deployment's network for the containers it starts.
             let data = format!("{}-data", frood_modhost::service_name(name));
             out.push_str(&format!(
-                "    environment:\n      FROOD_DOCKER_NETWORK: {network}\n      FROOD_DATA: /data\n\
-                 \x20   volumes:\n      - /var/run/docker.sock:/var/run/docker.sock\n      - {data}:/data\n",
+                "    environment:\n      FROOD_DOCKER_NETWORK: {network}\n      FROOD_DATA: /data\n",
                 network = quote(&format!("{}_default", project_name(loaded))),
             ));
+            mounts.push("/var/run/docker.sock:/var/run/docker.sock".to_owned());
+            mounts.push(format!("{data}:/data"));
             volumes.push(data);
+        }
+        // Host folders the config gives the module, e.g. a backup disk.
+        for volume in &module.volumes {
+            if let Some((host, inside)) = volume.split_once(':') {
+                let path = loaded.base_dir.join(host);
+                let path = host_path(&path);
+                mounts.push(format!("{}:{inside}", path.display()));
+            }
+        }
+        if !mounts.is_empty() {
+            out.push_str("    volumes:\n");
+            for mount in mounts {
+                out.push_str(&format!("      - {}\n", quote(&mount)));
+            }
         }
         if deploy.server == ServerPlacement::Host {
             out.push_str(&format!(
@@ -147,6 +169,13 @@ pub fn render(
         out.push_str(&format!("  {volume}:\n"));
     }
     out
+}
+
+/// A host path as Compose needs it: absolute, or Compose takes it for a volume name.
+fn host_path(path: &Path) -> std::path::PathBuf {
+    path.canonicalize()
+        .or_else(|_| std::path::absolute(path))
+        .unwrap_or_else(|_| path.to_owned())
 }
 
 /// YAML double-quoted scalar; JSON string syntax is valid YAML.
@@ -202,6 +231,7 @@ mod tests {
                 secrets: vec!["OPENAI_API_KEY".into()],
                 config: Default::default(),
                 host_docker: false,
+                volumes: vec!["/Volumes/Backup/frood:/repos/disk".into()],
             },
         );
         loaded.config.modules.insert(
@@ -214,6 +244,7 @@ mod tests {
                 secrets: Vec::new(),
                 config: Default::default(),
                 host_docker: true,
+                volumes: Vec::new(),
             },
         );
         let out = render(
@@ -241,6 +272,7 @@ mod tests {
             .next()
             .unwrap();
         assert!(agents.contains("/var/run/docker.sock:/var/run/docker.sock"));
+        assert!(stt.contains("\"/Volumes/Backup/frood:/repos/disk\""));
         assert!(agents.contains("FROOD_DOCKER_NETWORK: \"frood-personal_default\""));
         assert!(out.ends_with("volumes:\n  pgdata:\n  module-agents-data:\n"));
         let parsed: serde_yaml_ng::Value = serde_yaml_ng::from_str(&out).unwrap();
@@ -259,6 +291,7 @@ mod tests {
         assert!(out.contains("\"127.0.0.1:8080:8080\""));
         assert!(out.contains("FROOD_DB_HOST: postgres"));
         assert!(out.contains("\"/x/frood.yaml:/etc/frood/frood.yaml:ro\""));
+        assert!(out.contains("\"/x/.frood/secrets.env:/etc/frood/.frood/secrets.env:ro\""));
         assert!(out.contains("condition: service_healthy"));
     }
 

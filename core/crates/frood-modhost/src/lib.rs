@@ -36,6 +36,25 @@ pub fn service_name(module: &str) -> String {
     format!("module-{module}")
 }
 
+/// The database as container modules reach it: the deployment's `postgres` service. A server
+/// on the host uses the port published on 127.0.0.1, which modules cannot reach.
+pub fn database_url(config: &Config) -> String {
+    let url = &config.storage.url;
+    let Ok(mut parsed) = url::Url::parse(url) else {
+        return url.clone();
+    };
+    let local = matches!(parsed.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"));
+    if config.deploy.target == "compose"
+        && local
+        && parsed.port() == Some(config.deploy.postgres_port)
+        && parsed.set_host(Some("postgres")).is_ok()
+        && parsed.set_port(Some(5432)).is_ok()
+    {
+        return parsed.to_string();
+    }
+    url.clone()
+}
+
 /// Host port of a module when the server runs on the host: its `port`, or the next free
 /// one from 18100 in name order (modules with a `url` take none).
 pub fn host_port(config: &Config, module: &str) -> u16 {
@@ -307,6 +326,17 @@ impl Modules {
         capability: &str,
         input: &Value,
     ) -> Result<Value, ModuleError> {
+        self.call_within(module, capability, input, None).await
+    }
+
+    /// A call that may take longer than the usual five minutes, e.g. a backup.
+    pub async fn call_within(
+        &self,
+        module: &str,
+        capability: &str,
+        input: &Value,
+        timeout: Option<Duration>,
+    ) -> Result<Value, ModuleError> {
         let endpoint = self.endpoint(module)?;
         let manifest = match self.manifest(module) {
             Some(manifest) => manifest,
@@ -325,6 +355,9 @@ impl Modules {
             .json(input);
         if let Some(token) = &endpoint.token {
             request = request.bearer_auth(token);
+        }
+        if let Some(timeout) = timeout {
+            request = request.timeout(timeout);
         }
         let response = request.send().await.map_err(|e| ModuleError::Unavailable {
             module: module.to_owned(),
@@ -391,6 +424,24 @@ mod tests {
         let container = config(modules, "container");
         assert_eq!(module_url(&container, "stt"), "http://module-stt:8080");
         assert_eq!(token_secret("my-stt"), "FROOD_MODULE_TOKEN_MY_STT");
+    }
+
+    #[test]
+    fn modules_reach_the_database_inside_the_deployment() {
+        let mut host = config("  stt: { build: ../stt }\n", "host");
+        host.storage.url = "postgres://frood:pw@127.0.0.1:5432/frood".into();
+        assert_eq!(
+            database_url(&host),
+            "postgres://frood:pw@postgres:5432/frood"
+        );
+        host.storage.url = "postgres://frood:pw@db.example.com:5432/frood".into();
+        assert_eq!(
+            database_url(&host),
+            host.storage.url,
+            "a database elsewhere"
+        );
+        host.storage.url = "postgres://frood:pw@postgres:5432/frood".into();
+        assert_eq!(database_url(&host), host.storage.url);
     }
 
     #[tokio::test]

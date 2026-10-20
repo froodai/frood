@@ -36,6 +36,9 @@ pub struct Config {
     /// Who is told what, when and where (docs/15).
     #[serde(default)]
     pub attention: Attention,
+    /// Backups (docs/16 §7). When they run is `jobs.backup` and `jobs.backup-verify`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backup: Option<Backup>,
 
     // Sections implemented by later milestones. They are accepted so a config can be written
     // ahead of time, but ignored with a warning until the milestone lands.
@@ -45,8 +48,75 @@ pub struct Config {
     pub imports: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub channels: Option<serde_json::Value>,
+}
+
+/// Backups (C4): a dump of the database (knowledge, journal, files, config revisions, Inbox),
+/// `frood.yaml`, and the secrets file encrypted to the recovery key, into every target.
+/// Nothing here has a default: what to keep and where is the installation's to say.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Backup {
+    /// The module that gives `backup.target@1`; needed only when several modules give it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub backup: Option<serde_json::Value>,
+    pub module: Option<String>,
+    /// The public half of your recovery key (`age1…`, from `frood backup key`). The secrets in a
+    /// backup are encrypted to it; the secret half stays with you, off the server.
+    pub recovery_key: String,
+    /// Where backups go, by name. Two independent ones protect against losing a provider.
+    pub targets: BTreeMap<String, BackupTarget>,
+    /// Which backups to keep in each target.
+    pub keep: BackupKeep,
+}
+
+/// A restic repository.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BackupTarget {
+    /// As restic names it: a folder inside the module (`/repos/disk`, from the module's
+    /// `volumes`), `s3:https://host/bucket/path`, `b2:bucket:path`, `sftp:user@host:path`,
+    /// `rest:https://…`.
+    pub repository: String,
+    /// The password restic encrypts the repository with, e.g. `${secret:BACKUP_DISK_PASSWORD}`.
+    pub password: String,
+    /// Environment restic needs for this repository, e.g. `AWS_ACCESS_KEY_ID` and
+    /// `AWS_SECRET_ACCESS_KEY` for S3, `B2_ACCOUNT_ID` and `B2_ACCOUNT_KEY` for B2.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env: BTreeMap<String, String>,
+}
+
+/// restic's `forget` rules: the last N backups, and the last backup of each of N hours, days, …
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BackupKeep {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hourly: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub daily: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub weekly: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub monthly: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub yearly: Option<u32>,
+}
+
+impl BackupKeep {
+    /// The rules that are set, as restic's flag names without `--keep-`.
+    pub fn rules(&self) -> Vec<(&'static str, u32)> {
+        [
+            ("last", self.last),
+            ("hourly", self.hourly),
+            ("daily", self.daily),
+            ("weekly", self.weekly),
+            ("monthly", self.monthly),
+            ("yearly", self.yearly),
+        ]
+        .into_iter()
+        .filter_map(|(name, n)| n.map(|n| (name, n)))
+        .collect()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -362,6 +432,10 @@ pub struct Module {
     /// (A2): only for modules you trust.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub host_docker: bool,
+    /// Host folders the module sees, as `host-path:module-path`, e.g. a backup disk:
+    /// `/Volumes/Backup/frood:/repos/disk`. A relative host path is relative to the config.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub volumes: Vec<String>,
 }
 
 /// A job: what capability to call, on which events, with which inputs (docs/13 §3–4).
@@ -598,6 +672,9 @@ pub struct Detectors {
     /// A module does not answer for this long. Default 5m.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub module_down: Option<String>,
+    /// No successful backup for this many intervals of `jobs.backup`'s schedule. Default 2.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backups_missed: Option<u32>,
 }
 
 /// One reminder of a due date.
@@ -683,7 +760,6 @@ pub(crate) const RESERVED_SECTIONS: &[(&str, &str)] = &[
     ),
     ("imports", "a later milestone"),
     ("channels", "M5"),
-    ("backup", "M6"),
 ];
 
 impl Config {
@@ -692,7 +768,6 @@ impl Config {
             ("runtimes", self.runtimes.is_some()),
             ("imports", self.imports.is_some()),
             ("channels", self.channels.is_some()),
-            ("backup", self.backup.is_some()),
         ];
         present
             .into_iter()

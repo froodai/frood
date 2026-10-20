@@ -33,6 +33,7 @@ impl Dispatch {
         problems.extend(self.stale_sources(now).await?);
         problems.extend(self.budgets_running_out().await?);
         problems.extend(self.modules_down(now).await);
+        problems.extend(self.backups(now).await?);
         let pool = &self.ctx.pool;
         let urgency = inbox::urgency(&self.ctx.attention, "alert", None);
         for problem in &problems {
@@ -258,6 +259,71 @@ impl Dispatch {
                     }),
                 });
             }
+        }
+        Ok(out)
+    }
+
+    /// No successful backup for several intervals of its schedule, or the latest restore check
+    /// failed (C3).
+    async fn backups(&self, now: DateTime<Utc>) -> sqlx::Result<Vec<Problem>> {
+        if self.ctx.backup.is_none() {
+            return Ok(Vec::new());
+        }
+        let pool = &self.ctx.pool;
+        let mut out = Vec::new();
+        let missed = i32::try_from(
+            self.ctx
+                .attention
+                .detectors
+                .backups_missed
+                .unwrap_or(2)
+                .max(1),
+        )
+        .unwrap_or(2);
+        if let Some(interval) = crate::schedules::interval(&self.jobs, "backup", now) {
+            let (last_ok, first): (Option<DateTime<Utc>>, Option<DateTime<Utc>>) = sqlx::query_as(
+                "SELECT max(finished_at) FILTER (WHERE status = 'succeeded'), min(created_at) \
+                 FROM runs WHERE job = 'backup'",
+            )
+            .fetch_one(pool)
+            .await?;
+            // Never succeeded: measured from the first attempt.
+            if let Some(since) = last_ok.or(first)
+                && now - since > interval * missed
+            {
+                out.push(Problem {
+                    key: "backup/missed".into(),
+                    data: json!({
+                        "detector": "backups_missed",
+                        "message": match last_ok {
+                            Some(at) => format!("No backup has succeeded since {}", at.to_rfc3339()),
+                            None => "No backup has succeeded yet".to_owned(),
+                        },
+                        "since": since,
+                    }),
+                });
+            }
+        }
+        let latest: Option<(String, Option<String>, Option<DateTime<Utc>>)> = sqlx::query_as(
+            "SELECT status, error, finished_at FROM runs WHERE job = 'backup-verify' \
+             AND status IN ('succeeded', 'failed') ORDER BY finished_at DESC NULLS LAST LIMIT 1",
+        )
+        .fetch_optional(pool)
+        .await?;
+        if let Some((status, error, at)) = latest
+            && status == "failed"
+        {
+            out.push(Problem {
+                key: "backup/verify".into(),
+                data: json!({
+                    "detector": "backup_verify",
+                    "error": error,
+                    "message": format!(
+                        "Restoring from a backup did not work{}",
+                        at.map(|at| format!(" ({})", at.to_rfc3339())).unwrap_or_default()
+                    ),
+                }),
+            });
         }
         Ok(out)
     }

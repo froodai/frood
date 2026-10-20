@@ -1,5 +1,6 @@
 //! Jobs: the built-in standard set and how `frood.yaml` changes it (docs/13 §3, §10).
 
+pub(crate) mod backup;
 pub(crate) mod embed;
 pub(crate) mod extract;
 pub(crate) mod transcribe;
@@ -23,6 +24,10 @@ pub enum Task {
     Agent,
     /// "What is new since last time" for each person, without a model (B3).
     Digest,
+    /// The installation into its backup targets (`backup.target`, C4).
+    Backup,
+    /// Each target's latest backup restored into a temporary database and compared.
+    BackupVerify,
 }
 
 /// What an agent job needs to run (docs/13 §3); all of it named in the config (A3).
@@ -165,6 +170,22 @@ fn standard() -> Vec<JobSpec> {
             name: "digest".into(),
             uses: "inbox.digest".into(),
             task: Task::Digest,
+            triggers: vec![],
+            with: Map::new(),
+            agent: None,
+        },
+        JobSpec {
+            name: "backup".into(),
+            uses: "backup.target".into(),
+            task: Task::Backup,
+            triggers: vec![],
+            with: Map::new(),
+            agent: None,
+        },
+        JobSpec {
+            name: "backup-verify".into(),
+            uses: "backup.target".into(),
+            task: Task::BackupVerify,
             triggers: vec![],
             with: Map::new(),
             agent: None,
@@ -330,6 +351,8 @@ pub fn resolve(config: &Config, caps: &Capabilities<'_>) -> (Vec<JobSpec>, Vec<S
             }
             // The digest runs when the config names when (a schedule) or by hand.
             Task::Digest if !config.jobs.contains_key(&job.name) => continue,
+            // Backups exist once the config says where they go; without a schedule, by hand.
+            Task::Backup | Task::BackupVerify if config.backup.is_none() => continue,
             Task::Embed if !caps.embeddings => continue,
             Task::Transcribe if caps.modules == 0 => {
                 warnings.push(
@@ -345,7 +368,14 @@ pub fn resolve(config: &Config, caps: &Capabilities<'_>) -> (Vec<JobSpec>, Vec<S
     for (name, job) in &config.jobs {
         if matches!(
             name.as_str(),
-            "transcribe" | "extract" | "embed" | "daily-sweep" | "investigate" | "digest"
+            "transcribe"
+                | "extract"
+                | "embed"
+                | "daily-sweep"
+                | "investigate"
+                | "digest"
+                | "backup"
+                | "backup-verify"
         ) || job.enabled == Some(false)
         {
             continue;

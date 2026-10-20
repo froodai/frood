@@ -43,6 +43,10 @@ pub async fn run(paths: &Paths) -> anyhow::Result<()> {
         warnings,
     } = frood_api::assemble(config, &loaded.base_dir, pool, |name| secrets.get(name));
     state.config_sha256 = Some(loaded.sha256.clone());
+    state.dispatch = state
+        .dispatch
+        .clone()
+        .with_backup_files(loaded.raw.clone(), paths.secrets());
     for warning in &warnings {
         tracing::warn!("{warning}");
     }
