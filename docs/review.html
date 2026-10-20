@@ -320,7 +320,7 @@ details.area[open] summary .tw{transform:rotate(90deg)}
         <div class="prose">
           <p>Раунд 18. Раунд 17 принят: E3′, сервер — Hetzner, образы открытые, траты до $0.50 разрешены.</p>
           <p><b>Выпуск 0.1.0 готов:</b> по тегу версии CI соберёт образы ядра, модулей и агентов под x86 и ARM и опубликует их в реестр GitHub; на сервере <code>install.sh</code> ставит <code>frood</code> из образа выпуска. Сборка Rust идёт кросс-компиляцией без эмуляции — проверил локально обе платформы. Когда публиковать — напишу в чате.</p>
-          <p><b>Для прогона нужны четыре вещи от вас</b> — ниже по шагам: сервер в Hetzner, второй Telegram-бот, вход через Google и открытые образы после первой публикации. Остальное — установку, настройку, сам прогон и протокол — сделаю я.</p>
+          <p><b>Для прогона нужны три вещи от вас</b> — ниже по шагам: сервер в Hetzner, вход через Google и открытые образы после первой публикации. Остальное — установку, настройку, сам прогон и протокол — сделаю я.</p>
           <p>Отметки сохраняются в странице. Напишите в чат «готово», и я их прочитаю.</p>
         </div>
         <div class="locked"><span class="caption">Принято:</span><span class="chip">Фазы 1–6</span><span class="chip">M0–M6</span><span class="chip">R1′, R2</span><span class="chip">D1–D4</span><span class="chip">A1–A7, A4′</span><span class="chip">B1–B3, B4′</span><span class="chip">C1–C5</span><span class="chip">E1, E2, E3′</span></div>
@@ -340,8 +340,7 @@ details.area[open] summary .tw{transform:rotate(90deg)}
             <li>Firewalls → Create firewall: входящие TCP <b>22, 80, 443</b>. Name — <code>frood-1</code>. Create &amp; Buy now.</li>
             <li>IPv4-адрес сервера — в поле QS1 ниже.</li>
           </ol>
-          <p><b>2. Второй Telegram-бот</b> для сервера: бот может слушать только одна установка, а ваша локальная продолжит работать со своим. В Telegram у <a href="https://t.me/BotFather" target="_blank" rel="noopener">@BotFather</a> → <code>/newbot</code> → имя и логин. Токен — командой в терминале Mac (при вводе не виден):</p>
-          <pre style="white-space:pre-wrap;word-break:break-all">read -rs "T?bot token: "; echo; printf 'TELEGRAM_BOT_TOKEN=%s\n' "$T" &gt;&gt; ~/frood-server.env; chmod 600 ~/frood-server.env; unset T</pre>
+          <p><b>2. Telegram</b> — тот же бот, что у локальной установки: на время прогона его слушает сервер, локальный Telegram-модуль я остановлю; токен перенесу сам.</p>
           <p><b>3. Вход через Google</b> — после того как будет IP. Адрес сервера — IP с дефисами вместо точек: для <code>203.0.113.7</code> это <code>https://203-0-113-7.sslip.io</code>.</p>
           <ol>
             <li><a href="https://console.cloud.google.com/" target="_blank" rel="noopener">console.cloud.google.com</a> → новый проект <code>frood</code>.</li>
