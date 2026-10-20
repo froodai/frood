@@ -301,7 +301,7 @@ details.area[open] summary .tw{transform:rotate(90deg)}
     </header>
 
     <div class="tabs" role="tablist" aria-label="Этапы ревью">
-      <button class="tab" role="tab" id="t-now" data-tab="now" aria-controls="now" aria-selected="true">Сейчас на ревью <span class="n">4</span></button>
+      <button class="tab" role="tab" id="t-now" data-tab="now" aria-controls="now" aria-selected="true">Сейчас на ревью <span class="n">3</span></button>
       <button class="tab" role="tab" id="t-mvp" data-tab="mvp" aria-controls="mvp" aria-selected="false">План MVP</button>
       <button class="tab" role="tab" id="t-platform" data-tab="platform" aria-controls="platform" aria-selected="false">Платформа</button>
       <button class="tab" role="tab" id="t-notify" data-tab="notify" aria-controls="notify" aria-selected="false">Inbox и уведомления</button>
@@ -318,42 +318,57 @@ details.area[open] summary .tw{transform:rotate(90deg)}
       <section id="now-intro">
         <div class="sh"><h2>Что нужно от вас</h2></div>
         <div class="prose">
-          <p>Раунд 17. Из раунда 16 приняты E1 и E2 — <b>уже сделаны</b>: шаги 1–5 сценария — один автотест через настоящее ядро (голосовое → ответ в другом клиенте со ссылкой на источник → ночной конфликт → Telegram с кнопками → перезапуск → решение кнопкой), шаг 6 — прогон в Docker в CI (бэкап, удаление, восстановление, тот же экспорт). Если в конфиге есть публичный адрес, впереди встаёт Caddy с сертификатом. По ходу ответ поиска в MCP научился ссылаться на источник — раньше клиент видел только id. E3 вы отклонили: проверять хочется сразу то, что получит пользователь, — ниже E3′.</p>
-          <p><b>Backblaze B2 подключён:</b> бакет <code>frood-backups</code>, папка <code>frood-local</code>. Бэкап ушёл в оба хранилища, проверка восстановления сошлась в обоих по 33 таблицам. Бэкап вашей установки готов: каждые 6 часов в папку на Mac и в B2. Не забудьте перенести <code>~/frood-local/recovery-kit.txt</code> в менеджер паролей.</p>
-          <p><b>Адрес без домена</b> (QV2): берём бесплатный адрес по IP сервера вида <code>1-2-3-4.sslip.io</code> — на него выдаётся сертификат, ничего покупать не нужно. Свой домен можно подключить позже одной строкой в конфиге.</p>
+          <p>Раунд 18. Раунд 17 принят: E3′, сервер — Hetzner, образы открытые, траты до $0.50 разрешены.</p>
+          <p><b>Выпуск 0.1.0 готов:</b> по тегу версии CI соберёт образы ядра, модулей и агентов под x86 и ARM и опубликует их в реестр GitHub; на сервере <code>install.sh</code> ставит <code>frood</code> из образа выпуска. Сборка Rust идёт кросс-компиляцией без эмуляции — проверил локально обе платформы. Когда публиковать — напишу в чате.</p>
+          <p><b>Для прогона нужны четыре вещи от вас</b> — ниже по шагам: сервер в Hetzner, второй Telegram-бот, вход через Google и открытые образы после первой публикации. Остальное — установку, настройку, сам прогон и протокол — сделаю я.</p>
           <p>Отметки сохраняются в странице. Напишите в чат «готово», и я их прочитаю.</p>
         </div>
-        <div class="locked"><span class="caption">Принято:</span><span class="chip">Фазы 1–6</span><span class="chip">M0–M6</span><span class="chip">R1′, R2</span><span class="chip">D1–D4</span><span class="chip">A1–A7, A4′</span><span class="chip">B1–B3, B4′</span><span class="chip">C1–C5</span><span class="chip">E1, E2</span></div>
+        <div class="locked"><span class="caption">Принято:</span><span class="chip">Фазы 1–6</span><span class="chip">M0–M6</span><span class="chip">R1′, R2</span><span class="chip">D1–D4</span><span class="chip">A1–A7, A4′</span><span class="chip">B1–B3, B4′</span><span class="chip">C1–C5</span><span class="chip">E1, E2, E3′</span></div>
       </section>
 
-      <section id="now-answers">
-        <div class="sh"><h2>Ответы на ваши вопросы</h2></div>
+      <section id="now-steps">
+        <div class="sh"><span class="tag need">нужно ваше действие</span><h2>Шаги</h2></div>
         <div class="prose">
-          <p><b>Почему Hetzner</b> (QV1). Для прогона нужен сервер с 2 ядрами и 4 ГБ памяти: ядро, база, бот, бэкап и контейнер агента Claude Code (агенту нужно около 2 ГБ). Hetzner — самый дешёвый такой сервер в Европе с хорошей репутацией: CAX11 (ARM, 2 ядра, 4 ГБ, 40 ГБ диска) сейчас около €6,5 в месяц после повышения цен в 2026 году. Оплата почасовая: неделя прогона обойдётся в €1–2, потом сервер можно удалить. Но ARM-серверы у них иногда временно недоступны для заказа — тогда подойдёт CX23 (обычный x86, те же 2 ядра и 4 ГБ, похожая цена).</p>
-          <p><b>Google Cloud</b> (QV3). Google Cloud Console я предлагал не как сервер, а только чтобы создать «Войти через Google»: OAuth-клиент там бесплатный и с серверами не связан. Как сервер Google Cloud тоже можно взять, если у вас там есть кредиты: бесплатная навсегда машина e2-micro — всего 1 ГБ памяти, агенту не хватит. Подходит e2-medium (2 ядра, 4 ГБ) — около $25 в месяц, или бесплатно из пробных кредитов, если они есть.</p>
+          <p><b>1. Сервер в Hetzner</b> (минут десять):</p>
+          <ol>
+            <li><a href="https://www.hetzner.com/cloud" target="_blank" rel="noopener">hetzner.com/cloud</a> → Sign up: почта, данные, карта или PayPal; иногда просят подтвердить личность.</li>
+            <li>В консоли — новый проект <code>frood</code> → <b>Add Server</b>.</li>
+            <li>Location — Falkenstein, Nuremberg или Helsinki. Image — <b>Debian 13</b>.</li>
+            <li>Type — Shared vCPU, <b>Arm64 CAX11</b> (2 ядра, 4 ГБ). Если недоступен — x86 <b>CX23</b>.</li>
+            <li>Networking — Public IPv4 оставьте включённым: облачные клиенты ходят по IPv4.</li>
+            <li>SSH keys → Add SSH key: в терминале Mac <code>pbcopy &lt; ~/.ssh/id_ed25519.pub</code> и вставьте. Этим же ключом я подключусь к серверу с вашего Mac.</li>
+            <li>Firewalls → Create firewall: входящие TCP <b>22, 80, 443</b>. Name — <code>frood-1</code>. Create &amp; Buy now.</li>
+            <li>IPv4-адрес сервера — в поле QS1 ниже.</li>
+          </ol>
+          <p><b>2. Второй Telegram-бот</b> для сервера: бот может слушать только одна установка, а ваша локальная продолжит работать со своим. В Telegram у <a href="https://t.me/BotFather" target="_blank" rel="noopener">@BotFather</a> → <code>/newbot</code> → имя и логин. Токен — командой в терминале Mac (при вводе не виден):</p>
+          <pre style="white-space:pre-wrap;word-break:break-all">read -rs "T?bot token: "; echo; printf 'TELEGRAM_BOT_TOKEN=%s\n' "$T" &gt;&gt; ~/frood-server.env; chmod 600 ~/frood-server.env; unset T</pre>
+          <p><b>3. Вход через Google</b> — после того как будет IP. Адрес сервера — IP с дефисами вместо точек: для <code>203.0.113.7</code> это <code>https://203-0-113-7.sslip.io</code>.</p>
+          <ol>
+            <li><a href="https://console.cloud.google.com/" target="_blank" rel="noopener">console.cloud.google.com</a> → новый проект <code>frood</code>.</li>
+            <li>Google Auth Platform → Branding: имя приложения Frood, ваша почта. Audience — External; в Test users добавьте свою почту.</li>
+            <li>Clients → Create client → Web application. Authorized redirect URI: <code>https://&lt;IP-с-дефисами&gt;.sslip.io/oauth/callback/google</code>.</li>
+            <li>Client ID и Client secret — командой:</li>
+          </ol>
+          <pre style="white-space:pre-wrap;word-break:break-all">read -r "I?client ID: "; read -rs "S?client secret: "; echo; printf 'GOOGLE_CLIENT_ID=%s\nGOOGLE_CLIENT_SECRET=%s\n' "$I" "$S" &gt;&gt; ~/frood-server.env; unset I S</pre>
+          <p><b>4. Открыть образы</b> — после первой публикации, я скажу когда. На <a href="https://github.com/orgs/froodai/packages" target="_blank" rel="noopener">github.com/orgs/froodai/packages</a> у каждого из семи пакетов: Package settings → Change visibility → Public. Если такого пункта нет — в настройках организации разрешите публичные пакеты (Settings → Packages).</p>
         </div>
       </section>
 
       <section id="now-decisions">
-        <div class="sh"><span class="tag need">нужно ваше решение</span><h2>Решения</h2></div>
+        <div class="sh"><span class="tag need">нужен ваш ответ</span><h2>Вопросы</h2></div>
         <div class="rv-list">
-          <div class="rv" data-id="impl08_E3" data-kind="decision" data-label="E3′ Проверяем выпуск, как у пользователя">
-            <div class="txt"><span class="id">E3′</span><h3>Проверяем то, что получит пользователь: на версию с тегом CI собирает образы ядра и модулей под x86 и ARM и публикует их в реестр GitHub; на сервере — установка как у пользователя: одна команда ставит <code>frood</code>, дальше <code>frood init</code> и <code>frood apply</code> тянут образы нужной версии</h3><p class="why">Так прогон проверяет и сборку, и публикацию, и установку с нуля — то, что делает человек, который ставит Frood впервые. Сама программа <code>frood</code> лежит в образе ядра, поэтому отдельный выпуск бинарников не нужен.</p></div><div class="ctl"></div>
+          <div class="rv q" data-id="impl09_Q1" data-kind="question" data-label="QS1 IPv4 сервера">
+            <div class="txt"><span class="id">QS1</span><h3>IPv4-адрес сервера (после шага 1)</h3><p class="affects">Адрес установки, сертификат, redirect URI для Google.</p></div><div class="ctl"></div>
+          </div>
+          <div class="rv q" data-id="impl09_Q2" data-kind="question" data-label="QS2 Источник ночного прохода на сервере">
+            <div class="txt"><span class="id">QS2</span><h3>Ночной проход агента на сервере — по тому же YouTrack, что и локально? Тогда я перенесу на сервер его адрес и токен из секретов локальной установки</h3><p class="affects">Шаг 3 сценария вживую: агент находит изменение в источнике.</p></div><div class="ctl"></div>
+          </div>
+          <div class="rv q" data-id="impl09_Q3" data-kind="question" data-label="QS3 Подписка Claude на сервере">
+            <div class="txt"><span class="id">QS3</span><h3>Агент на сервере работает вашей подпиской Claude — перенести токен подписки из секретов локальной установки? И ключи Anthropic и OpenAI для извлечения и распознавания (траты до $0.50 вы уже разрешили)</h3><p class="affects">Без подписки шаг 3 пойдёт с ключа API, без ключей шаги 1–2 — с поддельными сервисами.</p></div><div class="ctl"></div>
           </div>
         </div>
-        <div class="rv-list" style="margin-top:16px">
-          <div class="rv q" data-id="impl08_Q1" data-kind="question" data-label="QV1′ Где сервер">
-            <div class="txt"><span class="id">QV1′</span><h3>Где сервер: Hetzner (CAX11 или CX23, около €6,5 в месяц, почасово) или Google Cloud e2-medium (если есть кредиты)? Аккаунт и сервер заводите вы — Debian 13, SSH-ключ мой пришлю, когда решите</h3><p class="affects">Ручной прогон M7. Автотест в CI от этого не зависит — он уже в работе.</p></div><div class="ctl"></div>
-          </div>
-          <div class="rv q" data-id="impl08_Q2" data-kind="question" data-label="QV5 Образы открытые или по токену">
-            <div class="txt"><span class="id">QV5</span><h3>Репозиторий приватный. Образы в реестре: сделать их открытыми (код остаётся закрытым, скачать готовые образы может любой) или оставить приватными (серверу понадобится токен GitHub только на чтение пакетов)?</h3><p class="affects">Как сервер получает образы при установке.</p></div><div class="ctl"></div>
-          </div>
-          <div class="rv q" data-id="impl08_Q3" data-kind="question" data-label="QV4 Траты на прогон">
-            <div class="txt"><span class="id">QV4</span><h3>Траты на прогон: извлечение из голосового настоящей моделью (Haiku, ключ Anthropic — центы за сценарий) и распознавание (ключ OpenAI — доли цента); проход агента — подпиской. Можно потратить с ключей до $0.50?</h3><p class="affects">Без этого шаги 1 и 3 на сервере пройдут только с поддельными сервисами.</p></div><div class="ctl"></div>
-          </div>
-        </div>
-        <div class="overall" data-id="impl08_overall" data-kind="overall" data-label="Общий вердикт по раунду 17">
-          <h3>Общий вердикт по раунду 17</h3>
+        <div class="overall" data-id="impl09_overall" data-kind="overall" data-label="Общий вердикт по раунду 18">
+          <h3>Общий вердикт по раунду 18</h3>
           <div class="ctl"></div>
         </div>
       </section>
@@ -1716,7 +1731,8 @@ jobs:
             <tr><td class="k">14</td><td>A4′ вход подпиской; M5: B1–B4</td><td>A4′, B1–B3 приняты; B4 → B4′</td></tr>
             <tr><td class="k">15</td><td>B4′ напоминания; M6: C1–C5, QM6</td><td>всё принято; хранилища: диск и B2</td></tr>
             <tr><td class="k">16</td><td>B2 для бэкапа; M7: E1–E3, QV1–QV4</td><td>E1, E2 приняты; E3 → E3′; B2 подключён</td></tr>
-            <tr><td class="k">17</td><td>M7: E3′, QV1′, QV4, QV5</td><td><span class="st wait">идёт</span></td></tr>
+            <tr><td class="k">17</td><td>M7: E3′, QV1′, QV4, QV5</td><td>всё принято: Hetzner, открытые образы, траты до $0.50</td></tr>
+            <tr><td class="k">18</td><td>Сервер, бот, вход Google; QS1–QS3</td><td><span class="st wait">идёт</span></td></tr>
           </tbody>
         </table></div>
         <p class="caption">Все отметки хранятся в странице и продублированы в docs/README.md.</p>
@@ -1883,7 +1899,7 @@ jobs:
     overall: [["approve","Апрув"],["approve_changes","С правками"],["redo","Переделать"]]
   };
   var LABEL = {ok:"принять",discuss:"обсудить",no:"против",approve:"апрув",approve_changes:"апрув с правками",redo:"переделать"};
-  var LKEY = "frood-review-v17";
+  var LKEY = "frood-review-v18";
   var items = Array.prototype.slice.call(document.querySelectorAll("[data-id]"));
   var ids = {}; items.forEach(function(el){ ids[el.dataset.id] = true; });
   var state = {}, db = null, canWrite = true;
@@ -1951,13 +1967,13 @@ jobs:
     var a = 0, m = 0, q = 0;
     items.forEach(function(el){
       var id = el.dataset.id, s = state[id] || {};
-      if (el.dataset.kind === "decision" && s.verdict) { if (id.indexOf("impl08_") === 0) m++; else a++; }
+      if (el.dataset.kind === "decision" && s.verdict) { if (id.indexOf("impl09_") === 0) m++; else a++; }
       if (el.dataset.kind === "question" && (s.comment || "").trim()) q++;
     });
     var na = document.getElementById("n-arch"); if (na) na.textContent = a;
     document.getElementById("n-model").textContent = m;
     document.getElementById("n-q").textContent = q;
-    var o = state.impl08_overall || {};
+    var o = state.impl09_overall || {};
     document.getElementById("n-all").textContent = o.verdict ? LABEL[o.verdict] : "—";
   }
 
@@ -1984,9 +2000,9 @@ jobs:
   }
 
   function compose(){
-    var lines = ["Ревью Frood, раунд 17: M7"];
-    var o = state.impl08_overall || {};
-    lines.push("Общее по раунду 17: " + (o.verdict ? LABEL[o.verdict] : "без вердикта") + (o.comment ? ". " + o.comment.trim() : ""));
+    var lines = ["Ревью Frood, раунд 18: сервер для прогона"];
+    var o = state.impl09_overall || {};
+    lines.push("Общее по раунду 18: " + (o.verdict ? LABEL[o.verdict] : "без вердикта") + (o.comment ? ". " + o.comment.trim() : ""));
     items.forEach(function(el){
       var k = el.dataset.kind, s = state[el.dataset.id] || {}, c = (s.comment || "").trim();
       if (k === "decision") lines.push(el.dataset.label + ": " + (s.verdict ? LABEL[s.verdict] : "без отметки") + (c ? ". " + c : ""));
