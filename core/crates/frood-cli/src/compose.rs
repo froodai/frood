@@ -10,6 +10,9 @@ use frood_config::{Loaded, ServerPlacement};
 /// the same collations) as the official `postgres:18` image.
 pub const POSTGRES_IMAGE: &str = "pgvector/pgvector:pg18-trixie";
 
+/// The HTTPS front (E2): takes a certificate for `server.public_url` and proxies to the server.
+pub const CADDY_IMAGE: &str = "caddy:2.10";
+
 pub fn project_name(loaded: &Loaded) -> String {
     format!("frood-{}", loaded.config.installation.name)
 }
@@ -164,6 +167,53 @@ pub fn render(
         }
     }
 
+    if let Some(public) = loaded
+        .config
+        .server
+        .public_url
+        .as_deref()
+        .and_then(|u| url::Url::parse(u).ok())
+    {
+        // Only Caddy faces the internet: the server, the database and the modules stay inside
+        // (or on 127.0.0.1).
+        let host = public.host_str().unwrap_or("localhost").to_owned();
+        let https = public.port().unwrap_or(443);
+        let port = listen_port(loaded);
+        let (upstream, extra) = match deploy.server {
+            ServerPlacement::Container => (format!("frood:{port}"), String::new()),
+            ServerPlacement::Host => (
+                format!("host.docker.internal:{port}"),
+                "    extra_hosts:\n      - \"host.docker.internal:host-gateway\"\n".to_owned(),
+            ),
+        };
+        let from = if https == 443 {
+            host
+        } else {
+            format!("{host}:{https}")
+        };
+        out.push_str(&format!(
+            "  caddy:\n\
+             \x20   image: {image}\n\
+             \x20   restart: unless-stopped\n\
+             \x20   command: [\"caddy\", \"reverse-proxy\", \"--from\", {from}, \"--to\", {upstream}]\n\
+             \x20   ports:\n\
+             \x20     - \"80:80\"\n\
+             \x20     - \"{https}:{https}\"\n\
+             \x20   volumes:\n\
+             \x20     - caddy-data:/data\n\
+             \x20     - caddy-config:/config\n\
+             {extra}",
+            image = quote(CADDY_IMAGE),
+            from = quote(&from),
+            upstream = quote(&upstream),
+        ));
+        if deploy.server == ServerPlacement::Container {
+            out.push_str("    depends_on:\n      - frood\n");
+        }
+        volumes.push("caddy-data".to_owned());
+        volumes.push("caddy-config".to_owned());
+    }
+
     out.push_str("volumes:\n");
     for volume in volumes {
         out.push_str(&format!("  {volume}:\n"));
@@ -293,6 +343,68 @@ mod tests {
         assert!(out.contains("\"/x/frood.yaml:/etc/frood/frood.yaml:ro\""));
         assert!(out.contains("\"/x/.frood/secrets.env:/etc/frood/.frood/secrets.env:ro\""));
         assert!(out.contains("condition: service_healthy"));
+    }
+
+    #[test]
+    fn a_public_address_puts_caddy_in_front() {
+        let mut container = loaded(ServerPlacement::Container);
+        container.config.server.public_url = Some("https://1-2-3-4.sslip.io".into());
+        let out = render(
+            &container,
+            Path::new("/x/frood.yaml"),
+            Path::new("/x/.frood/secrets.env"),
+            Path::new("/x/.frood/deploy"),
+        );
+        let parsed: serde_json::Value = serde_yaml_ng::from_str(&out).unwrap();
+        let caddy = &parsed["services"]["caddy"];
+        assert_eq!(
+            caddy["command"],
+            serde_json::json!([
+                "caddy",
+                "reverse-proxy",
+                "--from",
+                "1-2-3-4.sslip.io",
+                "--to",
+                "frood:8080"
+            ])
+        );
+        assert_eq!(caddy["ports"], serde_json::json!(["80:80", "443:443"]));
+        assert!(parsed["volumes"].get("caddy-data").is_some());
+        // Nothing else listens beyond this machine.
+        for (name, service) in parsed["services"].as_object().unwrap() {
+            if name == "caddy" {
+                continue;
+            }
+            for port in service["ports"].as_array().into_iter().flatten() {
+                assert!(
+                    port.as_str().unwrap().starts_with("127.0.0.1:"),
+                    "{name}: {port}"
+                );
+            }
+        }
+        let mut host = loaded(ServerPlacement::Host);
+        host.config.server.public_url = Some("https://mem.example.com:8443".into());
+        let out = render(
+            &host,
+            Path::new("/x/frood.yaml"),
+            Path::new("/x/.frood/secrets.env"),
+            Path::new("/x/.frood/deploy"),
+        );
+        let parsed: serde_json::Value = serde_yaml_ng::from_str(&out).unwrap();
+        let caddy = &parsed["services"]["caddy"];
+        assert_eq!(caddy["command"][3], "mem.example.com:8443");
+        assert_eq!(caddy["command"][5], "host.docker.internal:8080");
+        assert_eq!(caddy["ports"][1], "8443:8443");
+        assert!(
+            render(
+                &loaded(ServerPlacement::Container),
+                Path::new("/x/frood.yaml"),
+                Path::new("/x/s"),
+                Path::new("/x/d")
+            )
+            .find("caddy")
+            .is_none()
+        );
     }
 
     #[test]
