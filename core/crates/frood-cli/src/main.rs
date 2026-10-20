@@ -107,7 +107,7 @@ enum Command {
         /// The recovery key file (`frood backup key --out`).
         #[arg(long)]
         identity: PathBuf,
-        /// The backup module's image, which has restic, e.g. ghcr.io/froodai/backup-restic:0.0.1.
+        /// The backup module's image, which has restic, e.g. ghcr.io/froodai/backup-restic:0.1.0.
         #[arg(long)]
         image: String,
         /// KEY=VALUE the repository needs, e.g. AWS_ACCESS_KEY_ID=…; repeatable.

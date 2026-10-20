@@ -1,5 +1,5 @@
 name: runtime-docker
-version: 0.0.1
+version: 0.1.0
 description: Runs agents (Claude Code, Codex) for Frood jobs, one Docker container per turn, and resumes their sessions after people answer.
 license: Apache-2.0
 provides:

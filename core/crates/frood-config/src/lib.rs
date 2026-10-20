@@ -844,6 +844,7 @@ pub fn template(options: &TemplateOptions<'_>) -> String {
         .replace("__SERVER__", options.server.as_str())
         .replace("__IMAGE_OR_BUILD__", &image_or_build)
         .replace("__PG_PORT__", &options.postgres_port.to_string())
+        .replace("__VERSION__", env!("CARGO_PKG_VERSION"))
 }
 
 /// JSON Schema of `frood.yaml`, for editors and `frood config schema`.

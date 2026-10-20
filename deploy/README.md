@@ -5,6 +5,18 @@ The `compose` deploy target is built into the CLI: `frood apply` renders
 `deploy.server: container`, the modules) and runs `docker compose up`. Everything listens on
 127.0.0.1 only.
 
+## Installing a release
+
+A release (tag `v<version>`) publishes images of the core, the modules and the agents for x86
+and ARM as `ghcr.io/froodai/<name>:<version>`. On a server with Docker:
+
+```sh
+sh install.sh 0.1.0                       # puts `frood` into /usr/local/bin
+frood init --dir /srv/frood --name team   # the server's image is the release's
+```
+
+Modules then use the release's images, e.g. `telegram: { image: ghcr.io/froodai/telegram:0.1.0 }`.
+
 ## Public HTTPS
 
 Cloud clients (Claude, ChatGPT) reach Frood only at a public HTTPS address. Set it and apply:
