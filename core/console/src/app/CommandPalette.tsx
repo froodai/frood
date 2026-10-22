@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { LANGUAGES, useI18n } from "@/i18n";
 import { api } from "@/lib/frood";
-import { useStartJob } from "@/lib/queries";
+import { useHealth, useStartJob } from "@/lib/queries";
 import type { SearchHit } from "@/lib/types";
 import { SECTIONS } from "./sections";
 
@@ -25,6 +25,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
   const { resolvedTheme, setTheme } = useTheme();
   const navigate = useNavigate();
   const start = useStartJob();
+  const backups = !!useHealth().data?.backups;
   const [query, setQuery] = useState("");
   const q = useDebounced(query.trim(), 250);
   const hits = useQuery({
@@ -85,14 +86,18 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
           ))}
         </CommandGroup>
         <CommandGroup heading={t("palette.actions")}>
-          <CommandItem value={t("palette.backupNow")} onSelect={() => job("backup")}>
-            <DatabaseBackup />
-            {t("palette.backupNow")}
-          </CommandItem>
-          <CommandItem value={t("palette.verifyBackup")} onSelect={() => job("backup-verify")}>
-            <ShieldCheck />
-            {t("palette.verifyBackup")}
-          </CommandItem>
+          {backups && (
+            <>
+              <CommandItem value={t("palette.backupNow")} onSelect={() => job("backup")}>
+                <DatabaseBackup />
+                {t("palette.backupNow")}
+              </CommandItem>
+              <CommandItem value={t("palette.verifyBackup")} onSelect={() => job("backup-verify")}>
+                <ShieldCheck />
+                {t("palette.verifyBackup")}
+              </CommandItem>
+            </>
+          )}
           <CommandItem value={t("palette.toggleTheme")} onSelect={() => run(() => setTheme(resolvedTheme === "dark" ? "light" : "dark"))}>
             <SunMoon />
             {t("palette.toggleTheme")}

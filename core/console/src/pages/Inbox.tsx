@@ -52,11 +52,21 @@ function headline(entry: InboxEntry): string {
   return entry.item.subject;
 }
 
+/** Decides at once on screen; the server catches up, and a failure puts the items back. */
 function useAct() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: ({ ids, act }: { ids: string[]; act: Act }) =>
       Promise.all(ids.map((id) => api(`/v1/inbox/${id}/act`, { method: "POST", json: act }))),
+    onMutate: async ({ ids }) => {
+      await client.cancelQueries({ queryKey: ["inbox"] });
+      const before = client.getQueryData<InboxEntry[]>(["inbox"]);
+      client.setQueryData<InboxEntry[]>(["inbox"], (entries) =>
+        entries?.map((e) => (ids.includes(e.item.id) ? { ...e, item: { ...e.item, state: "resolved" } } : e)),
+      );
+      return { before };
+    },
+    onError: (_err, _vars, context) => context?.before && client.setQueryData(["inbox"], context.before),
     onSettled: () => client.invalidateQueries({ queryKey: ["inbox"] }),
   });
 }
@@ -93,30 +103,26 @@ export function Inbox() {
     const index = visible.findIndex((e) => e.item.id === current?.item.id);
     const rest = visible.filter((e) => !ids.includes(e.item.id));
     const next = rest[Math.min(Math.max(index, 0), rest.length - 1)];
-    act.mutate(
-      { ids, act: a },
-      {
-        onSuccess: () => {
-          setSelected(new Set());
-          show(next);
-          const key: Key = a.action === "accept" ? "inbox.done.accept" : a.action === "reject" ? "inbox.done.keep" : a.action === "defer" ? "inbox.done.defer" : "inbox.done.other";
-          const undoable = ["accept", "reject", "defer"].includes(a.action);
-          toast(t(key, { n: ids.length }), {
-            action: undoable
-              ? {
-                  label: t("inbox.undo"),
-                  onClick: () =>
-                    undo.mutate(ids, {
-                      onSuccess: () => toast(t("inbox.undone")),
-                      onError: (err) => toast.error(t("inbox.failed", { error: err.message })),
-                    }),
-                }
-              : undefined,
-          });
-        },
-        onError: (err) => toast.error(t("inbox.failed", { error: err.message })),
-      },
-    );
+    setSelected(new Set());
+    show(next);
+    const done = act.mutateAsync({ ids, act: a });
+    done.catch((err: Error) => toast.error(t("inbox.failed", { error: err.message })));
+    const key: Key = a.action === "accept" ? "inbox.done.accept" : a.action === "reject" ? "inbox.done.keep" : a.action === "defer" ? "inbox.done.defer" : "inbox.done.other";
+    const undoable = ["accept", "reject", "defer"].includes(a.action);
+    toast(t(key, { n: ids.length }), {
+      duration: undoable ? 8000 : 4000,
+      action: undoable
+        ? {
+            label: t("inbox.undo"),
+            // An undo waits for the decision to reach the server.
+            onClick: () =>
+              done
+                .then(() => undo.mutateAsync(ids))
+                .then(() => toast(t("inbox.undone")))
+                .catch((err: Error) => toast.error(t("inbox.failed", { error: err.message }))),
+          }
+        : undefined,
+    });
   };
 
   const toggle = (itemId: string) =>
@@ -154,8 +160,8 @@ export function Inbox() {
   const detail = current && <Detail entry={current} busy={act.isPending} onAct={(a) => decide([current.item.id], a)} />;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-wrap">
-      <section className="flex min-w-0 flex-[999_1_520px] flex-col gap-3.5 px-4 py-5 md:px-6">
+    <div className="flex min-h-0 flex-1">
+      <section className="flex min-w-0 flex-1 flex-col gap-3.5 px-4 py-5 md:px-6">
         <div className="flex flex-wrap items-center gap-2">
           {FILTERS.filter(([f]) => f === "all" || counts[f] > 0).map(([f, label]) => (
             <Button key={f} size="sm" variant={filter === f ? "default" : "outline"} className="rounded-full" onClick={() => (setFilter(f), setSelected(new Set()))}>
@@ -166,23 +172,23 @@ export function Inbox() {
         </div>
 
         {chosen.length > 0 && (
-          <div className="sticky top-16 z-10 flex flex-wrap items-center gap-2 rounded-lg bg-foreground px-3 py-2 text-background shadow-lg">
+          // Floats over the list, so choosing never moves the rows under the pointer.
+          <div className="fixed inset-x-0 bottom-20 z-30 mx-auto flex w-fit max-w-[calc(100%-2rem)] flex-wrap items-center gap-2 rounded-xl border bg-popover px-3 py-2 shadow-xl md:bottom-6">
             <span className="px-1 text-sm font-medium">{t("inbox.selected", { n: chosen.length })}</span>
-            <div className="flex-1" />
             {proposalsChosen && (
               <>
                 <Button size="sm" disabled={act.isPending} onClick={() => decide(chosen, { action: "accept" })}>
                   {t("inbox.accept")}
                 </Button>
-                <Button size="sm" variant="outline" className="border-background/30 bg-transparent text-background hover:bg-background/10 hover:text-background" disabled={act.isPending} onClick={() => decide(chosen, { action: "reject" })}>
+                <Button size="sm" variant="outline" disabled={act.isPending} onClick={() => decide(chosen, { action: "reject" })}>
                   {t("inbox.keep")}
                 </Button>
-                <Button size="sm" variant="outline" className="border-background/30 bg-transparent text-background hover:bg-background/10 hover:text-background" disabled={act.isPending} onClick={() => decide(chosen, { action: "defer" })}>
+                <Button size="sm" variant="outline" disabled={act.isPending} onClick={() => decide(chosen, { action: "defer" })}>
                   {t("inbox.defer")}
                 </Button>
               </>
             )}
-            <Button size="sm" variant="ghost" className="text-background hover:bg-background/10 hover:text-background" onClick={() => setSelected(new Set())}>
+            <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
               {t("inbox.clear")}
             </Button>
           </div>
@@ -237,7 +243,7 @@ export function Inbox() {
       </section>
 
       {wide ? (
-        <aside className="sticky top-14 flex max-h-[calc(100dvh-3.5rem)] min-w-0 flex-[1_1_380px] flex-col overflow-y-auto border-s bg-card px-6 py-5">
+        <aside className="sticky top-14 flex max-h-[calc(100dvh-3.5rem)] w-[clamp(320px,36%,480px)] shrink-0 flex-col overflow-y-auto border-s bg-card px-6 py-5">
           {detail ?? <p className="text-sm text-muted-foreground">{t("inbox.pick")}</p>}
         </aside>
       ) : (

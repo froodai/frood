@@ -69,7 +69,11 @@ export function Now() {
         <div className="flex flex-col gap-1 rounded-xl border bg-card p-4">
           <span className="text-sm text-muted-foreground">{t("now.deadlines")}</span>
           <span className="text-3xl font-semibold tracking-tight">{v?.deadlines.length ?? "–"}</span>
-          {v?.deadlines[0] && <span className={cn("text-sm", v.deadlines[0].overdue ? "text-destructive" : "text-warning")}>{t("now.soonest", { when: date(v.deadlines[0].due) })}</span>}
+          {v && v.deadlines.some((d) => d.overdue) ? (
+            <span className="text-sm text-destructive">{t("now.overdueCount", { n: v.deadlines.filter((d) => d.overdue).length })}</span>
+          ) : (
+            v?.deadlines[0] && <span className="text-sm text-warning">{t("now.soonest", { when: date(v.deadlines[0].due) })}</span>
+          )}
         </div>
         <div className="flex flex-col gap-1 rounded-xl border bg-card p-4">
           <span className="text-sm text-muted-foreground">{t("now.changes")}</span>

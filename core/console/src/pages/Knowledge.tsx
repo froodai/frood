@@ -42,8 +42,8 @@ export function Knowledge() {
   const detail = id && <History id={id} />;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-wrap">
-      <section className="flex min-w-0 flex-[999_1_520px] flex-col gap-3.5 px-4 py-5 md:px-6">
+    <div className="flex min-h-0 flex-1">
+      <section className="flex min-w-0 flex-1 flex-col gap-3.5 px-4 py-5 md:px-6">
         <label className="flex min-h-10 items-center gap-2.5 rounded-lg border bg-card px-3 focus-within:ring-2 focus-within:ring-ring/40">
           <Search className="size-4 text-muted-foreground" aria-hidden />
           <input
@@ -96,7 +96,7 @@ export function Knowledge() {
         )}
       </section>
       {wide ? (
-        <aside className="sticky top-14 flex max-h-[calc(100dvh-3.5rem)] min-w-0 flex-[1_1_360px] flex-col overflow-y-auto border-s bg-card px-6 py-5">
+        <aside className="sticky top-14 flex max-h-[calc(100dvh-3.5rem)] w-[clamp(320px,36%,480px)] shrink-0 flex-col overflow-y-auto border-s bg-card px-6 py-5">
           {detail || <p className="text-sm text-muted-foreground">{t("knowledge.pick")}</p>}
         </aside>
       ) : (
