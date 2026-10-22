@@ -253,6 +253,14 @@ impl AuthSettings {
         )
     }
 
+    /// The console's address for links from channels; only for a public HTTPS address, since a
+    /// phone cannot open this machine's loopback.
+    pub fn console_url(&self) -> Option<String> {
+        self.issuer
+            .starts_with("https://")
+            .then(|| format!("{}/admin/", self.issuer))
+    }
+
     /// A path of this server as the browser sees it, behind the issuer's path.
     pub fn path(&self, path: &str) -> String {
         format!("{}{path}", self.base_path)

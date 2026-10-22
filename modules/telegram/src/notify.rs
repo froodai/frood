@@ -62,6 +62,9 @@ pub(crate) struct Words {
     digest_due: &'static str,
     digest_failed: &'static str,
     digest_nothing: &'static str,
+    details: &'static str,
+    undo: &'static str,
+    undone: &'static str,
 }
 
 const EN: Words = Words {
@@ -88,7 +91,7 @@ const EN: Words = Words {
     due_ago: "was due {n} days ago: done, or move it?",
     failed: "🚨 A run failed",
     accept: "Accept",
-    reject: "Reject",
+    reject: "Keep current",
     defer: "Later",
     snooze: "Later",
     done: "Done",
@@ -96,7 +99,7 @@ const EN: Words = Words {
     retry: "Retry",
     dismiss: "Hide",
     accepted: "✅ Accepted",
-    rejected: "❌ Rejected",
+    rejected: "↩️ Kept the current one",
     deferred: "⏸ Put off",
     answered: "💬 Answered",
     expired: "⌛ Expired",
@@ -118,6 +121,9 @@ const EN: Words = Words {
     digest_due: "Due soon",
     digest_failed: "Failed runs",
     digest_nothing: "Nothing new.",
+    details: "Details",
+    undo: "Undo",
+    undone: "Undone",
 };
 
 const RU: Words = Words {
@@ -144,7 +150,7 @@ const RU: Words = Words {
     due_ago: "срок прошёл {n} дн. назад: выполнено или перенести?",
     failed: "🚨 Запуск упал",
     accept: "Принять",
-    reject: "Отклонить",
+    reject: "Оставить старое",
     defer: "Отложить",
     snooze: "Отложить",
     done: "Выполнено",
@@ -152,7 +158,7 @@ const RU: Words = Words {
     retry: "Повторить",
     dismiss: "Скрыть",
     accepted: "✅ Принято",
-    rejected: "❌ Отклонено",
+    rejected: "↩️ Оставлено старое",
     deferred: "⏸ Отложено",
     answered: "💬 Отвечено",
     expired: "⌛ Время вышло",
@@ -174,6 +180,9 @@ const RU: Words = Words {
     digest_due: "Скоро сроки",
     digest_failed: "Сбои запусков",
     digest_nothing: "Ничего нового.",
+    details: "Подробнее",
+    undo: "Отменить",
+    undone: "Отменено",
 };
 
 impl Lang {
@@ -456,8 +465,9 @@ fn resolution(resolution: &Value, w: &Words) -> String {
     }
 }
 
-/// One row per button; callback data names the item and the action's index.
-pub(crate) fn keyboard(shown: &Value, w: &Words) -> Value {
+/// One row per button; callback data names the item and the action's index. A link to the
+/// item in the console comes last when the installation has a public address.
+pub(crate) fn keyboard(shown: &Value, w: &Words, console: Option<&str>) -> Value {
     let id = shown["item"]["id"].as_str().unwrap_or_default();
     let several = shown["actions"]
         .as_array()
@@ -492,7 +502,32 @@ pub(crate) fn keyboard(shown: &Value, w: &Words) -> Value {
             json!([{ "text": short(&label, 60), "callback_data": format!("i:{id}:{i}") }])
         })
         .collect();
+    let mut rows = rows;
+    if let Some(url) = console {
+        rows.push(json!([{ "text": w.details, "url": url }]));
+    }
     json!({ "inline_keyboard": rows })
+}
+
+/// What a message offers: the actions while the item waits; after a decision on a change made
+/// here, a way to take it back (docs/25 §4).
+pub(crate) fn markup(shown: &Value, w: &Words, console: Option<&str>) -> Value {
+    let item = &shown["item"];
+    if item["state"] == "open" {
+        return keyboard(shown, w, console);
+    }
+    let here = item["resolution"]["by"]
+        .as_str()
+        .is_some_and(|by| by.ends_with("/via/telegram"));
+    let decided = matches!(
+        item["resolution"]["action"].as_str(),
+        Some("accept" | "reject")
+    );
+    if item["kind"] == "proposal" && (item["state"] == "snoozed" || here && decided) {
+        let id = item["id"].as_str().unwrap_or_default();
+        return json!({ "inline_keyboard": [[{ "text": w.undo, "callback_data": format!("u:{id}") }]] });
+    }
+    json!({ "inline_keyboard": [] })
 }
 
 fn message_ref(chat: &Value, message_id: &Value) -> String {
@@ -513,10 +548,11 @@ impl Bot {
             .ok_or("recipient.external_id is not a Telegram account")?;
         let shown = &body["item"];
         let w = self.lang.words();
+        let console = body["console_url"].as_str();
         let sent = self
             .telegram(
                 "sendMessage",
-                json!({ "chat_id": chat, "text": text(shown, w), "reply_markup": keyboard(shown, w) }),
+                json!({ "chat_id": chat, "text": text(shown, w), "reply_markup": keyboard(shown, w, console) }),
             )
             .await?;
         Ok(json!({ "message_ref": message_ref(&json!(chat), &sent["message_id"]) }))
@@ -533,11 +569,14 @@ impl Bot {
 
     async fn edit_shown(&self, chat: i64, message_id: i64, shown: &Value) {
         let w = self.lang.words();
+        let console = self
+            .console_url(shown["item"]["id"].as_str().unwrap_or_default())
+            .await;
         let result = self
             .telegram(
                 "editMessageText",
                 json!({ "chat_id": chat, "message_id": message_id, "text": text(shown, w),
-                        "reply_markup": { "inline_keyboard": [] } }),
+                        "reply_markup": markup(shown, w, console.as_deref()) }),
             )
             .await;
         if let Err(err) = result
@@ -553,11 +592,10 @@ impl Bot {
         let query_id = query["id"].as_str().unwrap_or_default();
         let from = query["from"]["id"].as_i64().unwrap_or_default().to_string();
         let data = query["data"].as_str().unwrap_or_default();
+        let chat = query.pointer("/message/chat/id").and_then(Value::as_i64);
+        let message_id = query.pointer("/message/message_id").and_then(Value::as_i64);
         let mut parts = data.split(':');
-        let (Some("i"), Some(item_id), Some(index)) = (parts.next(), parts.next(), parts.next())
-        else {
-            return;
-        };
+        let (kind, item_id, index) = (parts.next(), parts.next(), parts.next());
         let answer = |text: String| {
             let bot = self.clone();
             let id = query_id.to_owned();
@@ -569,6 +607,37 @@ impl Bot {
                     )
                     .await;
             }
+        };
+        let (item_id, index) = match (kind, item_id, index) {
+            (Some("i"), Some(item_id), Some(index)) => (item_id, index),
+            (Some("u"), Some(item_id), None) => {
+                // Take the decision back; the message shows the item with its buttons again.
+                let undone = self
+                    .frood(
+                        self.http
+                            .post(format!("{}/v1/inbox/{item_id}/undo", self.frood)),
+                    )
+                    .json(&json!({ "external_id": from }))
+                    .send()
+                    .await;
+                match undone {
+                    Ok(r) if r.status().is_success() => {
+                        answer(w.undone.to_owned()).await;
+                        if let (Some(chat), Some(message_id), Some(shown)) =
+                            (chat, message_id, self.inbox_item(item_id).await)
+                        {
+                            self.edit_shown(chat, message_id, &shown).await;
+                        }
+                    }
+                    Ok(r) => {
+                        let body: Value = r.json().await.unwrap_or(Value::Null);
+                        answer(short(body["detail"].as_str().unwrap_or("?"), 190)).await;
+                    }
+                    Err(err) => answer(short(&err.to_string(), 190)).await,
+                }
+                return;
+            }
+            _ => return,
         };
         let shown: Value = match self
             .frood(self.http.get(format!("{}/v1/inbox/{item_id}", self.frood)))
@@ -586,8 +655,6 @@ impl Bot {
                 return;
             }
         };
-        let chat = query.pointer("/message/chat/id").and_then(Value::as_i64);
-        let message_id = query.pointer("/message/message_id").and_then(Value::as_i64);
         let action = index
             .parse::<usize>()
             .ok()
@@ -657,10 +724,10 @@ mod tests {
             "⚠️ Противоречит записанному\nБыло: Релиз 2.4 — 14 ноября\nСтало: Релиз 2.4 — 28 ноября\n\n«релиз переносим на 28.11»\nПочему: #release, 18:02\nОт агента: daily-sweep\n\n🔎 Агент выяснил: Olya confirmed in #release"
         );
         assert_eq!(
-            keyboard(&shown, w),
+            keyboard(&shown, w, None),
             json!({ "inline_keyboard": [
                 [{ "text": "Принять", "callback_data": "i:0199-item:0" }],
-                [{ "text": "Отклонить", "callback_data": "i:0199-item:1" }],
+                [{ "text": "Оставить старое", "callback_data": "i:0199-item:1" }],
                 [{ "text": "Отложить", "callback_data": "i:0199-item:2" }]
             ] })
         );
@@ -677,7 +744,7 @@ mod tests {
             "🚨 Джоба transcribe падает раз за разом\nffmpeg missing"
         );
         assert_eq!(
-            keyboard(&shown, Lang::Ru.words())["inline_keyboard"][0][0]["text"],
+            keyboard(&shown, Lang::Ru.words(), None)["inline_keyboard"][0][0]["text"],
             "Скрыть"
         );
         let shown = alert(json!({ "detector": "module_down", "module": "stt" }));
@@ -736,7 +803,7 @@ mod tests {
             json!({ "action": "accept", "by": "user:0199/via/claude-code" });
         assert!(text(&shown, w).ends_with("✅ Принято в другом месте"));
         shown["item"]["resolution"] = json!({ "action": "reject", "by": "user:0199/via/telegram" });
-        assert!(text(&shown, w).ends_with("❌ Отклонено"));
+        assert!(text(&shown, w).ends_with("↩️ Оставлено старое"));
         assert_eq!(parse_ref("373739001:52"), Some((373_739_001, 52)));
     }
 }

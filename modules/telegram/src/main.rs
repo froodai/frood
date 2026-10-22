@@ -11,6 +11,7 @@
 //! channel name), `FROOD_MODULE_CONFIG` (`{"language": "en" | "ru"}`), `TELEGRAM_BOT_TOKEN`,
 //! optionally `TELEGRAM_API_URL`, `PORT` (8080, for `/manifest` and `/healthz`).
 
+mod commands;
 mod notify;
 
 use std::sync::Arc;
@@ -51,10 +52,24 @@ struct Texts {
     failed: &'static str,
     still_working: &'static str,
     error: &'static str,
+    /// Descriptions of /now, /inbox, /ask, /digest, /help in the menu.
+    menu: [&'static str; 5],
+    now_title: &'static str,
+    deadlines: &'static str,
+    nothing_due: &'static str,
+    overdue: &'static str,
+    waiting_n: &'static str,
+    changed_n: &'static str,
+    ask_usage: &'static str,
+    ask_nothing: &'static str,
+    since: &'static str,
+    inbox_empty: &'static str,
+    inbox_more: &'static str,
+    months: [&'static str; 12],
 }
 
 const EN: Texts = Texts {
-    help: "Send me notes, voice messages or files and I will put them into Frood. I also bring you what waits for your decision, with buttons; /digest shows what is new.\nFirst link your account: run `frood link telegram --email you@example.com` (or ask your admin for a code) and send me /link CODE.",
+    help: "Send me notes, voice messages or files and I will put them into Frood. I also bring you what waits for your decision, with buttons.\n/now — what is due and what waits\n/inbox — decide what waits for you\n? when is the release — ask your memory\n/digest — what is new\nFirst link your account: open the link from the console, or send /link CODE (`frood link telegram --email you@example.com` gives a code).",
     not_linked: "This Telegram account is not linked to Frood yet. Send /link CODE (get a code with `frood link telegram --email …`).",
     linked: "Linked to",
     link_failed: "Could not link",
@@ -70,10 +85,31 @@ const EN: Texts = Texts {
     failed: "Saved, but processing failed:",
     still_working: "Saved; still processing.",
     error: "Could not save:",
+    menu: [
+        "What is due and what waits",
+        "Decide what waits for you",
+        "Ask your memory",
+        "What is new",
+        "How it works",
+    ],
+    now_title: "📌 Now",
+    deadlines: "Deadlines",
+    nothing_due: "No deadlines in the next two weeks.",
+    overdue: "overdue",
+    waiting_n: "Waiting for you: {n}",
+    changed_n: "Changed this week: {n}",
+    ask_usage: "Ask after /ask, or start a message with ?: “? when is the release”",
+    ask_nothing: "Nothing about that in memory.",
+    since: "since {date}",
+    inbox_empty: "Nothing waits for you.",
+    inbox_more: "{n} more wait; /inbox again after these.",
+    months: [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ],
 };
 
 const RU: Texts = Texts {
-    help: "Присылайте заметки, голосовые и файлы — я сохраню их во Frood. А ещё приношу то, что ждёт вашего решения, с кнопками; /digest — что нового.\nСначала свяжите аккаунт: выполните `frood link telegram --email you@example.com` (или попросите код у администратора) и пришлите мне /link КОД.",
+    help: "Присылайте заметки, голосовые и файлы — я сохраню их во Frood. А ещё приношу то, что ждёт вашего решения, с кнопками.\n/now — сроки и что ждёт решения\n/inbox — разобрать то, что ждёт вас\n? когда релиз — спросить память\n/digest — что нового\nСначала свяжите аккаунт: откройте ссылку из консоли или пришлите /link КОД (код даёт `frood link telegram --email you@example.com`).",
     not_linked: "Этот аккаунт Telegram ещё не связан с Frood. Пришлите /link КОД (код даёт `frood link telegram --email …`).",
     linked: "Связано с",
     link_failed: "Не удалось связать",
@@ -89,6 +125,27 @@ const RU: Texts = Texts {
     failed: "Сохранено, но обработка не удалась:",
     still_working: "Сохранено; ещё обрабатываю.",
     error: "Не удалось сохранить:",
+    menu: [
+        "Сроки и что ждёт решения",
+        "Разобрать то, что ждёт вас",
+        "Спросить память",
+        "Что нового",
+        "Как это работает",
+    ],
+    now_title: "📌 Сейчас",
+    deadlines: "Сроки",
+    nothing_due: "Сроков на две недели нет.",
+    overdue: "просрочено",
+    waiting_n: "Ждёт вашего решения: {n}",
+    changed_n: "Изменилось за неделю: {n}",
+    ask_usage: "Спросите после /ask или начните сообщение с ?: «? когда релиз»",
+    ask_nothing: "Об этом в памяти ничего нет.",
+    since: "с {date}",
+    inbox_empty: "Ничего не ждёт вашего решения.",
+    inbox_more: "Ждут ещё {n}; после этих — снова /inbox.",
+    months: [
+        "янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек",
+    ],
 };
 
 impl Lang {
@@ -111,6 +168,8 @@ struct Bot {
     lang: Lang,
     poll_every: Duration,
     poll_for: Duration,
+    /// The console's address, asked once (`/v1/version`); none without a public address.
+    console: Arc<tokio::sync::OnceCell<Option<String>>>,
 }
 
 #[derive(Deserialize)]
@@ -225,13 +284,17 @@ impl Bot {
         let text = message.text.clone().unwrap_or_default();
         let command = text.split_whitespace().next().unwrap_or_default();
         let command = command.split('@').next().unwrap_or_default();
+        if self.command(&message, &external_id, &text).await {
+            return;
+        }
+        // A link from the console opens the bot with `/start CODE`.
+        let code = text.split_whitespace().nth(1).unwrap_or_default();
         match command {
-            "/start" | "/help" => {
+            "/start" | "/help" if code.is_empty() || command == "/help" => {
                 self.reply(&message, t.help).await;
                 return;
             }
-            "/link" => {
-                let code = text.split_whitespace().nth(1).unwrap_or_default();
+            "/link" | "/start" => {
                 if code.is_empty() {
                     self.reply(&message, t.link_usage).await;
                     return;
@@ -466,6 +529,7 @@ impl Bot {
 
     /// Long polling until the process stops.
     async fn run(self) {
+        self.set_menu().await;
         let mut offset: i64 = 0;
         loop {
             let updates = self
@@ -694,6 +758,7 @@ fn bot_from_env() -> Result<Bot, String> {
         },
         poll_every: Duration::from_secs(2),
         poll_for: Duration::from_secs(180),
+        console: Arc::default(),
     })
 }
 
@@ -847,6 +912,7 @@ mod tests {
             lang,
             poll_every: Duration::from_millis(10),
             poll_for: Duration::from_secs(2),
+            console: Arc::default(),
         }
     }
 
@@ -976,7 +1042,7 @@ mod tests {
             edited["text"].as_str().unwrap().ends_with("✅ Принято"),
             "{edited}"
         );
-        assert_eq!(edited["reply_markup"]["inline_keyboard"], json!([]));
+        assert_eq!(edited["reply_markup"]["inline_keyboard"][0][0]["callback_data"], "u:item-1", "a decision here can be taken back");
     }
 
     #[tokio::test]

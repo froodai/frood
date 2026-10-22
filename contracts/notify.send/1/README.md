@@ -54,6 +54,10 @@ person's channel account in `external_id`: the action is that linked person's
 - `actions` are what the person may do; each becomes a button. Send the chosen one back as the
   body of `POST /v1/inbox/{id}/act` (`action` plus its `alternative` or `answer`), with
   `external_id`.
+- `console_url`, when the installation has a public address, opens the item in the console:
+  a "details" link for the message. Optional; absent on a local installation.
+- A decision can be taken back: `POST /v1/inbox/{id}/undo` with `external_id` opens the item
+  again (an "undo" button after a decision).
 - `message_ref` is whatever lets the module edit the message later.
 
 ## `notify.update@1`
