@@ -371,17 +371,17 @@ function Detail({ entry, busy, onAct }: { entry: InboxEntry; busy: boolean; onAc
       <div className="flex flex-wrap gap-2">
         {p && p.alternatives.length === 1 && has("accept") && (
           <Button disabled={busy} onClick={() => onAct({ action: "accept" })}>
-            {t("inbox.accept")} <kbd className="font-mono text-[11px] opacity-70">A</kbd>
+            {t("inbox.accept")} <kbd dir="ltr" className="font-mono text-[11px] opacity-70">A</kbd>
           </Button>
         )}
         {has("reject") && (
           <Button variant="outline" disabled={busy} onClick={() => onAct({ action: "reject" })}>
-            {t("inbox.keep")} <kbd className="font-mono text-[11px] text-muted-foreground">O</kbd>
+            {t("inbox.keep")} <kbd dir="ltr" className="font-mono text-[11px] text-muted-foreground">O</kbd>
           </Button>
         )}
         {has("defer") && (
           <Button variant="outline" disabled={busy} onClick={() => onAct({ action: "defer" })}>
-            {t("inbox.defer")} <kbd className="font-mono text-[11px] text-muted-foreground">S</kbd>
+            {t("inbox.defer")} <kbd dir="ltr" className="font-mono text-[11px] text-muted-foreground">S</kbd>
           </Button>
         )}
         {(
