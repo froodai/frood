@@ -242,13 +242,17 @@ async fn idp_token(
 }
 
 async fn setup(name: &str, idp: &Idp) -> Option<(Router, Auth)> {
+    setup_with(name, idp, "deploy: {server: host}").await
+}
+
+async fn setup_with(name: &str, idp: &Idp, deploy: &str) -> Option<(Router, Auth)> {
     let url = frood_store::testing::database_url()?;
     let pool = frood_store::testing::fresh_database(&url, name)
         .await
         .expect("test database");
     let raw = format!(
         "version: 1\ninstallation: {{name: test}}\nstorage: {{uses: postgres, url: 'postgres://unused'}}\n\
-         deploy: {{server: host}}\nauth:\n  allow: [alice@example.com]\n  providers:\n    - {{kind: oidc, id: corp, \
+         {deploy}\nauth:\n  allow: [alice@example.com]\n  providers:\n    - {{kind: oidc, id: corp, \
          label: Corp SSO, issuer: '{}', client_id: frood-test, client_secret: s3cret}}\n",
         idp.base
     );
@@ -722,4 +726,106 @@ async fn admin_panel_signs_in_with_its_own_client() {
     // Without a token there is no health or metrics.
     let reply = get_with(&app, "/metrics", None).await;
     assert_eq!(reply.status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn behind_a_proxy_under_a_path() {
+    const BASE: &str = "https://mem.example.com/frood";
+    let idp = Idp::start("alice@example.com").await;
+    let deploy = format!("deploy: {{server: host}}\nserver: {{public_url: '{BASE}'}}");
+    let Some((app, _auth)) = setup_with("oauth_path", &idp, &deploy).await else {
+        eprintln!("FROOD_TEST_DATABASE_URL is not set; skipping");
+        return;
+    };
+    // The proxy strips `/frood`; the browser sees it in every link.
+    let behind = |location: &Url| {
+        let path = path_and_query(location);
+        assert!(path.starts_with("/frood/"), "{path}");
+        path["/frood".len()..].to_owned()
+    };
+
+    let reply = send(
+        &app,
+        Request::post("/mcp")
+            .header(header::HOST, "mem.example.com")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::UNAUTHORIZED);
+    assert!(reply.header(header::WWW_AUTHENTICATE).contains(
+        "resource_metadata=\"https://mem.example.com/.well-known/oauth-protected-resource/frood/mcp\""
+    ));
+    // RFC 9728 and RFC 8414 put the path after the well-known part, at the root of the host;
+    // behind the proxy the plain paths answer the same.
+    for path in [
+        "/.well-known/oauth-protected-resource/frood/mcp",
+        "/.well-known/oauth-protected-resource/mcp",
+    ] {
+        let metadata = get_with(&app, path, None).await.json();
+        assert_eq!(metadata["resource"], format!("{BASE}/mcp"), "{path}");
+        assert_eq!(metadata["authorization_servers"], json!([BASE]));
+    }
+    for path in [
+        "/.well-known/oauth-authorization-server/frood",
+        "/.well-known/oauth-authorization-server",
+    ] {
+        let server = get_with(&app, path, None).await.json();
+        assert_eq!(server["issuer"], BASE, "{path}");
+        assert_eq!(server["token_endpoint"], format!("{BASE}/oauth/token"));
+    }
+    for path in [
+        "/.well-known/oauth-authorization-server/other",
+        "/.well-known/oauth-protected-resource/other/mcp",
+    ] {
+        assert_eq!(
+            get_with(&app, path, None).await.status,
+            StatusCode::NOT_FOUND,
+            "{path}"
+        );
+    }
+
+    // Sign-in stays under the path: redirects, the provider's callback and the cookie.
+    let (_, challenge) = pkce();
+    let authorize = format!(
+        "/oauth/authorize?{}",
+        url::form_urlencoded::Serializer::new(String::new())
+            .extend_pairs([
+                ("response_type", "code"),
+                ("client_id", "frood-admin"),
+                ("redirect_uri", &format!("{BASE}/admin/")),
+                ("code_challenge", &challenge),
+                ("code_challenge_method", "S256"),
+                ("scope", "knowledge:read"),
+                ("state", "s"),
+                ("resource", &format!("{BASE}/v1")),
+            ])
+            .finish()
+    );
+    let reply = get_with(&app, &authorize, None).await;
+    let reply = get_with(&app, &behind(&reply.location()), None).await;
+    let reply = get_with(&app, &behind(&reply.location()), None).await;
+    let upstream = reply.location();
+    assert_eq!(
+        query(&upstream, "redirect_uri"),
+        format!("{BASE}/oauth/callback/corp")
+    );
+    *idp.nonce.lock().unwrap() = Some(query(&upstream, "nonce"));
+    *idp.challenge.lock().unwrap() = Some(query(&upstream, "code_challenge"));
+    let callback = format!(
+        "/oauth/callback/corp?code=idp-code&state={}",
+        query(&upstream, "state")
+    );
+    let reply = get_with(&app, &callback, None).await;
+    assert!(
+        reply
+            .header(header::SET_COOKIE)
+            .contains("Path=/frood/oauth;")
+    );
+    let consent = behind(&reply.location());
+    assert!(consent.starts_with("/oauth/consent?tx="), "{consent}");
+    let cookie = reply.header(header::SET_COOKIE);
+    let cookie = cookie.split(';').next().unwrap();
+    let page = get_with(&app, &consent, Some(cookie)).await.text();
+    assert!(page.contains("action=\"/frood/oauth/consent\""));
 }

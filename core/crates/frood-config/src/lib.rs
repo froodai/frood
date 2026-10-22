@@ -14,8 +14,8 @@ pub use interpolate::Secrets;
 pub use model::{
     Account, AccountBudget, AskUser, Attention, AttentionPerson, AttentionRoute, Auth, AutoAccept,
     Backup, BackupKeep, BackupTarget, BeforeNotify, Budget, Config, Deploy, Detectors, Embeddings,
-    Installation, Job, ModelProvider, Module, OnExpire, Policies, Provider, Reminder, Search,
-    Server, ServerPlacement, SituationMatch, Source, Storage, Trigger,
+    Installation, Job, ModelProvider, Module, OnExpire, Policies, Provider, Proxy, Reminder,
+    Search, Server, ServerPlacement, SituationMatch, Source, Storage, Trigger,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -118,12 +118,28 @@ fn validate(config: &Config) -> Result<(), ConfigError> {
             config.server.listen
         ));
     }
-    if let Some(url) = &config.server.public_url
-        && !url.starts_with("https://")
+    if let Some(url) = &config.server.public_url {
+        match url::Url::parse(url) {
+            _ if !url.starts_with("https://") => problems.push(format!(
+                "server.public_url {url:?} must start with https://"
+            )),
+            Ok(parsed) if parsed.query().is_none() && parsed.fragment().is_none() => {}
+            _ => problems.push(format!(
+                "server.public_url {url:?} must be an address like https://example.com or https://example.com/frood"
+            )),
+        }
+    }
+    if config
+        .deploy
+        .proxy
+        .as_ref()
+        .is_some_and(|p| p.routes.is_some())
+        && config.server.public_url.is_none()
     {
-        problems.push(format!(
-            "server.public_url {url:?} must start with https://"
-        ));
+        problems.push(
+            "deploy.proxy.routes needs server.public_url: Caddy runs only for a public address"
+                .to_owned(),
+        );
     }
     if config.storage.uses != "postgres" {
         problems.push(format!(
@@ -1188,6 +1204,47 @@ jobs:
                 }
                 other => panic!("expected Invalid, got {other:?}"),
             }
+        }
+    }
+
+    #[test]
+    fn a_public_address_may_have_a_path() {
+        let with = |url: &str| {
+            template_for(ServerPlacement::Container).replace(
+                "# public_url: https://mem.example.com",
+                &format!("public_url: {url}"),
+            )
+        };
+        let loaded = parse(&with("https://mem.example.com/frood"), &secrets()).unwrap();
+        assert_eq!(
+            loaded.config.server.public_url.as_deref(),
+            Some("https://mem.example.com/frood")
+        );
+        for bad in [
+            "http://mem.example.com",
+            "https://mem.example.com/frood?x=1",
+        ] {
+            match parse(&with(bad), &secrets()) {
+                Err(ConfigError::Invalid(problems)) => {
+                    assert!(
+                        problems.iter().any(|p| p.contains("public_url")),
+                        "{problems:?}"
+                    );
+                }
+                other => panic!("{bad}: expected Invalid, got {other:?}"),
+            }
+        }
+        // Caddy, and so the routes of other apps, exists only for a public address.
+        let routes = template_for(ServerPlacement::Container)
+            .replace("deploy:\n", "deploy:\n  proxy: { routes: pages.caddy }\n");
+        match parse(&routes, &secrets()) {
+            Err(ConfigError::Invalid(problems)) => {
+                assert!(
+                    problems.iter().any(|p| p.contains("deploy.proxy.routes")),
+                    "{problems:?}"
+                );
+            }
+            other => panic!("expected Invalid, got {other:?}"),
         }
     }
 

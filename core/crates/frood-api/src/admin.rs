@@ -19,7 +19,8 @@ const PAGE: &str = include_str!("admin.html");
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/admin", get(|| async { Redirect::permanent("/admin/") }))
+        // Relative, so that it stays under a proxy's path such as `/frood`.
+        .route("/admin", get(|| async { Redirect::permanent("admin/") }))
         .route("/admin/", get(page))
         .route("/v1/health", get(health))
         .route("/v1/logs", get(logs))

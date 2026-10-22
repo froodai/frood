@@ -185,6 +185,9 @@ pub type Result<T> = std::result::Result<T, AuthError>;
 pub struct AuthSettings {
     /// Base URL of this installation without a trailing slash; the OAuth issuer.
     pub issuer: String,
+    /// The issuer's path (`/frood` for `https://host/frood`, empty at the root). A proxy in
+    /// front strips it: the server's own routes stay at the root.
+    pub base_path: String,
     pub installation: String,
     pub allow: Vec<String>,
     pub allow_domains: Vec<String>,
@@ -209,8 +212,12 @@ impl AuthSettings {
                 format!("http://{addr}")
             }
         };
+        let base_path = url::Url::parse(&issuer)
+            .map(|url| url.path().trim_end_matches('/').to_owned())
+            .unwrap_or_default();
         Self {
             issuer,
+            base_path,
             installation: config.installation.name.clone(),
             allow: config.auth.allow.iter().map(|e| e.to_lowercase()).collect(),
             allow_domains: config
@@ -232,12 +239,29 @@ impl AuthSettings {
         }
     }
 
-    /// Where a client learns how to obtain a token for `resource` (RFC 9728).
+    /// Where a client learns how to obtain a token for `resource` (RFC 9728): the well-known
+    /// part goes between the host and the resource's path.
     pub fn resource_metadata_url(&self, resource: Resource) -> String {
-        match resource {
-            Resource::Api => format!("{}/.well-known/oauth-protected-resource/v1", self.issuer),
-            Resource::Mcp => format!("{}/.well-known/oauth-protected-resource/mcp", self.issuer),
-        }
+        let name = match resource {
+            Resource::Api => "v1",
+            Resource::Mcp => "mcp",
+        };
+        format!(
+            "{}/.well-known/oauth-protected-resource{}/{name}",
+            self.origin(),
+            self.base_path
+        )
+    }
+
+    /// A path of this server as the browser sees it, behind the issuer's path.
+    pub fn path(&self, path: &str) -> String {
+        format!("{}{path}", self.base_path)
+    }
+
+    fn origin(&self) -> String {
+        url::Url::parse(&self.issuer)
+            .map(|url| url.origin().ascii_serialization())
+            .unwrap_or_else(|_| self.issuer.clone())
     }
 
     fn secure_cookies(&self) -> bool {
