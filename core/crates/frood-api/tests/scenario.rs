@@ -608,4 +608,38 @@ async fn the_mvp_scenario() {
     .await;
     assert_eq!(now[0]["text"], "Релиз 2.4 — 28 ноября", "{now}");
     assert_eq!(now[0]["sources"][0]["quote"], IN_CHAT);
+
+    // Alice takes it back in Telegram: the old date holds again and the item waits for her.
+    let (status, reopened) = call(
+        &app,
+        post_json(
+            &format!("/v1/inbox/{item_id}/undo"),
+            "tg-token",
+            json!({ "external_id": "42" }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{reopened}");
+    assert_eq!(reopened["state"], "open");
+    let (_, again) = call(
+        &app,
+        get_json(
+            &format!("/v1/proposals/{}", proposed["id"].as_str().unwrap()),
+            &client,
+        ),
+    )
+    .await;
+    assert_eq!(again["state"], "open");
+    assert_eq!(again["verdicts"][1]["decision"], "undo");
+    // The console's first page shows what holds and what changed this week.
+    let (status, page) = call(&app, get_json("/v1/now", &client)).await;
+    assert_eq!(status, StatusCode::OK, "{page}");
+    let changes = page["changes"].as_array().unwrap();
+    assert!(
+        changes
+            .iter()
+            .any(|c| c["assertion"]["text"] == "Релиз 2.4 — 14 ноября"
+                && c["before"] == "Релиз 2.4 — 28 ноября"),
+        "{page}"
+    );
 }

@@ -9,6 +9,12 @@ export const useMe = () => useQuery({ queryKey: ["me"], queryFn: () => api<Me>("
 export const useHealth = () =>
   useQuery({ queryKey: ["health"], queryFn: () => api<Health>("/v1/health"), refetchInterval: 30_000, retry: false });
 
+/** Items that wait for a person now: open, or snoozed until a time that has passed. */
+export const waiting = (entries: InboxEntry[] | undefined) =>
+  (entries ?? []).filter(
+    (e) => e.item.state === "open" || (e.item.state === "snoozed" && (!e.item.snoozed_until || new Date(e.item.snoozed_until) <= new Date())),
+  );
+
 export const useInbox = () =>
   useQuery({ queryKey: ["inbox"], queryFn: () => api<InboxEntry[]>("/v1/inbox?limit=200"), refetchInterval: 30_000 });
 

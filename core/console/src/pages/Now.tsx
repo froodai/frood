@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useI18n } from "@/i18n";
 import { api } from "@/lib/frood";
-import { useInbox } from "@/lib/queries";
+import { useInbox, waiting } from "@/lib/queries";
 import type { Assertion } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -51,7 +51,7 @@ export function Now() {
     queryFn: () => api<NowView>(`/v1/now${project ? `?project=${project}` : ""}`),
     refetchInterval: 60_000,
   });
-  const waiting = inbox.data?.filter((e) => e.item.state !== "resolved").length ?? 0;
+  const count = waiting(inbox.data).length;
   const v = now.data;
   const about = (a: Assertion) => a.subjects.map((s) => v?.names[s]).filter(Boolean).join(", ");
   const link = (a: Assertion) => `../knowledge/${a.assertion_id}`;
@@ -61,7 +61,7 @@ export function Now() {
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Link to="../inbox" className="flex flex-col gap-1 rounded-xl border bg-card p-4 hover:border-primary">
           <span className="text-sm text-muted-foreground">{t("now.waiting")}</span>
-          <span className="text-3xl font-semibold tracking-tight">{waiting}</span>
+          <span className="text-3xl font-semibold tracking-tight">{count}</span>
           <span className="inline-flex items-center gap-1 text-sm text-primary">
             {t("now.review")} <ArrowRight className="size-3.5 rtl:rotate-180" />
           </span>

@@ -145,6 +145,18 @@ pub(crate) async fn resolve(
         > 0)
 }
 
+/// An undone decision puts the item back: it needs a person again.
+async fn reopen(pool: &PgPool, subject: &str) -> sqlx::Result<()> {
+    sqlx::query(
+        "UPDATE inbox_items SET state = 'open', resolution = NULL, resolved_at = NULL, snoozed_until = NULL, \
+         updated_at = now() WHERE subject = $1",
+    )
+    .bind(subject)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 async fn snooze(pool: &PgPool, subject: &str, until: DateTime<Utc>) -> sqlx::Result<()> {
     sqlx::query(
         "UPDATE inbox_items SET state = 'snoozed', snoozed_until = $2, updated_at = now() \
@@ -419,6 +431,11 @@ impl Dispatch {
                         resolve(pool, &subject, &resolution).await?;
                     }
                     None => {}
+                }
+            }
+            "proposal.reopened" => {
+                if let Some(pid) = id("proposal_id") {
+                    reopen(pool, &format!("proposal/{pid}")).await?;
                 }
             }
             "proposal.stale" => {
@@ -823,6 +840,36 @@ impl Dispatch {
             "alternatives": alternatives,
             "quote": quote,
         })
+    }
+
+    /// Takes back a person's decision on a proposal item (docs/25 §3.2); the item opens again.
+    pub async fn inbox_undo(&self, item_id: Uuid, actor: &str) -> Result<InboxItem, String> {
+        let pool = &self.ctx.pool;
+        let item = get(pool, item_id)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or("no such Inbox item")?;
+        let proposal_id = match item.kind.as_str() {
+            "proposal" => item.data["proposal_id"]
+                .as_str()
+                .and_then(|s| s.parse::<Uuid>().ok())
+                .ok_or("the item has no proposal_id")?,
+            kind => return Err(format!("a {kind} cannot be undone")),
+        };
+        let actor = Actor::parse(actor).map_err(|e| e.to_string())?;
+        self.ctx
+            .ledger
+            .undo(&actor, proposal_id)
+            .await
+            .map_err(|e| e.to_string())?;
+        // The journal reopens it too; here so that the answer already shows it open.
+        reopen(pool, &item.subject)
+            .await
+            .map_err(|e| e.to_string())?;
+        get(pool, item_id)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "no such Inbox item".to_owned())
     }
 
     /// A person acts on an item, from the API or a channel. `actor` is how the ledger records

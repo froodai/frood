@@ -12,7 +12,7 @@ import { useI18n } from "@/i18n";
 import type { Key } from "@/i18n/en";
 import { api } from "@/lib/frood";
 import { useKeys, useMediaQuery } from "@/lib/hooks";
-import { useInbox } from "@/lib/queries";
+import { useInbox, waiting } from "@/lib/queries";
 import type { Change, InboxEntry, ProposalContent, QuestionContent } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -80,7 +80,7 @@ export function Inbox() {
   const [filter, setFilter] = useState<Filter>("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
-  const open = useMemo(() => (inbox.data ?? []).filter((e) => e.item.state !== "resolved"), [inbox.data]);
+  const open = useMemo(() => waiting(inbox.data), [inbox.data]);
   const visible = open.filter((e) => filter === "all" || group(e) === filter);
   const current = visible.find((e) => e.item.id === id) ?? (wide ? visible[0] : undefined);
   const chosen = visible.filter((e) => selected.has(e.item.id)).map((e) => e.item.id);

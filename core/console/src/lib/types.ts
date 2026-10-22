@@ -30,6 +30,7 @@ export type InboxItem = {
   created_at: string;
   updated_at: string;
   resolved_at: string | null;
+  snoozed_until: string | null;
   resolution: { action?: string; by?: string; state?: string } | null;
 };
 

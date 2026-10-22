@@ -29,9 +29,25 @@ pub fn routes() -> Router<AppState> {
         .route("/v1/proposals/{id}", get(proposal))
         .route("/v1/proposals/{id}/verdicts", post(submit_verdict))
         .route("/v1/journal", get(journal))
+        .route("/v1/now", get(now))
 }
 
 type ApiResult<T> = Result<Json<T>, ApiError>;
+
+#[derive(Deserialize)]
+struct NowQuery {
+    /// An entity, usually a project.
+    project: Option<Uuid>,
+}
+
+/// What holds, what is due and what changed (docs/25 §3.1).
+async fn now(
+    State(state): State<AppState>,
+    _caller: Caller<Read>,
+    Query(q): Query<NowQuery>,
+) -> ApiResult<frood_ledger::NowView> {
+    Ok(Json(state.ledger.now(q.project).await?))
+}
 
 async fn capture(
     State(state): State<AppState>,

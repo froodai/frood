@@ -18,6 +18,7 @@ pub fn routes() -> Router<AppState> {
         .route("/v1/inbox", get(list))
         .route("/v1/inbox/{id}", get(one))
         .route("/v1/inbox/{id}/act", post(act))
+        .route("/v1/inbox/{id}/undo", post(undo))
         .route("/v1/digest", get(digest))
 }
 
@@ -157,7 +158,34 @@ async fn act(
     Path(id): Path<Uuid>,
     Json(body): Json<ActBody>,
 ) -> Result<Json<ActOutcome>, ApiError> {
-    let principal = &caller.principal;
+    let needed = if matches!(body.act.action.as_str(), "accept" | "reject" | "defer") {
+        scope::DECIDE
+    } else {
+        scope::CAPTURE
+    };
+    let (user, actor) = person(
+        &state,
+        &caller.principal,
+        body.external_id.as_deref(),
+        needed,
+    )
+    .await?;
+    state
+        .dispatch
+        .inbox_act(id, user, &actor, &body.act)
+        .await
+        .map(Json)
+        .map_err(|message| ApiError::new(StatusCode::CONFLICT, "conflict", message))
+}
+
+/// Who acts on the Inbox: the person whose token it is, or, for a channel module, the person
+/// linked to the channel account that pressed the button (R1′: `user:<id>/via/<channel>`).
+async fn person(
+    state: &AppState,
+    principal: &frood_auth::Principal,
+    external_id: Option<&str>,
+    needed: &'static str,
+) -> Result<(Uuid, String), ApiError> {
     let forbidden = |code: &'static str, message: &str| {
         ApiError::new(StatusCode::FORBIDDEN, code, message.to_owned())
     };
@@ -167,16 +195,8 @@ async fn act(
             "agents propose and ask; people act on the Inbox",
         ));
     }
-    let (user, actor) = match (principal.user_id(), body.external_id.as_deref()) {
+    Ok(match (principal.user_id(), external_id) {
         (Some(user), None) => {
-            let needed = if body.act.action == "accept"
-                || body.act.action == "reject"
-                || body.act.action == "defer"
-            {
-                scope::DECIDE
-            } else {
-                scope::CAPTURE
-            };
             if !principal.has(needed) {
                 return Err(forbidden(
                     "insufficient-scope",
@@ -217,10 +237,33 @@ async fn act(
                 "a module acts on the Inbox only for a linked person: give external_id",
             ));
         }
-    };
+    })
+}
+
+#[derive(Deserialize, Default)]
+struct UndoBody {
+    /// For channel modules: the channel account of the person who pressed the button.
+    external_id: Option<String>,
+}
+
+/// Takes back a decision on a proposal item (docs/25 §3.2); the item opens again.
+async fn undo(
+    State(state): State<AppState>,
+    caller: Caller<Signed>,
+    Path(id): Path<Uuid>,
+    body: Option<Json<UndoBody>>,
+) -> Result<Json<frood_dispatch::InboxItem>, ApiError> {
+    let body = body.map(|Json(b)| b).unwrap_or_default();
+    let (_, actor) = person(
+        &state,
+        &caller.principal,
+        body.external_id.as_deref(),
+        scope::DECIDE,
+    )
+    .await?;
     state
         .dispatch
-        .inbox_act(id, user, &actor, &body.act)
+        .inbox_undo(id, &actor)
         .await
         .map(Json)
         .map_err(|message| ApiError::new(StatusCode::CONFLICT, "conflict", message))
