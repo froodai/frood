@@ -226,7 +226,7 @@ fn is_slot_key(key: &str) -> bool {
 }
 
 /// The entity, its merge target and everything merged into that target.
-async fn entity_group(pool: &PgPool, id: Uuid) -> Result<Vec<Uuid>> {
+pub(crate) async fn entity_group(pool: &PgPool, id: Uuid) -> Result<Vec<Uuid>> {
     let root: Option<Option<Uuid>> =
         sqlx::query_scalar("SELECT merged_into FROM entities WHERE id = $1")
             .bind(id)

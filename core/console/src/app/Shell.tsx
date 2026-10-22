@@ -16,14 +16,14 @@ import {
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { LANGUAGES, useI18n } from "@/i18n";
 import { signOut } from "@/lib/frood";
-import { useHealth, useInbox, useMe } from "@/lib/queries";
+import { useHealth, useInbox, useMe, waiting } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 import { CommandPalette } from "./CommandPalette";
 import { SECTIONS } from "./sections";
 
 function useOpenCount() {
   const inbox = useInbox();
-  return inbox.data?.filter((e) => e.item.state !== "resolved").length ?? 0;
+  return waiting(inbox.data).length;
 }
 
 function Nav({ onPick }: { onPick?: () => void }) {

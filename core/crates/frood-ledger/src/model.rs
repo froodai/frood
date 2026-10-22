@@ -148,6 +148,7 @@ text_enum!(
         Reject => "reject",
         Defer => "defer",
         Investigate => "investigate",
+        Undo => "undo",
     }
 );
 

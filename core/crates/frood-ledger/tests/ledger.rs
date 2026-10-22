@@ -722,3 +722,217 @@ async fn validation_and_journal_order() {
     let after_first = ledger.journal(events[0].position, 10).await.unwrap();
     assert!(after_first.iter().all(|e| e.position > events[0].position));
 }
+
+fn verdict(decision: Decision) -> VerdictInput {
+    VerdictInput {
+        decision,
+        alternative: None,
+        operations: None,
+        reason: None,
+        deferred_until: None,
+    }
+}
+
+/// A commitment the user stated, and an agent's proposal to move its date.
+async fn release_and_a_move(ledger: &Ledger) -> (Uuid, Proposal) {
+    let evidence = capture(ledger, "release 2.4 on Nov 14").await;
+    let first = ledger
+        .open_proposal(
+            &user(),
+            proposal(
+                Risk::New,
+                vec![],
+                vec![Operation::Create {
+                    key: None,
+                    assertion: commitment(
+                        "Release 2.4 on Nov 14",
+                        "2026-11-14",
+                        day(2026, 9, 2),
+                        evidence,
+                    ),
+                }],
+            ),
+        )
+        .await
+        .unwrap();
+    let journal = ledger.journal(0, 1000).await.unwrap();
+    let id = created_id(&first, &journal);
+    let meeting = capture(ledger, "meeting: moving the release to Nov 28").await;
+    let change = ledger
+        .open_proposal(
+            &agent(),
+            proposal(
+                Risk::Conflict,
+                vec![BaseRef {
+                    assertion_id: id,
+                    version: 1,
+                }],
+                vec![Operation::Supersede {
+                    assertion_id: id,
+                    assertion: commitment(
+                        "Release 2.4 on Nov 28",
+                        "2026-11-28",
+                        day(2026, 10, 10),
+                        meeting,
+                    ),
+                }],
+            ),
+        )
+        .await
+        .unwrap();
+    (id, change)
+}
+
+async fn current_text(ledger: &Ledger, id: Uuid) -> Option<String> {
+    ledger
+        .assertion(id, None, None)
+        .await
+        .ok()
+        .map(|a| a.version.text)
+}
+
+#[tokio::test]
+async fn an_accepted_change_is_undone_and_can_be_decided_again() {
+    let ledger = ledger_or_skip!("ledger_undo_accept");
+    let (id, change) = release_and_a_move(&ledger).await;
+    ledger
+        .submit_verdict(&user(), change.id, accept(None))
+        .await
+        .unwrap();
+    assert_eq!(
+        current_text(&ledger, id).await.as_deref(),
+        Some("Release 2.4 on Nov 28")
+    );
+
+    let undone = ledger.undo(&user(), change.id).await.unwrap();
+    assert_eq!(undone.state, ProposalState::Open);
+    assert_eq!(
+        current_text(&ledger, id).await.as_deref(),
+        Some("Release 2.4 on Nov 14")
+    );
+    let decisions: Vec<Decision> = undone.verdicts.iter().map(|v| v.decision).collect();
+    assert_eq!(decisions, [Decision::Accept, Decision::Undo]);
+    // History keeps everything; current knowledge is as before, in both time axes.
+    let history = ledger.history(id).await.unwrap();
+    let current: Vec<&AssertionVersion> =
+        history.iter().filter(|v| v.recorded_to.is_none()).collect();
+    assert_eq!(current.len(), 1);
+    assert_eq!(current[0].valid_from, day(2026, 9, 2));
+    assert_eq!(current[0].verdict_id, undone.verdicts[1].id);
+    assert!(history.len() > 3);
+    let journal = ledger.journal(0, 1000).await.unwrap();
+    assert!(journal.iter().any(|e| e.event_type == "proposal.reopened"));
+
+    // The base moved to the restored version: deciding again works.
+    ledger
+        .submit_verdict(&user(), change.id, accept(None))
+        .await
+        .unwrap();
+    assert_eq!(
+        current_text(&ledger, id).await.as_deref(),
+        Some("Release 2.4 on Nov 28")
+    );
+    // Undo twice is undo of the newest verdict; with nothing left to undo it says so.
+    ledger.undo(&user(), change.id).await.unwrap();
+    assert!(matches!(
+        ledger.undo(&user(), change.id).await,
+        Err(LedgerError::Invalid(_))
+    ));
+}
+
+#[tokio::test]
+async fn rejected_and_deferred_open_again() {
+    let ledger = ledger_or_skip!("ledger_undo_reject");
+    let (id, change) = release_and_a_move(&ledger).await;
+    for decision in [Decision::Reject, Decision::Defer] {
+        let mut input = verdict(decision);
+        if decision == Decision::Defer {
+            input.deferred_until = Some(Utc::now() + chrono::Duration::days(1));
+        }
+        ledger
+            .submit_verdict(&user(), change.id, input)
+            .await
+            .unwrap();
+        let undone = ledger.undo(&user(), change.id).await.unwrap();
+        assert_eq!(undone.state, ProposalState::Open, "{decision:?}");
+        assert_eq!(undone.deferred_until, None);
+    }
+    // Still contested: the conflict waits for a person again.
+    let view = ledger.assertion(id, None, None).await.unwrap();
+    assert!(view.flags.contains(&Flag::Contested), "{:?}", view.flags);
+}
+
+#[tokio::test]
+async fn undoing_a_creation_takes_it_out_and_a_later_change_blocks_undo() {
+    let ledger = ledger_or_skip!("ledger_undo_create");
+    let evidence = capture(&ledger, "Olya owns billing").await;
+    let created = ledger
+        .open_proposal(
+            &agent(),
+            proposal(
+                Risk::New,
+                vec![],
+                vec![Operation::Create {
+                    key: None,
+                    assertion: commitment(
+                        "Olya ships billing",
+                        "2026-12-01",
+                        day(2026, 10, 1),
+                        evidence,
+                    ),
+                }],
+            ),
+        )
+        .await
+        .unwrap();
+    ledger
+        .submit_verdict(&user(), created.id, accept(None))
+        .await
+        .unwrap();
+    let journal = ledger.journal(0, 1000).await.unwrap();
+    let id = created_id(&created, &journal);
+    ledger.undo(&user(), created.id).await.unwrap();
+    assert_eq!(current_text(&ledger, id).await, None);
+
+    // Accepted, then changed by someone else: undoing the first would lose the second.
+    let (id, change) = release_and_a_move(&ledger).await;
+    ledger
+        .submit_verdict(&user(), change.id, accept(None))
+        .await
+        .unwrap();
+    let current = ledger.assertion(id, None, None).await.unwrap().version;
+    let later = ledger
+        .open_proposal(
+            &agent(),
+            proposal(
+                Risk::Change,
+                vec![BaseRef {
+                    assertion_id: id,
+                    version: current.version,
+                }],
+                vec![Operation::Supersede {
+                    assertion_id: id,
+                    assertion: commitment(
+                        "Release 2.4 on Dec 5",
+                        "2026-12-05",
+                        day(2026, 10, 20),
+                        evidence,
+                    ),
+                }],
+            ),
+        )
+        .await
+        .unwrap();
+    ledger
+        .submit_verdict(&user(), later.id, accept(None))
+        .await
+        .unwrap();
+    assert!(matches!(
+        ledger.undo(&user(), change.id).await,
+        Err(LedgerError::Stale { .. })
+    ));
+    assert_eq!(
+        current_text(&ledger, id).await.as_deref(),
+        Some("Release 2.4 on Dec 5")
+    );
+}

@@ -8,10 +8,12 @@ mod apply;
 mod error;
 mod journal;
 pub mod model;
+mod now;
 mod policy;
 mod query;
 mod rows;
 mod search;
+mod undo;
 
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -22,6 +24,7 @@ pub use error::{LedgerError, Result};
 use error::{invalid, is_unique_violation};
 use journal::Event;
 use model::*;
+pub use now::{Changed, Due, NowView, ProjectRef};
 pub use policy::{PolicyConfig, ProposalContext};
 pub use search::{SearchHit, SearchQuery};
 
@@ -464,6 +467,9 @@ impl Ledger {
         proposal_id: Uuid,
         input: VerdictInput,
     ) -> Result<Proposal> {
+        if input.decision == Decision::Undo {
+            return self.undo(actor, proposal_id).await;
+        }
         let mut tx = self.pool.begin().await?;
         let locked: Option<String> =
             sqlx::query_scalar("SELECT state FROM proposals WHERE id = $1 FOR UPDATE")
@@ -488,7 +494,7 @@ impl Ledger {
         ) = match input.decision {
             Decision::Reject => (Some(ProposalState::Rejected), None, None),
             Decision::Defer => (Some(ProposalState::Deferred), None, None),
-            Decision::Investigate => (None, None, None),
+            Decision::Investigate | Decision::Undo => (None, None, None),
             Decision::Accept => (
                 Some(ProposalState::Accepted),
                 Some(self.choose(&proposal, input.alternative.as_deref())?),
@@ -739,6 +745,11 @@ impl Ledger {
 
     pub async fn assertions(&self, filter: &AssertionFilter) -> Result<Vec<AssertionVersion>> {
         query::assertions(&self.pool, filter).await
+    }
+
+    /// What holds, what is due and what changed (docs/25 §3.1), for one project or all.
+    pub async fn now(&self, project: Option<Uuid>) -> Result<NowView> {
+        now::now(&self.pool, project, chrono::Utc::now()).await
     }
 
     pub async fn entity(&self, id: Uuid) -> Result<EntityView> {
