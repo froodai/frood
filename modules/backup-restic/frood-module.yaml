@@ -1,5 +1,5 @@
 name: backup-restic
-version: 0.1.1
+version: 0.1.2
 description: Backups of the installation into restic repositories (a folder, S3, B2, SFTP, REST), with a restore check into a temporary database.
 license: Apache-2.0
 provides:
