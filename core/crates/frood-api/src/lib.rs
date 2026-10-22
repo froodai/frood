@@ -6,6 +6,7 @@ mod admin;
 mod auth;
 mod capture;
 mod channels;
+mod console;
 mod error;
 mod inbox;
 mod ledger;
@@ -131,6 +132,7 @@ pub fn router(state: AppState) -> Router {
         .merge(work::routes())
         .merge(inbox::routes())
         .merge(admin::routes())
+        .merge(console::routes())
         .with_state(state)
         .merge(mcp)
         .merge(oauth)

@@ -1,0 +1,156 @@
+import { useQuery } from "@tanstack/react-query";
+import { ArrowRight } from "lucide-react";
+import { Link, useSearchParams } from "react-router";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useI18n } from "@/i18n";
+import { api } from "@/lib/frood";
+import { useInbox } from "@/lib/queries";
+import type { Assertion } from "@/lib/types";
+import { cn } from "@/lib/utils";
+
+type Due = Assertion & { due: string; overdue: boolean };
+type Changed = { assertion: Assertion; before: string | null };
+type NowView = {
+  projects: { id: string; name: string }[];
+  names: Record<string, string>;
+  deadlines: Due[];
+  decisions: Assertion[];
+  owners: Assertion[];
+  questions: Assertion[];
+  changes: Changed[];
+};
+
+function Panel({ title, sub, children, empty }: { title: string; sub?: string; children: React.ReactNode[]; empty: string }) {
+  return (
+    <section className="flex flex-col overflow-hidden rounded-xl border bg-card">
+      <div className="flex items-baseline justify-between gap-3 border-b px-4 py-3">
+        <h2 className="text-sm font-semibold">{title}</h2>
+        {sub && <span className="text-xs text-muted-foreground">{sub}</span>}
+      </div>
+      {children.length ? children : <p className="px-4 py-3 text-sm text-muted-foreground">{empty}</p>}
+    </section>
+  );
+}
+
+function Row({ to, children, className }: { to: string; children: React.ReactNode; className?: string }) {
+  return (
+    <Link to={to} className={cn("flex gap-3 border-b px-4 py-2.5 text-sm last:border-b-0 hover:bg-accent/50", className)}>
+      {children}
+    </Link>
+  );
+}
+
+export function Now() {
+  const { t, date, ago } = useI18n();
+  const [params, setParams] = useSearchParams();
+  const project = params.get("project") ?? "";
+  const inbox = useInbox();
+  const now = useQuery({
+    queryKey: ["now", project],
+    queryFn: () => api<NowView>(`/v1/now${project ? `?project=${project}` : ""}`),
+    refetchInterval: 60_000,
+  });
+  const waiting = inbox.data?.filter((e) => e.item.state !== "resolved").length ?? 0;
+  const v = now.data;
+  const about = (a: Assertion) => a.subjects.map((s) => v?.names[s]).filter(Boolean).join(", ");
+  const link = (a: Assertion) => `../knowledge/${a.assertion_id}`;
+
+  return (
+    <div className="flex max-w-6xl flex-col gap-5 px-4 py-5 md:px-7">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Link to="../inbox" className="flex flex-col gap-1 rounded-xl border bg-card p-4 hover:border-primary">
+          <span className="text-sm text-muted-foreground">{t("now.waiting")}</span>
+          <span className="text-3xl font-semibold tracking-tight">{waiting}</span>
+          <span className="inline-flex items-center gap-1 text-sm text-primary">
+            {t("now.review")} <ArrowRight className="size-3.5 rtl:rotate-180" />
+          </span>
+        </Link>
+        <div className="flex flex-col gap-1 rounded-xl border bg-card p-4">
+          <span className="text-sm text-muted-foreground">{t("now.deadlines")}</span>
+          <span className="text-3xl font-semibold tracking-tight">{v?.deadlines.length ?? "–"}</span>
+          {v?.deadlines[0] && <span className={cn("text-sm", v.deadlines[0].overdue ? "text-destructive" : "text-warning")}>{t("now.soonest", { when: date(v.deadlines[0].due) })}</span>}
+        </div>
+        <div className="flex flex-col gap-1 rounded-xl border bg-card p-4">
+          <span className="text-sm text-muted-foreground">{t("now.changes")}</span>
+          <span className="text-3xl font-semibold tracking-tight">{v?.changes.length ?? "–"}</span>
+          <span className="text-sm text-muted-foreground">{t("now.changes.sub")}</span>
+        </div>
+        <div className="flex flex-col gap-1 rounded-xl border bg-card p-4">
+          <span className="text-sm text-muted-foreground">{t("now.questions")}</span>
+          <span className="text-3xl font-semibold tracking-tight">{v?.questions.length ?? "–"}</span>
+        </div>
+      </div>
+
+      {v && v.projects.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="me-1 text-sm text-muted-foreground">{t("now.project")}</span>
+          {[{ id: "", name: t("now.allProjects") }, ...v.projects].map((p) => (
+            <Button key={p.id} size="sm" variant={project === p.id ? "default" : "outline"} className="rounded-full" onClick={() => setParams(p.id ? { project: p.id } : {})}>
+              {p.name}
+            </Button>
+          ))}
+        </div>
+      )}
+
+      {now.isError ? (
+        <p className="text-sm text-destructive">{now.error.message}</p>
+      ) : !v ? (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {[0, 1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-48" />
+          ))}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <Panel title={t("now.deadlines")} sub={t("now.deadlines.sub")} empty={t("now.nothing")}>
+            {v.deadlines.map((d) => (
+              <Row key={d.assertion_id} to={link(d)} className="items-baseline">
+                <span className={cn("w-20 shrink-0 font-mono text-xs", d.overdue ? "text-destructive" : "text-muted-foreground")}>{d.overdue ? t("now.overdue") : date(d.due)}</span>
+                <span className="min-w-0 flex-1">
+                  {d.text}
+                  {about(d) && <span className="block text-xs text-muted-foreground">{about(d)}</span>}
+                </span>
+              </Row>
+            ))}
+          </Panel>
+          <Panel title={t("now.decisions")} empty={t("now.nothing")}>
+            {v.decisions.map((d) => (
+              <Row key={d.assertion_id} to={link(d)} className="flex-col gap-0.5">
+                <span>{d.text}</span>
+                <span className="text-xs text-muted-foreground">
+                  {[about(d), date(d.valid_from)].filter(Boolean).join(" · ")}
+                </span>
+              </Row>
+            ))}
+          </Panel>
+          <Panel title={t("now.owners")} empty={t("now.nothing")}>
+            {v.owners.map((o) => (
+              <Row key={o.assertion_id} to={link(o)}>
+                <span className="min-w-0 flex-1">{o.text}</span>
+              </Row>
+            ))}
+          </Panel>
+          <Panel title={t("now.changes")} sub={t("now.changes.sub")} empty={t("now.nothing")}>
+            {v.changes.map(({ assertion: a, before }) => (
+              <Row key={`${a.assertion_id}/${a.version}`} to={link(a)} className="flex-col gap-0.5">
+                {before && <span className="text-[13px] text-muted-foreground line-through">{before}</span>}
+                <span>{a.text}</span>
+                <span className="text-xs text-muted-foreground">{ago(a.recorded_from)}</span>
+              </Row>
+            ))}
+          </Panel>
+          {v.questions.length > 0 && (
+            <Panel title={t("now.questions")} empty={t("now.nothing")}>
+              {v.questions.map((q) => (
+                <Row key={q.assertion_id} to={link(q)}>
+                  <span className="min-w-0 flex-1">{q.text}</span>
+                </Row>
+              ))}
+            </Panel>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
