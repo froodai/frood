@@ -1,4 +1,13 @@
 # Image of the frood binary (server + CLI). Build context: core/.
+
+# The console is plain files, the same for every platform: built once, embedded in the binary.
+FROM --platform=$BUILDPLATFORM node:24-slim AS console
+WORKDIR /console
+COPY console/package.json console/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY console/ ./
+RUN npm run build
+
 # The build stage runs on the builder's own platform and cross-compiles for the image's
 # (x86 or ARM): no emulation, so a multi-platform release builds in minutes.
 FROM --platform=$BUILDPLATFORM rust:1.99-slim-trixie AS build
@@ -19,6 +28,7 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY . .
+COPY --from=console /console/dist console/dist
 RUN set -eux; read triple cc < /target; \
     upper=$(echo "$triple" | tr 'a-z-' 'A-Z_'); \
     export "CARGO_TARGET_${upper}_LINKER=$cc" "CC_$(echo "$triple" | tr '-' '_')=$cc"; \

@@ -111,41 +111,48 @@ export function Knowledge() {
   );
 }
 
+/** What held when (current knowledge by valid time), then what was corrected in the record. */
 function History({ id }: { id: string }) {
   const { t, date, ago } = useI18n();
   const history = useQuery({ queryKey: ["history", id], queryFn: () => api<Assertion[]>(`/v1/assertions/${id}/history`) });
   if (history.isPending) return <Skeleton className="h-40" />;
   if (history.isError) return <p className="text-sm text-destructive">{history.error.message}</p>;
-  const versions = [...history.data].reverse();
-  const current = versions[0];
+  const held = history.data.filter((v) => !v.recorded_to).sort((a, b) => b.valid_from.localeCompare(a.valid_from));
+  const corrected = history.data
+    .filter((v) => v.recorded_to && !held.some((h) => h.text === v.text))
+    .sort((a, b) => b.recorded_to!.localeCompare(a.recorded_to!));
+  const head = held[0] ?? history.data[history.data.length - 1];
+  const entries = [
+    ...held.map((v) => ({ v, live: !v.valid_to && v.status === "active", corrected: false })),
+    ...corrected.map((v) => ({ v, live: false, corrected: true })),
+  ];
+  const span = (v: Assertion) => (v.valid_to ? `${date(v.valid_from, "long")} – ${date(v.valid_to, "long")}` : date(v.valid_from, "long"));
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-1.5">
         <Badge variant="secondary" className="self-start font-normal">
-          {t(kindKey(current.kind))}
+          {t(kindKey(head.kind))}
         </Badge>
-        <h2 className="text-lg font-semibold tracking-tight">{current.text}</h2>
+        <h2 className="text-lg font-semibold tracking-tight">{head.text}</h2>
       </div>
       <span className="text-xs text-muted-foreground">{t("knowledge.history")}</span>
       <ol className="flex flex-col">
-        {versions.map((v, i) => {
-          const live = i === 0 && !v.recorded_to && v.status === "active";
-          return (
-            <li key={v.version} className="flex gap-3">
-              <span className="flex w-2.5 flex-col items-center">
-                <span className={cn("mt-1.5 size-2.5 rounded-full", live ? "bg-primary" : "bg-border")} />
-                {i < versions.length - 1 && <span className="w-px flex-1 bg-border" />}
+        {entries.map(({ v, live, corrected }, i) => (
+          <li key={v.version} className="flex gap-3">
+            <span className="flex w-2.5 flex-col items-center">
+              <span className={cn("mt-1.5 size-2.5 rounded-full", live ? "bg-primary" : "bg-border")} />
+              {i < entries.length - 1 && <span className="w-px flex-1 bg-border" />}
+            </span>
+            <span className="flex flex-col gap-0.5 pb-4">
+              <span className={cn("text-sm", live && "font-medium", corrected && "text-muted-foreground line-through")}>{v.text}</span>
+              <span className="text-xs text-muted-foreground">
+                {corrected
+                  ? t("knowledge.correctedOn", { when: ago(v.recorded_to) })
+                  : `${live ? t("knowledge.current") : v.status === "active" || v.status === "superseded" ? t("knowledge.was") : t("knowledge.closed")} · ${span(v)} · ${t("knowledge.recorded", { when: ago(v.recorded_from) })}`}
               </span>
-              <span className="flex flex-col gap-0.5 pb-4">
-                <span className={cn("text-sm", live && "font-medium")}>{v.text}</span>
-                <span className="text-xs text-muted-foreground">
-                  {live ? t("knowledge.current") : v.status === "active" ? t("knowledge.was") : t("knowledge.closed")} · {date(v.valid_from, "long")} ·{" "}
-                  {t("knowledge.recorded", { when: ago(v.recorded_from) })}
-                </span>
-              </span>
-            </li>
-          );
-        })}
+            </span>
+          </li>
+        ))}
       </ol>
     </div>
   );

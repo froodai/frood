@@ -35,6 +35,50 @@ jobs:
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo test --locked
 
+  # The console (docs/25): types, unit tests, and its scenarios in a real browser against a
+  # server built from this commit with demo knowledge.
+  console:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: core/console
+    services:
+      postgres:
+        image: pgvector/pgvector:pg18-trixie
+        env:
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    env:
+      FROOD_TEST_DATABASE_URL: postgres://postgres:test@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: core/console/package-lock.json
+      - run: rustup toolchain install 1.99 --profile minimal && rustup default 1.99
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+      - run: npx playwright install --with-deps chromium
+      - run: ./e2e/serve.sh
+      - run: npx playwright test
+      - if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: playwright-report
+          path: core/console/playwright-report
+
   # Step 6 of the MVP scenario (docs/24, E1): backup, restore check, delete, restore.
   backup-restore:
     runs-on: ubuntu-latest

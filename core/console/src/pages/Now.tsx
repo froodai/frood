@@ -23,7 +23,7 @@ type NowView = {
 
 function Panel({ title, sub, children, empty }: { title: string; sub?: string; children: React.ReactNode[]; empty: string }) {
   return (
-    <section className="flex flex-col overflow-hidden rounded-xl border bg-card">
+    <section aria-label={title} className="flex flex-col overflow-hidden rounded-xl border bg-card">
       <div className="flex items-baseline justify-between gap-3 border-b px-4 py-3">
         <h2 className="text-sm font-semibold">{title}</h2>
         {sub && <span className="text-xs text-muted-foreground">{sub}</span>}

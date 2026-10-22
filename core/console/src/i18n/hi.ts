@@ -107,6 +107,7 @@ export const hi: Catalog = {
   "knowledge.was": "पहले",
   "knowledge.closed": "बंद",
   "knowledge.recorded": "{when} दर्ज",
+  "knowledge.correctedOn": "{when} सुधारा गया",
   "knowledge.pick": "इतिहास और स्रोत देखने के लिए बाईं ओर से कुछ चुनें।",
 
   "now.waiting": "आपका इंतज़ार",

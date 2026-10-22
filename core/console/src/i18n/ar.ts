@@ -107,6 +107,7 @@ export const ar: Catalog = {
   "knowledge.was": "سابقًا",
   "knowledge.closed": "مغلق",
   "knowledge.recorded": "سُجّل {when}",
+  "knowledge.correctedOn": "صُحّح {when}",
   "knowledge.pick": "اختر عنصرًا من القائمة لترى سجله ومصادره.",
 
   "now.waiting": "بانتظارك",

@@ -107,6 +107,7 @@ export const ru: Catalog = {
   "knowledge.was": "было",
   "knowledge.closed": "закрыто",
   "knowledge.recorded": "записано {when}",
+  "knowledge.correctedOn": "исправлено {when}",
   "knowledge.pick": "Выберите строку слева — покажу историю и источники.",
 
   "now.waiting": "Ждут решения",
