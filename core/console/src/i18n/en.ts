@@ -110,6 +110,7 @@ export const en = {
   "knowledge.was": "was",
   "knowledge.closed": "closed",
   "knowledge.recorded": "recorded {when}",
+  "knowledge.correctedOn": "corrected {when}",
   "knowledge.pick": "Pick something on the left to see its history and sources.",
 
   "now.waiting": "Waiting for you",

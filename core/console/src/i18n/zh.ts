@@ -107,6 +107,7 @@ export const zh: Catalog = {
   "knowledge.was": "曾经",
   "knowledge.closed": "已关闭",
   "knowledge.recorded": "{when}记录",
+  "knowledge.correctedOn": "{when}更正",
   "knowledge.pick": "在左侧选择一项，查看其历史和出处。",
 
   "now.waiting": "等你决定",

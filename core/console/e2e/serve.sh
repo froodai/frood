@@ -17,6 +17,8 @@ WORK=$(mktemp -d)
 cp "$HERE/frood.yaml" "$WORK/frood.yaml"
 mkdir -p "$WORK/.frood" && : > "$WORK/.frood/secrets.env"
 
+# A server from an earlier run goes first.
+if [ -f "$HERE/.pid" ]; then kill "$(cat "$HERE/.pid")" 2>/dev/null || true; rm -f "$HERE/.pid"; fi
 psql "$ADMIN_URL" -q -c "DROP DATABASE IF EXISTS $DB WITH (FORCE)" -c "CREATE DATABASE $DB"
 (cd "$CORE" && cargo build -q -p frood-cli)
 "$FROOD" --config "$WORK/frood.yaml" serve > "$WORK/serve.log" 2>&1 &

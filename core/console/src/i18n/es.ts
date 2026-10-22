@@ -107,6 +107,7 @@ export const es: Catalog = {
   "knowledge.was": "antes",
   "knowledge.closed": "cerrado",
   "knowledge.recorded": "registrado {when}",
+  "knowledge.correctedOn": "corregido {when}",
   "knowledge.pick": "Elige algo a la izquierda para ver su historial y sus fuentes.",
 
   "now.waiting": "Te esperan",
