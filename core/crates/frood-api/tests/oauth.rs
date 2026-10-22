@@ -643,11 +643,20 @@ async fn admin_panel_signs_in_with_its_own_client() {
     assert_eq!(reply.location().path(), "/admin/");
     let page = get_with(&app, "/admin/", None).await;
     assert_eq!(page.status, StatusCode::OK);
-    assert!(page.text().contains("frood-admin"));
+    // The built console learns its place from the server; without a build, the old page.
+    let html = page.text();
+    assert!(
+        html.contains("<meta name=\"frood-base\" content=\"\">") || html.contains("frood-admin"),
+        "{html}"
+    );
     assert!(
         page.header(header::CONTENT_SECURITY_POLICY)
             .contains("frame-ancestors 'none'")
     );
+    // A link to a section opens the same page.
+    let deep = get_with(&app, "/admin/inbox/0199", None).await;
+    assert_eq!(deep.status, StatusCode::OK);
+    assert_eq!(deep.text(), html);
 
     // Anywhere else than the installation's own panel is refused on the page.
     let (verifier, challenge) = pkce();

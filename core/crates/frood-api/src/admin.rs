@@ -4,7 +4,7 @@
 
 use axum::extract::{Query, State};
 use axum::http::{StatusCode, header};
-use axum::response::{IntoResponse, Redirect, Response};
+use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use frood_dispatch::health::Health;
@@ -15,13 +15,8 @@ use crate::AppState;
 use crate::auth::{Admin, Caller};
 use crate::error::ApiError;
 
-const PAGE: &str = include_str!("admin.html");
-
 pub fn routes() -> Router<AppState> {
     Router::new()
-        // Relative, so that it stays under a proxy's path such as `/frood`.
-        .route("/admin", get(|| async { Redirect::permanent("admin/") }))
-        .route("/admin/", get(page))
         .route("/v1/health", get(health))
         .route("/v1/logs", get(logs))
         .route("/metrics", get(metrics))
@@ -29,22 +24,6 @@ pub fn routes() -> Router<AppState> {
 
 fn db(err: frood_store::sqlx::Error) -> ApiError {
     frood_ledger::LedgerError::from(err).into()
-}
-
-async fn page() -> Response {
-    (
-        [
-            (header::CONTENT_TYPE, "text/html; charset=utf-8"),
-            // The page talks only to this server; no inline code from elsewhere.
-            (
-                header::CONTENT_SECURITY_POLICY,
-                "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'",
-            ),
-            (header::CACHE_CONTROL, "no-store"),
-        ],
-        PAGE,
-    )
-        .into_response()
 }
 
 async fn health(

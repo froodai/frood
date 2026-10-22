@@ -1124,6 +1124,8 @@ dependencies = [
  "frood-store",
  "http-body-util",
  "jsonwebtoken",
+ "mime_guess",
+ "rust-embed",
  "serde",
  "serde_json",
  "sha2 0.11.1",
