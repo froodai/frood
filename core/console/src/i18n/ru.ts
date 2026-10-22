@@ -15,6 +15,7 @@ export const ru: Catalog = {
   "app.theme.dark": "Тёмная",
   "app.theme.system": "Как в системе",
   "app.search": "Поиск и команды",
+  "app.searchShort": "Поиск",
   "app.more": "Ещё",
   "app.close": "Закрыть",
 
@@ -128,6 +129,7 @@ export const ru: Catalog = {
   "now.nothing": "Пока пусто.",
   "now.overdue": "просрочено",
   "now.soonest": "Ближайший — {when}",
+  "now.overdueCount": { one: "{n} просрочен", few: "{n} просрочено", many: "{n} просрочено", other: "{n} просрочено" },
   "now.changedCount": { one: "{n} изменение", few: "{n} изменения", many: "{n} изменений", other: "{n} изменения" },
 
   "sources.title": "Источники",

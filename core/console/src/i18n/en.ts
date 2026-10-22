@@ -18,6 +18,7 @@ export const en = {
   "app.theme.dark": "Dark",
   "app.theme.system": "System",
   "app.search": "Search and commands",
+  "app.searchShort": "Search",
   "app.more": "More",
   "app.close": "Close",
 
@@ -131,6 +132,7 @@ export const en = {
   "now.nothing": "Nothing here yet.",
   "now.overdue": "overdue",
   "now.soonest": "Soonest {when}",
+  "now.overdueCount": { one: "{n} overdue", other: "{n} overdue" },
   "now.changedCount": { one: "{n} change", other: "{n} changes" },
 
   "sources.title": "Sources",

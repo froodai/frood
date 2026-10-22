@@ -1,0 +1,10 @@
+# A throwaway installation for developing and testing the console (e2e/serve.sh).
+version: 1
+installation: { name: console-dev }
+server: { listen: "127.0.0.1:${env:FROOD_CONSOLE_PORT:-18080}" }
+storage: { uses: postgres, url: "${env:FROOD_CONSOLE_DB}" }
+deploy: { server: host }
+auth:
+  allow: [demo@example.com]
+  providers:
+    - { kind: dev, id: dev }

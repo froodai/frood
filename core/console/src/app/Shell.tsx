@@ -153,7 +153,7 @@ export function Shell() {
           className="flex min-h-9 items-center gap-2 rounded-md border bg-background px-2.5 text-sm text-muted-foreground hover:text-foreground"
         >
           <Search className="size-4" aria-hidden />
-          <span className="flex-1 text-start">{t("app.search")}</span>
+          <span className="flex-1 truncate text-start">{t("app.searchShort")}</span>
           <kbd className="rounded border px-1 font-mono text-[11px]">⌘K</kbd>
         </button>
         <Nav />
