@@ -108,6 +108,18 @@ pub(crate) fn write_deploy(paths: &Paths, loaded: &Loaded) -> anyhow::Result<Pat
     )
     .with_context(|| format!("cannot write {}", compose_path.display()))?;
     println!("wrote {}", compose_path.display());
+    if let Some(caddyfile) = compose::caddyfile(loaded) {
+        if let Some(routes) = compose::proxy_routes(loaded)
+            && !routes.is_file()
+        {
+            bail!("deploy.proxy.routes: {} does not exist", routes.display());
+        }
+        let dir = deploy_dir.join("caddy");
+        std::fs::create_dir_all(&dir)
+            .with_context(|| format!("cannot create {}", dir.display()))?;
+        std::fs::write(dir.join("Caddyfile"), caddyfile)
+            .with_context(|| format!("cannot write {}", dir.display()))?;
+    }
     Ok(compose_path)
 }
 
@@ -124,7 +136,47 @@ pub async fn apply(paths: &Paths, render_only: bool) -> anyhow::Result<()> {
     // The database first: a new server migrates it as it starts, so a snapshot comes before.
     docker_compose(&compose_path, &["up", "-d", "--wait", "postgres"]).await?;
     snapshot_before_migrations(&loaded, &compose_path).await?;
+    let caddy = compose::caddyfile(&loaded).is_some();
+    if caddy {
+        // A mistake in deploy.proxy.routes must not take the site down: check first.
+        let check = [
+            "run",
+            "--rm",
+            "--no-deps",
+            "-T",
+            "caddy",
+            "caddy",
+            "validate",
+            "--config",
+            compose::CADDYFILE,
+            "--adapter",
+            "caddyfile",
+        ];
+        docker_compose(&compose_path, &check)
+            .await
+            .context("Caddy refused the routes; nothing was changed")?;
+    }
     docker_compose_up(&compose_path, build).await?;
+    if caddy {
+        // Compose recreates Caddy only when its service changed, not for a new Caddyfile.
+        let reload = [
+            "exec",
+            "-T",
+            "caddy",
+            "caddy",
+            "reload",
+            "--config",
+            compose::CADDYFILE,
+            "--adapter",
+            "caddyfile",
+        ];
+        if docker_compose(&compose_path, &reload).await.is_err() {
+            println!(
+                "warning: Caddy did not reload its routes; `docker compose -p {} restart caddy` does it",
+                compose::project_name(&loaded)
+            );
+        }
+    }
 
     let pool = frood_store::connect(&loaded.config.storage.url, Duration::from_secs(60))
         .await

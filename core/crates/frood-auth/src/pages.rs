@@ -46,8 +46,10 @@ pub(crate) fn error(message: &str) -> Html<String> {
     )
 }
 
+/// `base` is the server's path behind the proxy (`/frood`, or empty at the root).
 pub(crate) fn choose_provider(
     installation: &str,
+    base: &str,
     providers: &[(String, String)],
     tx: &str,
 ) -> Html<String> {
@@ -55,7 +57,8 @@ pub(crate) fn choose_provider(
         .iter()
         .map(|(id, label)| {
             format!(
-                "<a class=\"btn\" href=\"/oauth/login/{}?tx={}\">Continue with {}</a>",
+                "<a class=\"btn\" href=\"{}/oauth/login/{}?tx={}\">Continue with {}</a>",
+                escape(base),
                 escape(id),
                 escape(tx),
                 escape(label)
@@ -71,15 +74,16 @@ pub(crate) fn choose_provider(
     )
 }
 
-pub(crate) fn dev_form(installation: &str, provider: &str, tx: &str) -> Html<String> {
+pub(crate) fn dev_form(installation: &str, base: &str, provider: &str, tx: &str) -> Html<String> {
     page(
         "Sign in (development)",
         &format!(
             "<h1>Development sign-in</h1><p class=\"muted\">Installation <code>{}</code>. This form exists only on a local server.</p>\
-             <form method=\"post\" action=\"/oauth/login/{}\"><input type=\"hidden\" name=\"tx\" value=\"{}\">\
+             <form method=\"post\" action=\"{}/oauth/login/{}\"><input type=\"hidden\" name=\"tx\" value=\"{}\">\
              <input type=\"email\" name=\"email\" placeholder=\"you@example.com\" required autofocus>\
              <button class=\"btn\" type=\"submit\">Sign in</button></form>",
             escape(installation),
+            escape(base),
             escape(provider),
             escape(tx)
         ),
@@ -88,6 +92,7 @@ pub(crate) fn dev_form(installation: &str, provider: &str, tx: &str) -> Html<Str
 
 pub(crate) struct Consent<'a> {
     pub installation: &'a str,
+    pub base: &'a str,
     pub client: &'a str,
     pub client_id: &'a str,
     pub email: &'a str,
@@ -120,13 +125,14 @@ pub(crate) fn consent(consent: &Consent<'_>) -> Html<String> {
         &format!(
             "<h1>Allow {} to use your Frood?</h1>\
              <p class=\"muted\">Installation <code>{}</code>, signed in as {}. Client <code>{}</code>.</p>\
-             <form method=\"post\" action=\"/oauth/consent\"><input type=\"hidden\" name=\"tx\" value=\"{}\">{checkboxes}\
+             <form method=\"post\" action=\"{}/oauth/consent\"><input type=\"hidden\" name=\"tx\" value=\"{}\">{checkboxes}\
              <button class=\"btn\" name=\"decision\" value=\"allow\" type=\"submit\">Allow</button>\
              <button class=\"btn secondary\" name=\"decision\" value=\"deny\" type=\"submit\">Deny</button></form>",
             escape(consent.client),
             escape(consent.installation),
             escape(consent.email),
             escape(consent.client_id),
+            escape(consent.base),
             escape(consent.tx)
         ),
     )
@@ -148,7 +154,7 @@ mod tests {
 
     #[test]
     fn form_posts_keep_their_origin() {
-        let html = dev_form("test", "dev", "tx_1").0;
+        let html = dev_form("test", "", "dev", "tx_1").0;
         assert!(html.contains("<meta name=\"referrer\" content=\"same-origin\">"));
         assert!(!html.contains("no-referrer"));
     }
@@ -158,6 +164,7 @@ mod tests {
         let requested = vec![scope::READ.to_owned(), scope::DECIDE.to_owned()];
         let html = consent(&Consent {
             installation: "personal",
+            base: "",
             client: "Claude",
             client_id: "https://claude.ai/x",
             email: "a@b.c",
@@ -176,6 +183,7 @@ mod tests {
         let requested: Vec<String> = scope::ALL.iter().map(|s| (*s).to_owned()).collect();
         let html = consent(&Consent {
             installation: "personal",
+            base: "/frood",
             client: "Claude Code",
             client_id: "https://claude.ai/oauth/claude-code-client-metadata",
             email: "a@b.c",
@@ -183,6 +191,7 @@ mod tests {
             tx: "tx_1",
         })
         .0;
+        assert!(html.contains("action=\"/frood/oauth/consent\""));
         for s in scope::CLIENT_DEFAULT {
             assert!(html.contains(&format!("value=\"{s}\" checked")), "{s}");
         }

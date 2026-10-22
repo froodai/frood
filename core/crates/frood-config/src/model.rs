@@ -132,7 +132,8 @@ pub struct Server {
     /// Address the HTTP server binds to.
     #[serde(default = "default_listen")]
     pub listen: String,
-    /// Public HTTPS address; AI clients and OAuth need it from milestone M2.
+    /// Public HTTPS address; AI clients and OAuth need it. It may end in a path
+    /// (`https://example.com/frood`) when the host serves other things as well.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub public_url: Option<String>,
 }
@@ -177,6 +178,19 @@ pub struct Deploy {
     /// Host port PostgreSQL is published on (bound to 127.0.0.1).
     #[serde(default = "default_postgres_port")]
     pub postgres_port: u16,
+    /// The HTTPS front (Caddy) that runs when `server.public_url` is set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy: Option<Proxy>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Proxy {
+    /// A file of Caddy routes for the same site, such as another app under `/pages`
+    /// (relative to the config file). Caddy sees its folder at the same path, so the file
+    /// may import files next to it. Frood's own routes win only for its paths.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub routes: Option<String>,
 }
 
 impl Default for Deploy {
@@ -187,6 +201,7 @@ impl Default for Deploy {
             image: None,
             build: None,
             postgres_port: default_postgres_port(),
+            proxy: None,
         }
     }
 }

@@ -28,16 +28,16 @@ pub fn routes(auth: Auth) -> Router {
             get(server_metadata),
         )
         .route(
+            "/.well-known/oauth-authorization-server/{*issuer_path}",
+            get(server_metadata_at),
+        )
+        .route(
             "/.well-known/oauth-protected-resource",
             get(api_resource_metadata),
         )
         .route(
-            "/.well-known/oauth-protected-resource/v1",
-            get(api_resource_metadata),
-        )
-        .route(
-            "/.well-known/oauth-protected-resource/mcp",
-            get(mcp_resource_metadata),
+            "/.well-known/oauth-protected-resource/{*resource}",
+            get(resource_metadata_at),
         )
         .route("/oauth/authorize", get(authorize))
         .route("/oauth/login", get(choose_provider))
@@ -89,12 +89,35 @@ fn resource_metadata(auth: &Auth, resource: Resource) -> Json<Value> {
     }))
 }
 
+/// RFC 8414 for an issuer with a path: `/.well-known/oauth-authorization-server/frood`
+/// reaches the server at the root of the host, without the proxy stripping the path.
+async fn server_metadata_at(State(auth): State<Auth>, Path(issuer_path): Path<String>) -> Response {
+    if issuer_path.trim_end_matches('/') != auth.settings().base_path.trim_start_matches('/') {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    server_metadata(State(auth)).await.into_response()
+}
+
 async fn api_resource_metadata(State(auth): State<Auth>) -> Json<Value> {
     resource_metadata(&auth, Resource::Api)
 }
 
-async fn mcp_resource_metadata(State(auth): State<Auth>) -> Json<Value> {
-    resource_metadata(&auth, Resource::Mcp)
+/// `…/v1` and `…/mcp`, with the issuer's path in front (RFC 9728, from the root of the host)
+/// or without it (behind the proxy, which stripped it).
+async fn resource_metadata_at(State(auth): State<Auth>, Path(resource): Path<String>) -> Response {
+    let base = auth.settings().base_path.trim_start_matches('/');
+    let name = match resource
+        .strip_prefix(base)
+        .and_then(|r| r.strip_prefix('/'))
+    {
+        Some(rest) if !base.is_empty() => rest,
+        _ => resource.as_str(),
+    };
+    match name {
+        "v1" => resource_metadata(&auth, Resource::Api).into_response(),
+        "mcp" => resource_metadata(&auth, Resource::Mcp).into_response(),
+        _ => StatusCode::NOT_FOUND.into_response(),
+    }
 }
 
 #[derive(Deserialize)]
@@ -239,7 +262,7 @@ async fn authorize(
     } else {
         "login"
     };
-    Redirect::to(&format!("/oauth/{next}?tx={tx}")).into_response()
+    Redirect::to(&auth.settings().path(&format!("/oauth/{next}?tx={tx}"))).into_response()
 }
 
 struct PendingRequest {
@@ -300,7 +323,8 @@ impl Auth {
             ""
         };
         let cookie = format!(
-            "{SESSION_COOKIE}={secret}; Path=/oauth; HttpOnly; SameSite=Lax; Max-Age={}{secure}",
+            "{SESSION_COOKIE}={secret}; Path={}; HttpOnly; SameSite=Lax; Max-Age={}{secure}",
+            self.settings().path("/oauth"),
             SESSION_DAYS * 86_400
         );
         HeaderValue::from_str(&cookie)
@@ -374,8 +398,19 @@ async fn choose_provider(
             StatusCode::SERVICE_UNAVAILABLE,
             "No sign-in providers are configured (auth.providers in frood.yaml).",
         ),
-        [(only, _)] => Redirect::to(&format!("/oauth/login/{only}?tx={tx}")).into_response(),
-        _ => pages::choose_provider(&auth.settings().installation, &providers, &tx).into_response(),
+        [(only, _)] => Redirect::to(
+            &auth
+                .settings()
+                .path(&format!("/oauth/login/{only}?tx={tx}")),
+        )
+        .into_response(),
+        _ => pages::choose_provider(
+            &auth.settings().installation,
+            &auth.settings().base_path,
+            &providers,
+            &tx,
+        )
+        .into_response(),
     }
 }
 
@@ -389,9 +424,13 @@ async fn provider_start(
     }
     match auth.provider(&provider_id) {
         None => error_page(StatusCode::NOT_FOUND, "Unknown sign-in provider."),
-        Some(frood_config::Provider::Dev { id, .. }) => {
-            pages::dev_form(&auth.settings().installation, id, &tx).into_response()
-        }
+        Some(frood_config::Provider::Dev { id, .. }) => pages::dev_form(
+            &auth.settings().installation,
+            &auth.settings().base_path,
+            id,
+            &tx,
+        )
+        .into_response(),
         Some(frood_config::Provider::Oidc {
             id,
             issuer,
@@ -572,7 +611,8 @@ async fn finish_sign_in(auth: &Auth, tx: &str, email: &str, name: Option<&str>) 
             "Cannot continue sign-in.",
         );
     }
-    let mut response = Redirect::to(&format!("/oauth/consent?tx={tx}")).into_response();
+    let mut response =
+        Redirect::to(&auth.settings().path(&format!("/oauth/consent?tx={tx}"))).into_response();
     response.headers_mut().append(header::SET_COOKIE, cookie);
     response
 }
@@ -588,7 +628,8 @@ async fn consent_page(
     };
     let session = auth.session_user(&headers).await.ok().flatten();
     let Some(user_id) = session.filter(|s| Some(*s) == request.user_id) else {
-        return Redirect::to(&format!("/oauth/login?tx={tx}")).into_response();
+        return Redirect::to(&auth.settings().path(&format!("/oauth/login?tx={tx}")))
+            .into_response();
     };
     let email: String = match sqlx::query_scalar("SELECT email FROM users WHERE id = $1")
         .bind(user_id)
@@ -600,6 +641,7 @@ async fn consent_page(
     };
     pages::consent(&Consent {
         installation: &auth.settings().installation,
+        base: &auth.settings().base_path,
         client: request.client_name.as_deref().unwrap_or(&request.client_id),
         client_id: &request.client_id,
         email: &email,
