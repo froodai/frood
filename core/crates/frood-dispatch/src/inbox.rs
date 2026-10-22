@@ -1176,10 +1176,13 @@ impl Dispatch {
                     if shown.is_none() {
                         shown = Some(self.inbox_shown(item.clone()).await?);
                     }
-                    let body = json!({
+                    let mut body = json!({
                         "recipient": { "user_id": user, "external_id": external_id },
                         "item": shown,
                     });
+                    if let Some(console) = self.ctx.auth.settings().console_url() {
+                        body["console_url"] = json!(format!("{console}inbox/{}", item.id));
+                    }
                     match self.ctx.modules.call(channel, "notify.send", &body).await {
                         Ok(out) => {
                             sqlx::query(

@@ -184,6 +184,8 @@ async fn version(State(state): State<AppState>) -> Json<Value> {
         "api": "v1",
         "installation": state.installation,
         "config_sha256": state.config_sha256,
+        // For links from channels to the console; only with a public address.
+        "console": state.auth.settings().console_url(),
     }))
 }
 
