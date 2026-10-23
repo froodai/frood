@@ -268,7 +268,9 @@ pub fn caddyfile(loaded: &Loaded) -> Option<String> {
             "\tredir {base} {base}/ 308\n\
              \thandle_path {base}/* {{\n\t\treverse_proxy {upstream}\n\t}}\n\
              \t@frood_discovery path /.well-known/oauth-authorization-server /.well-known/oauth-authorization-server{base} /.well-known/oauth-protected-resource{base}/*\n\
-             \thandle @frood_discovery {{\n\t\treverse_proxy {upstream}\n\t}}\n"
+             \thandle @frood_discovery {{\n\t\treverse_proxy {upstream}\n\t}}\n\
+             \t# Anything no route claims: a clear answer for clients of an old address.\n\
+             \thandle {{\n\t\trespond 404\n\t}}\n"
         ));
     }
     out.push_str("}\n");
@@ -475,7 +477,7 @@ mod tests {
         assert!(caddyfile.contains(
             "path /.well-known/oauth-authorization-server /.well-known/oauth-authorization-server/frood /.well-known/oauth-protected-resource/frood/*"
         ));
-        assert!(!caddyfile.contains("\thandle {"), "the root is not Frood's");
+        assert!(caddyfile.contains("\thandle {\n\t\trespond 404\n"), "the root is not Frood's");
         let out = render(
             &loaded,
             Path::new("/x/frood.yaml"),
