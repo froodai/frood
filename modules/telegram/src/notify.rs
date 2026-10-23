@@ -4,195 +4,8 @@
 
 use serde_json::{Value, json};
 
-use crate::{Bot, Lang};
-
-/// Words of notifications.
-pub(crate) struct Words {
-    /// Russian: detector texts are written out per language.
-    ru: bool,
-    conflict: &'static str,
-    change: &'static str,
-    new: &'static str,
-    stale: &'static str,
-    merge: &'static str,
-    variant: &'static str,
-    before: &'static str,
-    after: &'static str,
-    added: &'static str,
-    closed: &'static str,
-    why: &'static str,
-    from_agent: &'static str,
-    found: &'static str,
-    question: &'static str,
-    due: &'static str,
-    due_before: &'static str,
-    due_today: &'static str,
-    due_overdue: &'static str,
-    due_in: &'static str,
-    due_ago: &'static str,
-    failed: &'static str,
-    accept: &'static str,
-    reject: &'static str,
-    defer: &'static str,
-    snooze: &'static str,
-    done: &'static str,
-    postpone: &'static str,
-    retry: &'static str,
-    dismiss: &'static str,
-    accepted: &'static str,
-    rejected: &'static str,
-    deferred: &'static str,
-    answered: &'static str,
-    expired: &'static str,
-    cancelled: &'static str,
-    marked_done: &'static str,
-    postponed: &'static str,
-    retried: &'static str,
-    dismissed: &'static str,
-    stale_now: &'static str,
-    recovered: &'static str,
-    resolved: &'static str,
-    elsewhere: &'static str,
-    by_policy: &'static str,
-    already: &'static str,
-    ok: &'static str,
-    digest: &'static str,
-    digest_accepted: &'static str,
-    digest_waiting: &'static str,
-    digest_due: &'static str,
-    digest_failed: &'static str,
-    digest_nothing: &'static str,
-    details: &'static str,
-    undo: &'static str,
-    undone: &'static str,
-}
-
-const EN: Words = Words {
-    ru: false,
-    conflict: "⚠️ Conflict with what is recorded",
-    change: "✏️ Change to what is recorded",
-    new: "🆕 New knowledge",
-    stale: "🕰 Knowledge may be stale",
-    merge: "🔗 Same entity?",
-    variant: "Option",
-    before: "Was",
-    after: "Now",
-    added: "+",
-    closed: "Closes",
-    why: "Why",
-    from_agent: "From agent",
-    found: "The agent found",
-    question: "❓ A question from agent",
-    due: "⏰ Due",
-    due_before: "is due tomorrow",
-    due_today: "is due today",
-    due_overdue: "was due yesterday: done, or move it?",
-    due_in: "is due in {n} days",
-    due_ago: "was due {n} days ago: done, or move it?",
-    failed: "🚨 A run failed",
-    accept: "Accept",
-    reject: "Keep current",
-    defer: "Later",
-    snooze: "Later",
-    done: "Done",
-    postpone: "Move a week",
-    retry: "Retry",
-    dismiss: "Hide",
-    accepted: "✅ Accepted",
-    rejected: "↩️ Kept the current one",
-    deferred: "⏸ Put off",
-    answered: "💬 Answered",
-    expired: "⌛ Expired",
-    cancelled: "🚫 Cancelled",
-    marked_done: "✅ Done",
-    postponed: "📅 Moved",
-    retried: "🔁 Retried",
-    dismissed: "🙈 Hidden",
-    stale_now: "♻️ Outdated: the knowledge changed meanwhile",
-    recovered: "✅ The job works again",
-    resolved: "✅ Resolved",
-    elsewhere: "elsewhere",
-    by_policy: "by a policy",
-    already: "Already resolved",
-    ok: "Done",
-    digest: "📋 What is new",
-    digest_accepted: "Accepted",
-    digest_waiting: "Waiting for you",
-    digest_due: "Due soon",
-    digest_failed: "Failed runs",
-    digest_nothing: "Nothing new.",
-    details: "Details",
-    undo: "Undo",
-    undone: "Undone",
-};
-
-const RU: Words = Words {
-    ru: true,
-    conflict: "⚠️ Противоречит записанному",
-    change: "✏️ Изменение записанного",
-    new: "🆕 Новое знание",
-    stale: "🕰 Знание, возможно, устарело",
-    merge: "🔗 Это одно и то же?",
-    variant: "Вариант",
-    before: "Было",
-    after: "Стало",
-    added: "+",
-    closed: "Закрыть",
-    why: "Почему",
-    from_agent: "От агента",
-    found: "Агент выяснил",
-    question: "❓ Вопрос от агента",
-    due: "⏰ Срок",
-    due_before: "завтра срок",
-    due_today: "срок сегодня",
-    due_overdue: "срок был вчера: выполнено или перенести?",
-    due_in: "срок через {n} дн.",
-    due_ago: "срок прошёл {n} дн. назад: выполнено или перенести?",
-    failed: "🚨 Запуск упал",
-    accept: "Принять",
-    reject: "Оставить старое",
-    defer: "Отложить",
-    snooze: "Отложить",
-    done: "Выполнено",
-    postpone: "Перенести на неделю",
-    retry: "Повторить",
-    dismiss: "Скрыть",
-    accepted: "✅ Принято",
-    rejected: "↩️ Оставлено старое",
-    deferred: "⏸ Отложено",
-    answered: "💬 Отвечено",
-    expired: "⌛ Время вышло",
-    cancelled: "🚫 Отменено",
-    marked_done: "✅ Выполнено",
-    postponed: "📅 Перенесено",
-    retried: "🔁 Запущено снова",
-    dismissed: "🙈 Скрыто",
-    stale_now: "♻️ Неактуально: знание успело измениться",
-    recovered: "✅ Джоба снова работает",
-    resolved: "✅ Решено",
-    elsewhere: "в другом месте",
-    by_policy: "политикой",
-    already: "Уже решено",
-    ok: "Готово",
-    digest: "📋 Что нового",
-    digest_accepted: "Принято",
-    digest_waiting: "Ждёт вашего решения",
-    digest_due: "Скоро сроки",
-    digest_failed: "Сбои запусков",
-    digest_nothing: "Ничего нового.",
-    details: "Подробнее",
-    undo: "Отменить",
-    undone: "Отменено",
-};
-
-impl Lang {
-    pub(crate) fn words(self) -> &'static Words {
-        match self {
-            Self::En => &EN,
-            Self::Ru => &RU,
-        }
-    }
-}
+use crate::Bot;
+use crate::lang::Words;
 
 fn short(text: &str, max: usize) -> String {
     if text.chars().count() <= max {
@@ -330,38 +143,24 @@ fn detector_text(c: &Value, w: &Words) -> String {
     let since = c["since"]
         .as_str()
         .map(|s| s.chars().take(16).collect::<String>().replace('T', " "));
-    let ru = w.ru;
-    let text = match (c["detector"].as_str().unwrap_or_default(), ru) {
-        ("module_down", true) => format!("Модуль {} не отвечает", field("module")),
-        ("module_down", false) => format!("Module {} does not answer", field("module")),
-        ("failures_in_a_row", true) => format!("Джоба {} падает раз за разом", field("job")),
-        ("failures_in_a_row", false) => format!("Job {} keeps failing", field("job")),
-        ("queued", true) => format!("Запуск {} давно ждёт в очереди", field("job")),
-        ("queued", false) => format!("A run of {} waits in the queue too long", field("job")),
-        ("overrun", true) => format!("Запуск {} работает дольше отведённого", field("job")),
-        ("overrun", false) => format!("A run of {} works longer than its time", field("job")),
-        ("source_stale", true) => format!(
-            "{} давно не читал источник {}",
-            field("job"),
-            field("source")
-        ),
-        ("source_stale", false) => {
-            format!("{} has not read {} for long", field("job"), field("source"))
-        }
-        ("budget", true) => format!(
-            "Аккаунт {}: потрачено ${:.2} из ${:.2} за месяц",
-            field("account"),
-            c["spent_usd"].as_f64().unwrap_or(0.0),
-            c["monthly_usd"].as_f64().unwrap_or(0.0)
-        ),
-        ("budget", false) => format!(
-            "Account {}: ${:.2} of ${:.2} spent this month",
-            field("account"),
-            c["spent_usd"].as_f64().unwrap_or(0.0),
-            c["monthly_usd"].as_f64().unwrap_or(0.0)
-        ),
-        ("dispatcher_lag", true) => "Обработка событий отстаёт".to_owned(),
-        ("dispatcher_lag", false) => "Processing of events is behind".to_owned(),
+    let usd = |key: &str| format!("${:.2}", c[key].as_f64().unwrap_or(0.0));
+    let fill = |template: &str| {
+        template
+            .replace("{module}", &field("module"))
+            .replace("{job}", &field("job"))
+            .replace("{source}", &field("source"))
+            .replace("{account}", &field("account"))
+            .replace("{spent}", &usd("spent_usd"))
+            .replace("{limit}", &usd("monthly_usd"))
+    };
+    let text = match c["detector"].as_str().unwrap_or_default() {
+        "module_down" => fill(w.module_down),
+        "failures_in_a_row" => fill(w.failing),
+        "queued" => fill(w.queued_long),
+        "overrun" => fill(w.overrun),
+        "source_stale" => fill(w.source_stale),
+        "budget" => fill(w.budget),
+        "dispatcher_lag" => w.lagging.to_owned(),
         _ => field("message"),
     };
     let mut out = format!("🚨 {text}");
@@ -702,6 +501,7 @@ impl Bot {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lang::Lang;
 
     fn conflict() -> Value {
         json!({
