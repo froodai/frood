@@ -3,8 +3,9 @@
 
 use serde_json::{Value, json};
 
+use crate::lang::{Lang, Texts};
 use crate::notify::{keyboard, text};
-use crate::{Bot, Lang, Message, Texts};
+use crate::{Bot, Message};
 
 /// What the menu shows; the descriptions come from the language's texts.
 const MENU: [&str; 5] = ["now", "inbox", "ask", "digest", "help"];
@@ -15,11 +16,8 @@ const SHOWN: usize = 5;
 impl Bot {
     /// Puts the commands into Telegram's menu, in the bot's language and in each one it speaks.
     pub(crate) async fn set_menu(&self) {
-        for (lang, code) in [
-            (self.lang, None),
-            (Lang::En, Some("en")),
-            (Lang::Ru, Some("ru")),
-        ] {
+        let each = Lang::ALL.into_iter().map(|lang| (lang, Some(lang.code())));
+        for (lang, code) in std::iter::once((self.lang, None)).chain(each) {
             let t = lang.texts();
             let commands: Vec<Value> = MENU
                 .iter()
@@ -232,7 +230,10 @@ fn day(iso: &str, t: &Texts) -> String {
     let parts: Vec<&str> = iso.get(..10).unwrap_or_default().split('-').collect();
     match parts.as_slice() {
         [_, month, day] => match (month.parse::<usize>(), day.parse::<u32>()) {
-            (Ok(month @ 1..=12), Ok(day)) => format!("{day} {}", t.months[month - 1]),
+            (Ok(month @ 1..=12), Ok(day)) => t
+                .date
+                .replace("{day}", &day.to_string())
+                .replace("{month}", t.months[month - 1]),
             _ => iso.to_owned(),
         },
         _ => iso.to_owned(),

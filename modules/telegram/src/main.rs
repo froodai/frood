@@ -8,10 +8,11 @@
 //! messages with buttons; a button acts as the person who pressed it.
 //!
 //! Environment (written by `frood apply`): `FROOD_URL`, `FROOD_TOKEN`, `FROOD_MODULE` (the
-//! channel name), `FROOD_MODULE_CONFIG` (`{"language": "en" | "ru"}`), `TELEGRAM_BOT_TOKEN`,
+//! channel name), `FROOD_MODULE_CONFIG` (`{"language": "en"}`: en, zh, es, hi, ar, fr, pt or ru), `TELEGRAM_BOT_TOKEN`,
 //! optionally `TELEGRAM_API_URL`, `PORT` (8080, for `/manifest` and `/healthz`).
 
 mod commands;
+mod lang;
 mod notify;
 
 use std::sync::Arc;
@@ -25,137 +26,10 @@ use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
+use lang::{Lang, Texts};
+
 const MANIFEST: &str = include_str!("../frood-module.yaml");
 const TELEGRAM_URL: &str = "https://api.telegram.org";
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Lang {
-    En,
-    Ru,
-}
-
-/// The bot's words.
-struct Texts {
-    help: &'static str,
-    not_linked: &'static str,
-    linked: &'static str,
-    link_failed: &'static str,
-    unlinked: &'static str,
-    link_usage: &'static str,
-    saving: &'static str,
-    saved: &'static str,
-    known: &'static str,
-    remembered: &'static str,
-    waiting: &'static str,
-    conflict: &'static str,
-    nothing: &'static str,
-    failed: &'static str,
-    still_working: &'static str,
-    error: &'static str,
-    /// Descriptions of /now, /inbox, /ask, /digest, /help in the menu.
-    menu: [&'static str; 5],
-    now_title: &'static str,
-    deadlines: &'static str,
-    nothing_due: &'static str,
-    overdue: &'static str,
-    waiting_n: &'static str,
-    changed_n: &'static str,
-    ask_usage: &'static str,
-    ask_nothing: &'static str,
-    since: &'static str,
-    inbox_empty: &'static str,
-    inbox_more: &'static str,
-    months: [&'static str; 12],
-}
-
-const EN: Texts = Texts {
-    help: "Send me notes, voice messages or files and I will put them into Frood. I also bring you what waits for your decision, with buttons.\n/now — what is due and what waits\n/inbox — decide what waits for you\n? when is the release — ask your memory\n/digest — what is new\nFirst link your account: open the link from the console, or send /link CODE (`frood link telegram --email you@example.com` gives a code).",
-    not_linked: "This Telegram account is not linked to Frood yet. Send /link CODE (get a code with `frood link telegram --email …`).",
-    linked: "Linked to",
-    link_failed: "Could not link",
-    unlinked: "Unlinked. I will not save your messages until you link again.",
-    link_usage: "Send /link followed by the code, e.g. /link K7M2QX9P",
-    saving: "Saved, processing…",
-    saved: "Saved.",
-    known: "Already saved earlier.",
-    remembered: "Remembered:",
-    waiting: "Waiting for your decision:",
-    conflict: "conflicts with what is recorded",
-    nothing: "Saved; nothing in it to remember.",
-    failed: "Saved, but processing failed:",
-    still_working: "Saved; still processing.",
-    error: "Could not save:",
-    menu: [
-        "What is due and what waits",
-        "Decide what waits for you",
-        "Ask your memory",
-        "What is new",
-        "How it works",
-    ],
-    now_title: "📌 Now",
-    deadlines: "Deadlines",
-    nothing_due: "No deadlines in the next two weeks.",
-    overdue: "overdue",
-    waiting_n: "Waiting for you: {n}",
-    changed_n: "Changed this week: {n}",
-    ask_usage: "Ask after /ask, or start a message with ?: “? when is the release”",
-    ask_nothing: "Nothing about that in memory.",
-    since: "since {date}",
-    inbox_empty: "Nothing waits for you.",
-    inbox_more: "{n} more wait; /inbox again after these.",
-    months: [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-    ],
-};
-
-const RU: Texts = Texts {
-    help: "Присылайте заметки, голосовые и файлы — я сохраню их во Frood. А ещё приношу то, что ждёт вашего решения, с кнопками.\n/now — сроки и что ждёт решения\n/inbox — разобрать то, что ждёт вас\n? когда релиз — спросить память\n/digest — что нового\nСначала свяжите аккаунт: откройте ссылку из консоли или пришлите /link КОД (код даёт `frood link telegram --email you@example.com`).",
-    not_linked: "Этот аккаунт Telegram ещё не связан с Frood. Пришлите /link КОД (код даёт `frood link telegram --email …`).",
-    linked: "Связано с",
-    link_failed: "Не удалось связать",
-    unlinked: "Связь удалена. Сообщения не сохраняю, пока не свяжете снова.",
-    link_usage: "Пришлите /link и код, например /link K7M2QX9P",
-    saving: "Сохранено, обрабатываю…",
-    saved: "Сохранено.",
-    known: "Это уже сохранено раньше.",
-    remembered: "Запомнил:",
-    waiting: "Ждёт вашего решения:",
-    conflict: "противоречит записанному",
-    nothing: "Сохранено; запоминать нечего.",
-    failed: "Сохранено, но обработка не удалась:",
-    still_working: "Сохранено; ещё обрабатываю.",
-    error: "Не удалось сохранить:",
-    menu: [
-        "Сроки и что ждёт решения",
-        "Разобрать то, что ждёт вас",
-        "Спросить память",
-        "Что нового",
-        "Как это работает",
-    ],
-    now_title: "📌 Сейчас",
-    deadlines: "Сроки",
-    nothing_due: "Сроков на две недели нет.",
-    overdue: "просрочено",
-    waiting_n: "Ждёт вашего решения: {n}",
-    changed_n: "Изменилось за неделю: {n}",
-    ask_usage: "Спросите после /ask или начните сообщение с ?: «? когда релиз»",
-    ask_nothing: "Об этом в памяти ничего нет.",
-    since: "с {date}",
-    inbox_empty: "Ничего не ждёт вашего решения.",
-    inbox_more: "Ждут ещё {n}; после этих — снова /inbox.",
-    months: [
-        "янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек",
-    ],
-};
-
-impl Lang {
-    fn texts(self) -> &'static Texts {
-        match self {
-            Self::En => &EN,
-            Self::Ru => &RU,
-        }
-    }
-}
 
 #[derive(Clone)]
 struct Bot {
@@ -751,11 +625,7 @@ fn bot_from_env() -> Result<Bot, String> {
             .to_owned(),
         token: std::env::var("FROOD_TOKEN").map_err(|_| "FROOD_TOKEN is not set")?,
         channel: std::env::var("FROOD_MODULE").unwrap_or_else(|_| "telegram".to_owned()),
-        lang: if config["language"] == "ru" {
-            Lang::Ru
-        } else {
-            Lang::En
-        },
+        lang: Lang::from_code(config["language"].as_str().unwrap_or("en")),
         poll_every: Duration::from_secs(2),
         poll_for: Duration::from_secs(180),
         console: Arc::default(),

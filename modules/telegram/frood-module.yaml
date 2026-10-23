@@ -9,7 +9,7 @@ frood_api: [knowledge:capture, knowledge:read, channels:act]
 config:
   type: object
   properties:
-    language: { type: string, enum: [en, ru], description: "Language of the bot's replies, default en" }
+    language: { type: string, enum: [en, zh, es, hi, ar, fr, pt, ru], description: "Language of the bot's replies and notifications, default en; the menu comes in every language" }
 permissions:
   egress: [api.telegram.org]
   secrets: [TELEGRAM_BOT_TOKEN]
