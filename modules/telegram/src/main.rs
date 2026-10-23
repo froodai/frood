@@ -126,13 +126,31 @@ impl Bot {
         self.reply_with(message, text, None).await
     }
 
+    /// A reply in Telegram's HTML; the caller escapes what it did not write.
+    async fn reply_html(&self, message: &Message, text: &str) -> Option<i64> {
+        self.send_reply(message, text, None, true).await
+    }
+
     async fn reply_with(
         &self,
         message: &Message,
         text: &str,
         markup: Option<&Value>,
     ) -> Option<i64> {
+        self.send_reply(message, text, markup, false).await
+    }
+
+    async fn send_reply(
+        &self,
+        message: &Message,
+        text: &str,
+        markup: Option<&Value>,
+        html: bool,
+    ) -> Option<i64> {
         let mut body = json!({ "chat_id": message.chat.id, "text": text, "reply_parameters": { "message_id": message.message_id } });
+        if html {
+            body["parse_mode"] = json!("HTML");
+        }
         if let Some(markup) = markup {
             body["reply_markup"] = markup.clone();
         }
@@ -224,14 +242,18 @@ impl Bot {
                         let digest: Value = r.json().await.unwrap_or(Value::Null);
                         notify::digest_text(&digest, self.lang.words())
                     }
-                    Ok(r) if r.status() == StatusCode::FORBIDDEN => t.not_linked.to_owned(),
+                    Ok(r) if r.status() == StatusCode::FORBIDDEN => notify::esc(t.not_linked),
                     Ok(r) => {
                         let body: Value = r.json().await.unwrap_or(Value::Null);
-                        format!("{} {}", t.error, body["detail"].as_str().unwrap_or("?"))
+                        notify::esc(&format!(
+                            "{} {}",
+                            t.error,
+                            body["detail"].as_str().unwrap_or("?")
+                        ))
                     }
-                    Err(err) => format!("{} {err}", t.error),
+                    Err(err) => notify::esc(&format!("{} {err}", t.error)),
                 };
-                self.reply(&message, &answer).await;
+                self.reply_html(&message, &answer).await;
                 return;
             }
             "/unlink" => {
@@ -943,7 +965,7 @@ mod tests {
                 w.sent[0]["text"]
                     .as_str()
                     .unwrap()
-                    .starts_with("⚠️ Противоречит записанному")
+                    .starts_with("<b>⚠️ Противоречит записанному</b>")
             );
             assert_eq!(
                 w.sent[0]["reply_markup"]["inline_keyboard"][0][0]["callback_data"],

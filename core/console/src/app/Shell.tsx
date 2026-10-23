@@ -133,6 +133,24 @@ function Status() {
   );
 }
 
+/** Light and dark at hand; "as the system" stays in the account menu. */
+function ThemeButton() {
+  const { t } = useI18n();
+  const { resolvedTheme, setTheme } = useTheme();
+  const dark = resolvedTheme === "dark";
+  return (
+    <button
+      type="button"
+      onClick={() => setTheme(dark ? "light" : "dark")}
+      aria-label={t("palette.toggleTheme")}
+      title={t("palette.toggleTheme")}
+      className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+    >
+      {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
+    </button>
+  );
+}
+
 export function Shell() {
   const { t } = useI18n();
   const location = useLocation();
@@ -167,6 +185,7 @@ export function Shell() {
           <span className="hidden text-sm text-muted-foreground sm:inline">{t(section.sub)}</span>
           <div className="flex-1" />
           <Status />
+          <ThemeButton />
         </header>
         <main className="flex min-h-0 flex-1 flex-col">
           <Outlet />

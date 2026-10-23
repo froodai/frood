@@ -6,11 +6,47 @@ use uuid::Uuid;
 use crate::error::{LedgerError, Result, invalid, parse_text};
 use crate::model::{
     AssertionFilter, AssertionVersion, AssertionView, BlobInfo, Entity, EntityView, Flag, Link,
-    Proposal, ProposalState, SlotOp, Source, Timestamp,
+    Proposal, ProposalState, SlotOp, Source, SourceSummary, Timestamp,
 };
 use crate::rows::{self, version_columns};
 
 const MAX_LIMIT: i64 = 200;
+
+/// The newest sources first; `origin` narrows to `capture` or one connector's.
+pub(crate) async fn sources(
+    pool: &PgPool,
+    origin: Option<&str>,
+    before: Option<Timestamp>,
+    limit: i64,
+) -> Result<Vec<SourceSummary>> {
+    let rows = sqlx::query(
+        "SELECT s.id, s.kind, s.origin, s.title, left(s.content, 400) AS excerpt, s.captured_by, s.captured_at, \
+         s.said_at, s.withdrawn_at, b.content_type FROM sources s LEFT JOIN blobs b ON b.id = s.blob_id \
+         WHERE ($1::text IS NULL OR s.origin = $1) AND ($2::timestamptz IS NULL OR s.captured_at < $2) \
+         ORDER BY s.captured_at DESC LIMIT $3",
+    )
+    .bind(origin)
+    .bind(before)
+    .bind(limit.clamp(1, MAX_LIMIT))
+    .fetch_all(pool)
+    .await?;
+    rows.iter()
+        .map(|row| {
+            Ok(SourceSummary {
+                id: row.try_get("id")?,
+                kind: row.try_get("kind")?,
+                origin: row.try_get("origin")?,
+                title: row.try_get("title")?,
+                excerpt: row.try_get("excerpt")?,
+                captured_by: row.try_get("captured_by")?,
+                captured_at: row.try_get("captured_at")?,
+                said_at: row.try_get("said_at")?,
+                withdrawn_at: row.try_get("withdrawn_at")?,
+                content_type: row.try_get("content_type")?,
+            })
+        })
+        .collect()
+}
 
 pub(crate) async fn source(pool: &PgPool, id: Uuid) -> Result<Source> {
     let row = sqlx::query(

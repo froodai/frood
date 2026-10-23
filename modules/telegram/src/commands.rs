@@ -4,7 +4,7 @@
 use serde_json::{Value, json};
 
 use crate::lang::{Lang, Texts};
-use crate::notify::{keyboard, text};
+use crate::notify::{esc, keyboard, text};
 use crate::{Bot, Message};
 
 /// What the menu shows; the descriptions come from the language's texts.
@@ -105,7 +105,7 @@ impl Bot {
             return true;
         }
         let answer = match (command, question) {
-            (_, Some("")) => Ok(t.ask_usage.to_owned()),
+            (_, Some("")) => Ok(esc(t.ask_usage)),
             (_, Some(question)) => self.ask(question).await,
             ("/now", _) => self.now().await,
             _ => {
@@ -113,8 +113,8 @@ impl Bot {
                 return true;
             }
         };
-        let reply = answer.unwrap_or_else(|err| format!("{} {err}", t.error));
-        self.reply(message, &reply).await;
+        let reply = answer.unwrap_or_else(|err| format!("{} {}", esc(t.error), esc(&err)));
+        self.reply_html(message, &reply).await;
         true
     }
 
@@ -123,25 +123,34 @@ impl Bot {
         let now = self.get("/v1/now").await?;
         let inbox = self.get("/v1/inbox?limit=200").await?;
         let waiting = open(&inbox).len();
-        let mut out = vec![t.now_title.to_owned()];
+        let mut out = vec![format!("<b>{}</b>", esc(t.now_title)), String::new()];
         let deadlines = now["deadlines"].as_array().cloned().unwrap_or_default();
         if deadlines.is_empty() {
-            out.push(t.nothing_due.to_owned());
+            out.push(esc(t.nothing_due));
         } else {
-            out.push(format!("{}:", t.deadlines));
+            out.push(format!("<b>{}</b>", esc(t.deadlines)));
             for d in deadlines.iter().take(SHOWN) {
                 let when = if d["overdue"] == true {
                     t.overdue.to_owned()
                 } else {
                     day(d["due"].as_str().unwrap_or_default(), t)
                 };
-                out.push(format!("• {when} — {}", d["text"].as_str().unwrap_or("?")));
+                out.push(format!(
+                    "• <b>{}</b> — {}",
+                    esc(&when),
+                    esc(&short(d["text"].as_str().unwrap_or("?"), 110))
+                ));
             }
         }
         out.push(String::new());
-        out.push(t.waiting_n.replace("{n}", &waiting.to_string()));
+        let bold = |template: &str, n: usize| esc(template).replace("{n}", &format!("<b>{n}</b>"));
+        out.push(format!(
+            "⏳ {}{}",
+            bold(t.waiting_n, waiting),
+            if waiting > 0 { " — /inbox" } else { "" }
+        ));
         let changes = now["changes"].as_array().map_or(0, Vec::len);
-        out.push(t.changed_n.replace("{n}", &changes.to_string()));
+        out.push(format!("✏️ {}", bold(t.changed_n, changes)));
         Ok(out.join("\n"))
     }
 
@@ -161,7 +170,11 @@ impl Bot {
                     "{date}",
                     &day(h["valid_from"].as_str().unwrap_or_default(), t),
                 );
-                format!("• {} ({since})", h["text"].as_str().unwrap_or("?"))
+                format!(
+                    "• {} <i>({})</i>",
+                    esc(h["text"].as_str().unwrap_or("?")),
+                    esc(&since)
+                )
             })
             .collect::<Vec<_>>()
             .join("\n"))
@@ -201,7 +214,7 @@ impl Bot {
             let sent = self
                 .telegram(
                     "sendMessage",
-                    json!({ "chat_id": chat, "text": text(shown, w), "reply_markup": keyboard(shown, w, console.as_deref()) }),
+                    json!({ "chat_id": chat, "text": text(shown, w), "parse_mode": "HTML", "reply_markup": keyboard(shown, w, console.as_deref()) }),
                 )
                 .await;
             let one_option = shown["item"]["kind"] == "proposal"
@@ -334,6 +347,13 @@ fn batch_key() -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_millis() as u64);
     format!("{:x}{:x}", now, NEXT.fetch_add(1, Ordering::Relaxed))
+}
+
+fn short(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_owned();
+    }
+    format!("{}…", text.chars().take(max).collect::<String>())
 }
 
 /// Items waiting for a person now.

@@ -20,6 +20,7 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/v1/search", get(search))
         .route("/v1/sources/{id}/status", get(source_status))
+        .route("/v1/jobs", get(list_jobs))
         .route("/v1/runs", get(list_runs).post(start_run))
         .route("/v1/runs/{id}", get(run))
         .route("/v1/runs/{id}/events", get(run_events))
@@ -44,6 +45,14 @@ struct RunQuery {
     job: Option<String>,
     status: Option<String>,
     limit: Option<i64>,
+}
+
+/// The configured jobs, for the console's Automations.
+async fn list_jobs(
+    State(state): State<AppState>,
+    _caller: Caller<Read>,
+) -> Json<Vec<serde_json::Value>> {
+    Json(state.dispatch.jobs_shown())
 }
 
 async fn list_runs(

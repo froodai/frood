@@ -254,6 +254,23 @@ pub struct Source {
     pub withdrawn_at: Option<Timestamp>,
 }
 
+/// A source in a list: what it is and the start of its text, without evidence or the file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SourceSummary {
+    pub id: Uuid,
+    pub kind: String,
+    pub origin: String,
+    pub title: Option<String>,
+    /// The first few hundred characters of the text, if there is text.
+    pub excerpt: Option<String>,
+    pub captured_by: String,
+    pub captured_at: Timestamp,
+    pub said_at: Option<Timestamp>,
+    pub withdrawn_at: Option<Timestamp>,
+    /// The file's content type, when a file came with it.
+    pub content_type: Option<String>,
+}
+
 /// What taking a note back did.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Withdrawn {

@@ -22,22 +22,29 @@ fn agent_job(author: &str) -> Option<&str> {
 }
 
 /// The message text of a shown item (`{item, content, actions}`).
+/// Text for Telegram's HTML: what came from people and agents must not read as markup.
+pub(crate) fn esc(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+/// The message of a shown item (`{item, content, actions}`), in Telegram's HTML: a bold
+/// headline, short labelled lines, the quote in italics.
 pub(crate) fn text(shown: &Value, w: &Words) -> String {
     let item = &shown["item"];
     let content = &shown["content"];
     let mut lines: Vec<String> = Vec::new();
     match item["kind"].as_str().unwrap_or_default() {
         "proposal" => {
-            lines.push(
-                match content["risk"].as_str() {
-                    Some("conflict") => w.conflict,
-                    Some("change") => w.change,
-                    Some("stale_knowledge") => w.stale,
-                    Some("entity_merge") => w.merge,
-                    _ => w.new,
-                }
-                .to_owned(),
-            );
+            let headline = match content["risk"].as_str() {
+                Some("conflict") => w.conflict,
+                Some("change") => w.change,
+                Some("stale_knowledge") => w.stale,
+                Some("entity_merge") => w.merge,
+                _ => w.new,
+            };
+            lines.push(format!("<b>{}</b>", esc(headline)));
             let alternatives = content["alternatives"]
                 .as_array()
                 .cloned()
@@ -48,43 +55,55 @@ pub(crate) fn text(shown: &Value, w: &Words) -> String {
                         .as_str()
                         .or_else(|| alternative["key"].as_str())
                         .unwrap_or("?");
-                    lines.push(format!("\n{} «{name}»:", w.variant));
+                    lines.push(format!("\n<b>{} «{}»</b>", esc(w.variant), esc(name)));
                 }
                 for change in alternative["changes"].as_array().into_iter().flatten() {
                     match (change["before"].as_str(), change["after"].as_str()) {
                         (Some(before), Some(after)) => {
-                            lines.push(format!("{}: {}", w.before, short(before, 300)));
-                            lines.push(format!("{}: {}", w.after, short(after, 300)));
+                            lines.push(format!(
+                                "<b>{}:</b> {}",
+                                esc(w.before),
+                                esc(&short(before, 220))
+                            ));
+                            lines.push(format!(
+                                "<b>{}:</b> {}",
+                                esc(w.after),
+                                esc(&short(after, 220))
+                            ));
                         }
-                        (None, Some(after)) => {
-                            lines.push(format!("{} {}", w.added, short(after, 300)))
-                        }
-                        (Some(before), None) => {
-                            lines.push(format!("{}: {}", w.closed, short(before, 300)))
-                        }
+                        (None, Some(after)) => lines.push(esc(&short(after, 300))),
+                        (Some(before), None) => lines.push(format!(
+                            "<b>{}:</b> {}",
+                            esc(w.closed),
+                            esc(&short(before, 220))
+                        )),
                         (None, None) => {}
                     }
                 }
             }
             if let Some(quote) = content["quote"].as_str() {
-                lines.push(format!("\n«{}»", short(quote, 300)));
+                lines.push(format!("\n<i>«{}»</i>", esc(&short(quote, 220))));
             }
             if let Some(rationale) = content["rationale"].as_str() {
-                lines.push(format!("{}: {}", w.why, short(rationale, 300)));
+                lines.push(format!(
+                    "<b>{}:</b> {}",
+                    esc(w.why),
+                    esc(&short(rationale, 200))
+                ));
             }
             if let Some(job) = content["author"].as_str().and_then(agent_job) {
-                lines.push(format!("{}: {job}", w.from_agent));
+                lines.push(format!("<i>{}: {}</i>", esc(w.from_agent), esc(job)));
             }
         }
         "question" => {
             lines.push(format!(
-                "{} {}:",
-                w.question,
-                content["job"].as_str().unwrap_or("?")
+                "<b>{} {}</b>",
+                esc(w.question),
+                esc(content["job"].as_str().unwrap_or("?"))
             ));
-            lines.push(content["text"].as_str().unwrap_or_default().to_owned());
+            lines.push(esc(content["text"].as_str().unwrap_or_default()));
             if let Some(context) = content["context"].as_str() {
-                lines.push(format!("\n{}", short(context, 500)));
+                lines.push(format!("\n<i>{}</i>", esc(&short(context, 400))));
             }
         }
         "reminder" => {
@@ -104,35 +123,39 @@ pub(crate) fn text(shown: &Value, w: &Words) -> String {
                 d => w.due_ago.replace("{n}", &d.to_string()),
             };
             lines.push(format!(
-                "{} {}: {}",
-                w.due,
-                content["due"].as_str().unwrap_or("?"),
-                step
+                "<b>{} {}</b>: {}",
+                esc(w.due),
+                esc(content["due"].as_str().unwrap_or("?")),
+                esc(&step)
             ));
-            lines.push(content["text"].as_str().unwrap_or_default().to_owned());
+            lines.push(esc(content["text"].as_str().unwrap_or_default()));
         }
-        "alert" if content.get("detector").is_some() => lines.push(detector_text(content, w)),
+        "alert" if content.get("detector").is_some() => lines.push(esc(&detector_text(content, w))),
         "alert" => {
             lines.push(format!(
-                "{}: {}",
-                w.failed,
-                content["job"].as_str().unwrap_or("?")
+                "<b>{}: {}</b>",
+                esc(w.failed),
+                esc(content["job"].as_str().unwrap_or("?"))
             ));
             if let Some(error) = content["error"].as_str() {
-                lines.push(short(error, 500));
+                lines.push(esc(&short(error, 400)));
             }
         }
         "digest" => lines.push(digest_text(content, w)),
-        _ => lines.push(short(&content.to_string(), 1000)),
+        _ => lines.push(esc(&short(&content.to_string(), 800))),
     }
     if let Some(report) = item
         .pointer("/investigation/report")
         .and_then(Value::as_str)
     {
-        lines.push(format!("\n🔎 {}: {}", w.found, short(report, 800)));
+        lines.push(format!(
+            "\n🔎 <b>{}:</b> {}",
+            esc(w.found),
+            esc(&short(report, 600))
+        ));
     }
     if item["state"] == "resolved" {
-        lines.push(format!("\n{}", resolution(&item["resolution"], w)));
+        lines.push(format!("\n{}", esc(&resolution(&item["resolution"], w))));
     }
     lines.join("\n")
 }
@@ -175,11 +198,21 @@ fn detector_text(c: &Value, w: &Words) -> String {
 
 /// A digest (`GET /v1/digest` or a `digest` item) as text.
 pub(crate) fn digest_text(digest: &Value, w: &Words) -> String {
-    let mut lines = vec![w.digest.to_owned()];
-    let list = |title: &str, items: Vec<String>, lines: &mut Vec<String>| {
-        if !items.is_empty() {
-            lines.push(format!("\n{title}:"));
-            lines.extend(items.into_iter().map(|i| format!("• {}", short(&i, 200))));
+    let mut lines = vec![format!("<b>{}</b>", esc(w.digest))];
+    // A few short lines per section; the rest is a count, the console or /inbox has it all.
+    let list = |title: String, items: Vec<String>, total: usize, lines: &mut Vec<String>| {
+        if items.is_empty() {
+            return;
+        }
+        lines.push(format!("\n<b>{title}</b>"));
+        lines.extend(items.iter().take(DIGEST_ITEMS).map(|i| format!("• {i}")));
+        if total > DIGEST_ITEMS.min(items.len()) {
+            lines.push(format!(
+                "<i>{}</i>",
+                esc(&w
+                    .more
+                    .replace("{n}", &(total - DIGEST_ITEMS.min(items.len())).to_string()))
+            ));
         }
     };
     let strings = |v: &Value| -> Vec<String> {
@@ -187,21 +220,24 @@ pub(crate) fn digest_text(digest: &Value, w: &Words) -> String {
             .into_iter()
             .flatten()
             .filter_map(Value::as_str)
-            .map(str::to_owned)
+            .map(|s| esc(&short(s, DIGEST_CHARS)))
             .collect()
     };
-    list(w.digest_accepted, strings(&digest["accepted"]), &mut lines);
+    let accepted = strings(&digest["accepted"]);
+    let accepted_total = accepted.len();
+    list(esc(w.digest_accepted), accepted, accepted_total, &mut lines);
     let waiting: Vec<String> = digest["waiting"]["items"]
         .as_array()
         .into_iter()
         .flatten()
-        .filter_map(|i| i["what"].as_str().map(str::to_owned))
+        .filter_map(|i| i["what"].as_str().map(|s| esc(&short(s, DIGEST_CHARS))))
         .collect();
-    let count = digest["waiting"]["count"].as_u64().unwrap_or(0);
+    let count = digest["waiting"]["count"].as_u64().unwrap_or(0) as usize;
     if count > 0 {
         list(
-            &format!("{} ({count})", w.digest_waiting),
+            format!("{} ({count})", esc(w.digest_waiting)),
             waiting,
+            count,
             &mut lines,
         );
     }
@@ -211,13 +247,14 @@ pub(crate) fn digest_text(digest: &Value, w: &Words) -> String {
         .flatten()
         .map(|d| {
             format!(
-                "{} — {}",
-                d["due"].as_str().unwrap_or("?"),
-                d["text"].as_str().unwrap_or("?")
+                "<b>{}</b> — {}",
+                esc(d["due"].as_str().unwrap_or("?")),
+                esc(&short(d["text"].as_str().unwrap_or("?"), DIGEST_CHARS))
             )
         })
         .collect();
-    list(w.digest_due, due, &mut lines);
+    let due_total = due.len();
+    list(esc(w.digest_due), due, due_total, &mut lines);
     let failed: Vec<String> = digest["failed_runs"]
         .as_array()
         .into_iter()
@@ -225,17 +262,22 @@ pub(crate) fn digest_text(digest: &Value, w: &Words) -> String {
         .map(|r| {
             format!(
                 "{}: {}",
-                r["job"].as_str().unwrap_or("?"),
-                r["error"].as_str().unwrap_or("?")
+                esc(r["job"].as_str().unwrap_or("?")),
+                esc(&short(r["error"].as_str().unwrap_or("?"), DIGEST_CHARS))
             )
         })
         .collect();
-    list(w.digest_failed, failed, &mut lines);
+    let failed_total = failed.len();
+    list(esc(w.digest_failed), failed, failed_total, &mut lines);
     if lines.len() == 1 {
-        lines.push(w.digest_nothing.to_owned());
+        lines.push(esc(w.digest_nothing));
     }
     lines.join("\n")
 }
+
+/// How many lines a digest section shows, and how long each may be.
+const DIGEST_ITEMS: usize = 5;
+const DIGEST_CHARS: usize = 110;
 
 /// How the situation ended, in a word, and where.
 fn resolution(resolution: &Value, w: &Words) -> String {
@@ -351,7 +393,7 @@ impl Bot {
         let sent = self
             .telegram(
                 "sendMessage",
-                json!({ "chat_id": chat, "text": text(shown, w), "reply_markup": keyboard(shown, w, console) }),
+                json!({ "chat_id": chat, "text": text(shown, w), "parse_mode": "HTML", "reply_markup": keyboard(shown, w, console) }),
             )
             .await?;
         Ok(json!({ "message_ref": message_ref(&json!(chat), &sent["message_id"]) }))
@@ -374,7 +416,7 @@ impl Bot {
         let result = self
             .telegram(
                 "editMessageText",
-                json!({ "chat_id": chat, "message_id": message_id, "text": text(shown, w),
+                json!({ "chat_id": chat, "message_id": message_id, "text": text(shown, w), "parse_mode": "HTML",
                         "reply_markup": markup(shown, w, console.as_deref()) }),
             )
             .await;
@@ -533,12 +575,22 @@ mod tests {
     }
 
     #[test]
+    fn what_people_wrote_never_reads_as_markup() {
+        let mut shown = conflict();
+        shown["content"]["quote"] = json!("a <b>bold</b> & <script>");
+        assert!(
+            text(&shown, Lang::Ru.words())
+                .contains("«a &lt;b&gt;bold&lt;/b&gt; &amp; &lt;script&gt;»")
+        );
+    }
+
+    #[test]
     fn a_conflict_reads_as_was_and_now_with_buttons() {
         let w = Lang::Ru.words();
         let shown = conflict();
         assert_eq!(
             text(&shown, w),
-            "⚠️ Противоречит записанному\nБыло: Релиз 2.4 — 14 ноября\nСтало: Релиз 2.4 — 28 ноября\n\n«релиз переносим на 28.11»\nПочему: #release, 18:02\nОт агента: daily-sweep\n\n🔎 Агент выяснил: Olya confirmed in #release"
+            "<b>⚠️ Противоречит записанному</b>\n<b>Было:</b> Релиз 2.4 — 14 ноября\n<b>Стало:</b> Релиз 2.4 — 28 ноября\n\n<i>«релиз переносим на 28.11»</i>\n<b>Почему:</b> #release, 18:02\n<i>От агента: daily-sweep</i>\n\n🔎 <b>Агент выяснил:</b> Olya confirmed in #release"
         );
         assert_eq!(
             keyboard(&shown, w, None),
@@ -580,15 +632,15 @@ mod tests {
         };
         assert_eq!(
             text(&reminder(-3), w),
-            "⏰ Срок 2026-11-14: срок через 3 дн.\nСдать отчёт"
+            "<b>⏰ Срок 2026-11-14</b>: срок через 3 дн.\nСдать отчёт"
         );
         assert_eq!(
             text(&reminder(0), w),
-            "⏰ Срок 2026-11-14: срок сегодня\nСдать отчёт"
+            "<b>⏰ Срок 2026-11-14</b>: срок сегодня\nСдать отчёт"
         );
         assert_eq!(
             text(&reminder(2), w),
-            "⏰ Срок 2026-11-14: срок прошёл 2 дн. назад: выполнено или перенести?\nСдать отчёт"
+            "<b>⏰ Срок 2026-11-14</b>: срок прошёл 2 дн. назад: выполнено или перенести?\nСдать отчёт"
         );
     }
 
@@ -603,11 +655,11 @@ mod tests {
         });
         assert_eq!(
             digest_text(&digest, w),
-            "📋 Что нового\n\nПринято:\n• Релиз 2.4 — 28 ноября\n\nЖдёт вашего решения (1):\n• Решение или обсуждение?\n\nСкоро сроки:\n• 2026-11-14 — Сдать отчёт"
+            "<b>📋 Что нового</b>\n\n<b>Принято</b>\n• Релиз 2.4 — 28 ноября\n\n<b>Ждёт вашего решения (1)</b>\n• Решение или обсуждение?\n\n<b>Скоро сроки</b>\n• <b>2026-11-14</b> — Сдать отчёт"
         );
         assert_eq!(
             digest_text(&json!({ "waiting": { "count": 0 } }), w),
-            "📋 Что нового\nНичего нового."
+            "<b>📋 Что нового</b>\nНичего нового."
         );
     }
 
