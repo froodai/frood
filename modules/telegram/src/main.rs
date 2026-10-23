@@ -690,7 +690,7 @@ mod tests {
 
     use axum::extract::{Multipart, Path, State};
     use axum::http::HeaderMap;
-    use axum::routing::{delete, post};
+    use axum::routing::post;
 
     use super::*;
 
@@ -729,7 +729,11 @@ mod tests {
                 w.lock().unwrap().links.push(b);
                 Json(json!({ "linked": true, "email": "alice@example.com" }))
             }))
-            .route("/v1/channels/telegram/links/{id}", delete(|Path(_id): Path<String>| async { axum::http::StatusCode::NO_CONTENT }))
+            .route(
+                "/v1/channels/telegram/links/{id}",
+                get(|| async { Json(json!({ "linked": true })) })
+                    .delete(|Path(_id): Path<String>| async { axum::http::StatusCode::NO_CONTENT }),
+            )
             .route("/v1/capture", post(|State(w): State<Shared>, headers: HeaderMap, request: axum::extract::Request| async move {
                 let is_multipart = headers.get("content-type").and_then(|v| v.to_str().ok()).is_some_and(|v| v.starts_with("multipart/"));
                 let mut record = json!({});
@@ -760,14 +764,8 @@ mod tests {
                 w.lock().unwrap().answered.push(b);
                 Json(json!({ "ok": true, "result": true }))
             }))
-            .route("/v1/inbox/{id}", get(|Path(id): Path<String>| async move {
-                assert_eq!(id, "item-1");
-                Json(json!({
-                    "item": { "id": "item-1", "kind": "proposal", "state": "open" },
-                    "content": { "risk": "conflict", "alternatives": [{ "key": "default", "changes": [{ "before": "Релиз — 14.11", "after": "Релиз — 28.11" }] }] },
-                    "actions": [{ "action": "accept", "alternative": "default" }, { "action": "reject" }]
-                }))
-            }))
+            .route("/v1/inbox/{id}", get(|Path(id): Path<String>| async move { Json(card(&id)) }))
+            .route("/v1/inbox", get(|| async { Json(json!([card("item-1"), card("item-2")])) }))
             .route("/v1/inbox/{id}/act", post(|State(w): State<Shared>, headers: HeaderMap, Json(b): Json<Value>| async move {
                 assert_eq!(headers["authorization"], "Bearer module-token");
                 w.lock().unwrap().acts.push(b);
@@ -811,6 +809,15 @@ mod tests {
             console: Arc::default(),
             batches: Arc::default(),
         }
+    }
+
+    /// An Inbox item as the core shows it: a change with one option.
+    fn card(id: &str) -> Value {
+        json!({
+            "item": { "id": id, "kind": "proposal", "state": "open" },
+            "content": { "risk": "conflict", "alternatives": [{ "key": "default", "changes": [{ "before": "Релиз — 14.11", "after": "Релиз — 28.11" }] }] },
+            "actions": [{ "action": "accept", "alternative": "default" }, { "action": "reject" }]
+        })
     }
 
     fn message(from: i64, extra: Value) -> Message {
@@ -1002,5 +1009,35 @@ mod tests {
             manifest["frood_api"],
             json!(["knowledge:capture", "knowledge:read", "channels:act"])
         );
+    }
+
+    #[tokio::test]
+    async fn inbox_cards_come_with_accept_all() {
+        let (url, world) = world().await;
+        let bot = bot(&url, Lang::En);
+        bot.handle(message(42, json!({ "text": "/inbox" }))).await;
+        let key = {
+            let w = world.lock().unwrap();
+            assert_eq!(w.sent.len(), 3, "two cards and the button");
+            let button = &w.sent[2]["reply_markup"]["inline_keyboard"][0][0];
+            assert_eq!(button["text"], "Accept all 2");
+            button["callback_data"].as_str().unwrap().to_owned()
+        };
+        bot.on_button(&json!({ "id": "q-2", "from": { "id": 42 }, "data": key,
+                               "message": { "chat": { "id": 77 }, "message_id": 900 } }))
+            .await;
+        let w = world.lock().unwrap();
+        assert_eq!(w.acts.len(), 2);
+        assert!(
+            w.acts
+                .iter()
+                .all(|a| a["action"] == "accept" && a["external_id"] == "42")
+        );
+        let last = w.edited.last().unwrap();
+        assert_eq!(last["text"], "✅ Accepted: 2");
+        let undo = last["reply_markup"]["inline_keyboard"][0][0]["callback_data"]
+            .as_str()
+            .unwrap();
+        assert!(undo.starts_with("B:"), "{undo}");
     }
 }
