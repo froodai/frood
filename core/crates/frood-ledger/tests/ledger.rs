@@ -936,3 +936,105 @@ async fn undoing_a_creation_takes_it_out_and_a_later_change_blocks_undo() {
         Some("Release 2.4 on Dec 5")
     );
 }
+
+#[tokio::test]
+async fn a_note_taken_back_takes_what_came_from_it() {
+    let ledger = ledger_or_skip!("ledger_withdraw");
+    let note = "release 2.4 on Nov 14, Olya owns billing";
+    let captured = ledger
+        .capture_source(
+            &user(),
+            NewSource {
+                kind: "note".into(),
+                origin: "capture".into(),
+                uri: None,
+                title: None,
+                content: note.into(),
+                said_at: None,
+                metadata: json!({}),
+            },
+        )
+        .await
+        .unwrap();
+    let source = captured.source.id;
+    let evidence = captured.source.evidence[0].id;
+    // The person's own fact is accepted by the policy; an agent's reading waits.
+    let own = ledger
+        .open_proposal(
+            &user(),
+            proposal(
+                Risk::New,
+                vec![],
+                vec![Operation::Create {
+                    key: None,
+                    assertion: commitment(
+                        "Release 2.4 on Nov 14",
+                        "2026-11-14",
+                        day(2026, 10, 1),
+                        evidence,
+                    ),
+                }],
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(own.state, ProposalState::Accepted);
+    let journal = ledger.journal(0, 1000).await.unwrap();
+    let id = created_id(&own, &journal);
+    let waiting = ledger
+        .open_proposal(
+            &agent(),
+            proposal(
+                Risk::New,
+                vec![],
+                vec![Operation::Create {
+                    key: None,
+                    assertion: commitment(
+                        "Olya owns billing",
+                        "2026-12-01",
+                        day(2026, 10, 1),
+                        evidence,
+                    ),
+                }],
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(waiting.state, ProposalState::Open);
+
+    let done = ledger.withdraw_source(&user(), source).await.unwrap();
+    assert_eq!((done.closed, done.kept), (2, 0));
+    assert_eq!(
+        current_text(&ledger, id).await,
+        None,
+        "the fact from the note is gone"
+    );
+    assert_eq!(
+        ledger.proposal(waiting.id).await.unwrap().state,
+        ProposalState::Rejected
+    );
+    assert!(ledger.source(source).await.unwrap().withdrawn_at.is_some());
+    // Twice is once.
+    let again = ledger.withdraw_source(&user(), source).await.unwrap();
+    assert_eq!((again.closed, again.kept), (0, 0));
+
+    // The same note sent again comes back, to be processed anew.
+    let back = ledger
+        .capture_source(
+            &user(),
+            NewSource {
+                kind: "note".into(),
+                origin: "capture".into(),
+                uri: None,
+                title: None,
+                content: note.into(),
+                said_at: None,
+                metadata: json!({}),
+            },
+        )
+        .await
+        .unwrap();
+    assert!(back.created);
+    assert_eq!(back.source.id, source);
+    assert!(back.source.withdrawn_at.is_none());
+}

@@ -14,6 +14,7 @@ mod query;
 mod rows;
 mod search;
 mod undo;
+mod withdraw;
 
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -89,8 +90,12 @@ impl Ledger {
                 .fetch_optional(&self.pool)
                 .await?;
         if let Some(id) = existing {
+            let source = query::source(&self.pool, id).await?;
+            if source.withdrawn_at.is_some() {
+                return self.revive(actor, source).await;
+            }
             return Ok(CaptureResult {
-                source: query::source(&self.pool, id).await?,
+                source,
                 created: false,
             });
         }

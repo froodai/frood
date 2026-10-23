@@ -180,7 +180,7 @@ async fn act(
 
 /// Who acts on the Inbox: the person whose token it is, or, for a channel module, the person
 /// linked to the channel account that pressed the button (R1′: `user:<id>/via/<channel>`).
-async fn person(
+pub(crate) async fn person(
     state: &AppState,
     principal: &frood_auth::Principal,
     external_id: Option<&str>,

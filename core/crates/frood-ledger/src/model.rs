@@ -249,6 +249,19 @@ pub struct Source {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file: Option<BlobInfo>,
     pub evidence: Vec<Evidence>,
+    /// Set when the person took the note back (docs/25 §4).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub withdrawn_at: Option<Timestamp>,
+}
+
+/// What taking a note back did.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Withdrawn {
+    pub source_id: Uuid,
+    /// Proposals from the note that were closed, after undoing those already accepted.
+    pub closed: usize,
+    /// Accepted ones that changed since: undoing them would lose the later change.
+    pub kept: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

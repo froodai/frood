@@ -387,6 +387,31 @@ impl Dispatch {
         }
     }
 
+    /// A person takes back a note they sent (docs/25 §4): only their own.
+    pub async fn withdraw_source(
+        &self,
+        source_id: Uuid,
+        user: Uuid,
+        actor: &str,
+    ) -> Result<frood_ledger::model::Withdrawn, String> {
+        let source = self
+            .ctx
+            .ledger
+            .source(source_id)
+            .await
+            .map_err(|e| e.to_string())?;
+        let own = format!("user:{user}");
+        if source.captured_by != own && !source.captured_by.starts_with(&format!("{own}/")) {
+            return Err("only the person who sent a note can take it back".to_owned());
+        }
+        let actor = frood_ledger::model::Actor::parse(actor).map_err(|e| e.to_string())?;
+        self.ctx
+            .ledger
+            .withdraw_source(&actor, source_id)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
     /// How processing of a source goes.
     pub async fn source_status(
         &self,

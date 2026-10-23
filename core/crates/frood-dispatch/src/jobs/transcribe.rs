@@ -19,6 +19,9 @@ pub(crate) async fn run(ctx: &Ctx, spec: &JobSpec, run: &Run) -> Result<Value, J
         .and_then(|s| s.parse().ok())
         .ok_or_else(|| JobError::permanent("the event names no source"))?;
     let source = ctx.ledger.source(source_id).await?;
+    if source.withdrawn_at.is_some() {
+        return Ok(json!({ "skipped": "the note was taken back" }));
+    }
     let (file, data) = ctx.ledger.source_file(source_id).await?;
     let module = ctx
         .modules

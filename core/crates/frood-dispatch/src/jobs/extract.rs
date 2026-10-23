@@ -294,6 +294,9 @@ pub(crate) async fn run(ctx: &Ctx, spec: &JobSpec, run: &Run) -> Result<Value, J
     if source.captured_by.starts_with("agent:") {
         return Ok(json!({ "skipped": "an agent's source: the agent proposes from it itself" }));
     }
+    if source.withdrawn_at.is_some() {
+        return Ok(json!({ "skipped": "the note was taken back" }));
+    }
     let Some(text) = source.content.clone().filter(|t| !t.trim().is_empty()) else {
         return Ok(json!({ "skipped": "the source has no text" }));
     };
@@ -358,6 +361,10 @@ pub(crate) async fn run(ctx: &Ctx, spec: &JobSpec, run: &Run) -> Result<Value, J
     };
     let extraction: Extraction = serde_json::from_value(answer.clone())
         .map_err(|e| JobError::permanent(format!("the answer does not match the schema: {e}")))?;
+    // Taken back while the model was thinking: nothing comes of it.
+    if ctx.ledger.source(source_id).await?.withdrawn_at.is_some() {
+        return Ok(json!({ "skipped": "the note was taken back" }));
+    }
     let made = apply(
         ctx,
         run,

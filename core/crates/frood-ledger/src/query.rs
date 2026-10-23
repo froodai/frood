@@ -15,7 +15,7 @@ const MAX_LIMIT: i64 = 200;
 pub(crate) async fn source(pool: &PgPool, id: Uuid) -> Result<Source> {
     let row = sqlx::query(
         "SELECT s.id, s.kind, s.origin, s.uri, s.title, s.content, s.content_sha256, s.said_at, s.captured_by, \
-         s.captured_at, s.metadata, b.id AS blob_id, b.content_type, b.filename, b.size_bytes \
+         s.captured_at, s.metadata, s.withdrawn_at, b.id AS blob_id, b.content_type, b.filename, b.size_bytes \
          FROM sources s LEFT JOIN blobs b ON b.id = s.blob_id WHERE s.id = $1",
     )
     .bind(id)
@@ -41,6 +41,7 @@ pub(crate) async fn source(pool: &PgPool, id: Uuid) -> Result<Source> {
         captured_by: row.try_get("captured_by")?,
         captured_at: row.try_get("captured_at")?,
         metadata: row.try_get("metadata")?,
+        withdrawn_at: row.try_get("withdrawn_at")?,
         file: match row.try_get::<Option<Uuid>, _>("blob_id")? {
             Some(id) => Some(BlobInfo {
                 id,
