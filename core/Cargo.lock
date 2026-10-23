@@ -1106,7 +1106,7 @@ dependencies = [
 
 [[package]]
 name = "frood-api"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "age",
  "axum",
@@ -1140,7 +1140,7 @@ dependencies = [
 
 [[package]]
 name = "frood-auth"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "axum",
  "base64 0.23.1",
@@ -1166,7 +1166,7 @@ dependencies = [
 
 [[package]]
 name = "frood-cli"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "age",
  "anyhow",
@@ -1195,7 +1195,7 @@ dependencies = [
 
 [[package]]
 name = "frood-config"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "chrono",
  "chrono-tz",
@@ -1214,7 +1214,7 @@ dependencies = [
 
 [[package]]
 name = "frood-dispatch"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "age",
  "base64 0.23.1",
@@ -1239,7 +1239,7 @@ dependencies = [
 
 [[package]]
 name = "frood-ledger"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "chrono",
  "frood-store",
@@ -1256,7 +1256,7 @@ dependencies = [
 
 [[package]]
 name = "frood-llm"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "axum",
  "frood-config",
@@ -1270,7 +1270,7 @@ dependencies = [
 
 [[package]]
 name = "frood-mcp"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "chrono",
  "frood-auth",
@@ -1288,7 +1288,7 @@ dependencies = [
 
 [[package]]
 name = "frood-modhost"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "axum",
  "frood-config",
@@ -1303,7 +1303,7 @@ dependencies = [
 
 [[package]]
 name = "frood-search"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "frood-config",
  "frood-ledger",
@@ -1314,7 +1314,7 @@ dependencies = [
 
 [[package]]
 name = "frood-store"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "chrono",
  "sqlx",
