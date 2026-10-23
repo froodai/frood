@@ -642,4 +642,29 @@ async fn the_mvp_scenario() {
                 && c["before"] == "Релиз 2.4 — 28 ноября"),
         "{page}"
     );
+
+    // Alice takes her voice note back from Telegram. The date it gave was changed since by the
+    // agent's proposal and its undo, so that knowledge stays: undoing would lose the later steps.
+    let (status, withdrawn) = call(
+        &app,
+        post_json(
+            &format!("/v1/sources/{voice_source}/withdraw"),
+            "tg-token",
+            json!({ "external_id": "42" }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{withdrawn}");
+    assert_eq!(withdrawn["kept"], 1, "{withdrawn}");
+    // Someone else's account cannot.
+    let (status, _) = call(
+        &app,
+        post_json(
+            &format!("/v1/sources/{voice_source}/withdraw"),
+            "tg-token",
+            json!({ "external_id": "7" }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
 }

@@ -105,6 +105,13 @@ pub(crate) struct Texts {
     pub(crate) since: &'static str,
     pub(crate) inbox_empty: &'static str,
     pub(crate) inbox_more: &'static str,
+    /// The answer when a note is taken back; with `{n}` when some of it stayed.
+    pub(crate) taken_back: &'static str,
+    pub(crate) taken_back_kept: &'static str,
+    /// The button under /inbox's cards, and what it says after.
+    pub(crate) accept_all: &'static str,
+    pub(crate) accepted_all: &'static str,
+    pub(crate) batch_gone: &'static str,
     /// A day of a month: `{day}` and `{month}`.
     pub(crate) date: &'static str,
     pub(crate) months: [&'static str; 12],
@@ -212,6 +219,11 @@ const EN_TEXTS: Texts = Texts {
     since: "since {date}",
     inbox_empty: "Nothing waits for you.",
     inbox_more: "{n} more wait; /inbox again after these.",
+    taken_back: "↩️ Taken back: the note and what came from it.",
+    taken_back_kept: "↩️ Taken back; {n} stayed because they changed since.",
+    accept_all: "Accept all {n}",
+    accepted_all: "✅ Accepted: {n}",
+    batch_gone: "This list is gone; send /inbox again.",
     date: "{day} {month}",
     months: [
         "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
@@ -253,6 +265,11 @@ const ZH_TEXTS: Texts = Texts {
     since: "自 {date}",
     inbox_empty: "没有等你决定的事项。",
     inbox_more: "还有 {n} 项；处理完这些后再发 /inbox。",
+    taken_back: "↩️ 已撤回：这条笔记及由它产生的内容。",
+    taken_back_kept: "↩️ 已撤回；有 {n} 项因之后已变更而保留。",
+    accept_all: "全部接受 {n}",
+    accepted_all: "✅ 已接受：{n}",
+    batch_gone: "这个列表已失效；请重新发送 /inbox。",
     date: "{month}{day}日",
     months: [
         "1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月",
@@ -294,6 +311,11 @@ const ES_TEXTS: Texts = Texts {
     since: "desde el {date}",
     inbox_empty: "Nada espera tu decisión.",
     inbox_more: "Esperan {n} más; después de estos, /inbox otra vez.",
+    taken_back: "↩️ Retirada: la nota y lo que salió de ella.",
+    taken_back_kept: "↩️ Retirada; {n} se quedaron porque cambiaron después.",
+    accept_all: "Aceptar los {n}",
+    accepted_all: "✅ Aceptados: {n}",
+    batch_gone: "Esta lista ya no vale; envía /inbox otra vez.",
     date: "{day} {month}",
     months: [
         "ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sept", "oct", "nov", "dic",
@@ -335,6 +357,11 @@ const HI_TEXTS: Texts = Texts {
     since: "{date} से",
     inbox_empty: "कुछ भी आपके फ़ैसले का इंतज़ार नहीं कर रहा।",
     inbox_more: "{n} और इंतज़ार में हैं; इनके बाद फिर /inbox भेजें।",
+    taken_back: "↩️ वापस लिया: नोट और उससे निकली बातें।",
+    taken_back_kept: "↩️ वापस लिया; {n} बाद में बदले गए, इसलिए रहे।",
+    accept_all: "सभी {n} स्वीकारें",
+    accepted_all: "✅ स्वीकारे गए: {n}",
+    batch_gone: "यह सूची अब मान्य नहीं; फिर से /inbox भेजें।",
     date: "{day} {month}",
     months: [
         "जन॰",
@@ -387,6 +414,11 @@ const AR_TEXTS: Texts = Texts {
     since: "منذ {date}",
     inbox_empty: "لا شيء ينتظر قرارك.",
     inbox_more: "ينتظر {n} آخرون؛ بعدها أرسل ‎/inbox مجددًا.",
+    taken_back: "↩️ سُحبت: الملاحظة وما نتج عنها.",
+    taken_back_kept: "↩️ سُحبت؛ بقي {n} لأنها تغيّرت بعدها.",
+    accept_all: "قبول الكل ({n})",
+    accepted_all: "✅ تم القبول: {n}",
+    batch_gone: "انتهت صلاحية هذه القائمة؛ أرسل ‎/inbox مجددًا.",
     date: "{day} {month}",
     months: [
         "يناير",
@@ -439,6 +471,11 @@ const FR_TEXTS: Texts = Texts {
     since: "depuis le {date}",
     inbox_empty: "Rien n’attend votre décision.",
     inbox_more: "{n} autres attendent ; ensuite, /inbox à nouveau.",
+    taken_back: "↩️ Retirée : la note et ce qui en est sorti.",
+    taken_back_kept: "↩️ Retirée ; {n} restent, car modifiés depuis.",
+    accept_all: "Tout accepter ({n})",
+    accepted_all: "✅ Acceptés : {n}",
+    batch_gone: "Cette liste n’est plus valable ; renvoyez /inbox.",
     date: "{day} {month}",
     months: [
         "janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.",
@@ -481,6 +518,11 @@ const PT_TEXTS: Texts = Texts {
     since: "desde {date}",
     inbox_empty: "Nada espera sua decisão.",
     inbox_more: "Mais {n} esperam; depois destes, /inbox de novo.",
+    taken_back: "↩️ Retirada: a nota e o que veio dela.",
+    taken_back_kept: "↩️ Retirada; {n} ficaram porque mudaram depois.",
+    accept_all: "Aceitar todos os {n}",
+    accepted_all: "✅ Aceitos: {n}",
+    batch_gone: "Esta lista não vale mais; envie /inbox de novo.",
     date: "{day} de {month}",
     months: [
         "jan.", "fev.", "mar.", "abr.", "mai.", "jun.", "jul.", "ago.", "set.", "out.", "nov.",
@@ -523,6 +565,11 @@ const RU_TEXTS: Texts = Texts {
     since: "с {date}",
     inbox_empty: "Ничего не ждёт вашего решения.",
     inbox_more: "Ждут ещё {n}; после этих — снова /inbox.",
+    taken_back: "↩️ Отменено: заметка и всё, что из неё появилось.",
+    taken_back_kept: "↩️ Отменено; {n} осталось — с тех пор это уже меняли.",
+    accept_all: "Принять все {n}",
+    accepted_all: "✅ Принято: {n}",
+    batch_gone: "Этот список устарел; пришлите /inbox снова.",
     date: "{day} {month}",
     months: [
         "янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек",
@@ -1074,6 +1121,9 @@ mod tests {
                 (t.since, e.since),
                 (t.inbox_more, e.inbox_more),
                 (t.date, e.date),
+                (t.taken_back_kept, e.taken_back_kept),
+                (t.accept_all, e.accept_all),
+                (t.accepted_all, e.accepted_all),
             ] {
                 assert_eq!(holes(a), holes(b), "{lang:?}: {a}");
             }

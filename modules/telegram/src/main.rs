@@ -31,6 +31,9 @@ use lang::{Lang, Texts};
 const MANIFEST: &str = include_str!("../frood-module.yaml");
 const TELEGRAM_URL: &str = "https://api.telegram.org";
 
+/// A card a message shows: the Inbox item, the chat and the message.
+type Card = (String, i64, i64);
+
 #[derive(Clone)]
 struct Bot {
     http: reqwest::Client,
@@ -44,6 +47,8 @@ struct Bot {
     poll_for: Duration,
     /// The console's address, asked once (`/v1/version`); none without a public address.
     console: Arc<tokio::sync::OnceCell<Option<String>>>,
+    /// Cards `/inbox` sent together, for "Accept all".
+    batches: Arc<std::sync::Mutex<std::collections::HashMap<String, Vec<Card>>>>,
 }
 
 #[derive(Deserialize)]
@@ -118,12 +123,20 @@ impl Bot {
     }
 
     async fn reply(&self, message: &Message, text: &str) -> Option<i64> {
-        let sent = self
-            .telegram(
-                "sendMessage",
-                json!({ "chat_id": message.chat.id, "text": text, "reply_parameters": { "message_id": message.message_id } }),
-            )
-            .await;
+        self.reply_with(message, text, None).await
+    }
+
+    async fn reply_with(
+        &self,
+        message: &Message,
+        text: &str,
+        markup: Option<&Value>,
+    ) -> Option<i64> {
+        let mut body = json!({ "chat_id": message.chat.id, "text": text, "reply_parameters": { "message_id": message.message_id } });
+        if let Some(markup) = markup {
+            body["reply_markup"] = markup.clone();
+        }
+        let sent = self.telegram("sendMessage", body).await;
         match sent {
             Ok(result) => result.get("message_id").and_then(Value::as_i64),
             Err(err) => {
@@ -133,14 +146,12 @@ impl Bot {
         }
     }
 
-    async fn edit(&self, chat: i64, message_id: i64, text: &str) {
-        if let Err(err) = self
-            .telegram(
-                "editMessageText",
-                json!({ "chat_id": chat, "message_id": message_id, "text": text }),
-            )
-            .await
-        {
+    async fn edit(&self, chat: i64, message_id: i64, text: &str, markup: Option<&Value>) {
+        let mut body = json!({ "chat_id": chat, "message_id": message_id, "text": text });
+        if let Some(markup) = markup {
+            body["reply_markup"] = markup.clone();
+        }
+        if let Err(err) = self.telegram("editMessageText", body).await {
             tracing::warn!(error = %err, "cannot edit the reply");
         }
     }
@@ -262,7 +273,9 @@ impl Bot {
         };
         match captured {
             Ok((true, source_id)) => {
-                let reply = self.reply(&message, t.saving).await;
+                let reply = self
+                    .reply_with(&message, t.saving, Some(&take_back(&source_id, self.lang)))
+                    .await;
                 if let Some(reply) = reply {
                     let bot = self.clone();
                     let chat = message.chat.id;
@@ -359,6 +372,8 @@ impl Bot {
     /// Waits for processing and edits the "saved" reply into a summary.
     async fn follow(&self, chat: i64, reply: i64, source_id: &str) {
         let t = self.lang.texts();
+        let undo = take_back(source_id, self.lang);
+        let undo = Some(&undo);
         let deadline = tokio::time::Instant::now() + self.poll_for;
         loop {
             tokio::time::sleep(self.poll_every).await;
@@ -376,11 +391,11 @@ impl Bot {
             match status["state"].as_str() {
                 // Nothing to process: no job is set up for this kind of message.
                 Some("idle") => {
-                    self.edit(chat, reply, t.saved).await;
+                    self.edit(chat, reply, t.saved, undo).await;
                     return;
                 }
                 Some("done") => {
-                    self.edit(chat, reply, &summary(&status, t)).await;
+                    self.edit(chat, reply, &summary(&status, t), undo).await;
                     return;
                 }
                 Some("failed") => {
@@ -388,12 +403,12 @@ impl Bot {
                         .as_array()
                         .and_then(|runs| runs.iter().rev().find_map(|r| r["error"].as_str()))
                         .unwrap_or("?");
-                    self.edit(chat, reply, &format!("{} {error}", t.failed))
+                    self.edit(chat, reply, &format!("{} {error}", t.failed), undo)
                         .await;
                     return;
                 }
                 _ if tokio::time::Instant::now() >= deadline => {
-                    self.edit(chat, reply, t.still_working).await;
+                    self.edit(chat, reply, t.still_working, undo).await;
                     return;
                 }
                 _ => {}
@@ -435,6 +450,11 @@ impl Bot {
             }
         }
     }
+}
+
+/// "Undo" under a saved note: it takes the note back, and what came from it.
+fn take_back(source_id: &str, lang: Lang) -> Value {
+    json!({ "inline_keyboard": [[{ "text": lang.words().undo, "callback_data": format!("s:{source_id}") }]] })
 }
 
 /// An HTTP error without its URL: Bot API URLs carry the bot's token, which must not reach logs
@@ -629,6 +649,7 @@ fn bot_from_env() -> Result<Bot, String> {
         poll_every: Duration::from_secs(2),
         poll_for: Duration::from_secs(180),
         console: Arc::default(),
+        batches: Arc::default(),
     })
 }
 
@@ -681,6 +702,7 @@ mod tests {
         links: Vec<Value>,
         acts: Vec<Value>,
         answered: Vec<Value>,
+        withdrawn: Vec<Value>,
     }
 
     type Shared = Arc<Mutex<World>>;
@@ -752,6 +774,10 @@ mod tests {
                 Json(json!({ "outcome": "done", "item": { "id": "item-1", "kind": "proposal", "state": "resolved",
                     "resolution": { "action": "accept", "by": "user:u1/via/telegram" } } }))
             }))
+            .route("/v1/sources/src-1/withdraw", post(|State(w): State<Shared>, Json(b): Json<Value>| async move {
+                w.lock().unwrap().withdrawn.push(b);
+                Json(json!({ "source_id": "src-1", "closed": 2, "kept": 0 }))
+            }))
             .route("/v1/sources/src-1/status", get(|| async {
                 Json(json!({ "state": "done", "proposals": [
                     { "state": "accepted", "risk": "new", "alternatives": [{ "key": "default", "operations": [
@@ -783,6 +809,7 @@ mod tests {
             poll_every: Duration::from_millis(10),
             poll_for: Duration::from_secs(2),
             console: Arc::default(),
+            batches: Arc::default(),
         }
     }
 
@@ -823,6 +850,10 @@ mod tests {
             assert_eq!(capture["kind"], "message");
             assert_eq!(capture["said_at"], "2026-10-18T00:00:00Z");
             assert_eq!(w.sent[1]["text"], "Сохранено, обрабатываю…");
+            assert_eq!(
+                w.sent[1]["reply_markup"]["inline_keyboard"][0][0]["callback_data"],
+                "s:src-1"
+            );
         }
         // The reply turns into a summary when processing is done.
         for _ in 0..100 {
@@ -837,6 +868,25 @@ mod tests {
             edited["text"],
             "Запомнил:\n• Релиз 2.4 — 14 ноября\n\nЖдёт вашего решения:\n• Релиз 2.4 — 28 ноября (противоречит записанному)"
         );
+        assert_eq!(
+            edited["reply_markup"]["inline_keyboard"][0][0]["text"], "Отменить",
+            "the summary keeps the way back"
+        );
+
+        // "Undo" takes the note back as the person who pressed it.
+        bot.on_button(
+            &json!({ "id": "q-1", "from": { "id": 42 }, "data": "s:src-1",
+                               "message": { "chat": { "id": 42 }, "message_id": 900 } }),
+        )
+        .await;
+        let w = world.lock().unwrap();
+        assert_eq!(w.withdrawn[0], json!({ "external_id": "42" }));
+        let last = w.edited.last().unwrap();
+        assert_eq!(
+            last["text"],
+            "↩️ Отменено: заметка и всё, что из неё появилось."
+        );
+        assert!(last.get("reply_markup").is_none());
     }
 
     #[tokio::test]

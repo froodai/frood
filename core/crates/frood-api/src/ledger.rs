@@ -18,6 +18,7 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/v1/sources", post(capture))
         .route("/v1/sources/{id}", get(source))
+        .route("/v1/sources/{id}/withdraw", post(withdraw))
         .route("/v1/evidence", post(add_evidence))
         .route("/v1/observations", post(add_observation))
         .route("/v1/assertions", get(list_assertions))
@@ -61,6 +62,35 @@ async fn capture(
         StatusCode::OK
     };
     Ok((status, Json(result)))
+}
+
+#[derive(Deserialize, Default)]
+struct WithdrawBody {
+    /// For channel modules: the channel account of the person who pressed the button.
+    external_id: Option<String>,
+}
+
+/// A person takes a note back (docs/25 §4): what came from it is undone, the note stays marked.
+async fn withdraw(
+    State(state): State<AppState>,
+    caller: Caller<crate::auth::Signed>,
+    Path(id): Path<Uuid>,
+    body: Option<Json<WithdrawBody>>,
+) -> ApiResult<Withdrawn> {
+    let body = body.map(|Json(b)| b).unwrap_or_default();
+    let (user, actor) = crate::inbox::person(
+        &state,
+        &caller.principal,
+        body.external_id.as_deref(),
+        frood_auth::scope::CAPTURE,
+    )
+    .await?;
+    state
+        .dispatch
+        .withdraw_source(id, user, &actor)
+        .await
+        .map(Json)
+        .map_err(|message| ApiError::new(StatusCode::CONFLICT, "conflict", message))
 }
 
 async fn source(

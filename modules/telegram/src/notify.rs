@@ -366,7 +366,7 @@ impl Bot {
         Ok(json!({}))
     }
 
-    async fn edit_shown(&self, chat: i64, message_id: i64, shown: &Value) {
+    pub(crate) async fn edit_shown(&self, chat: i64, message_id: i64, shown: &Value) {
         let w = self.lang.words();
         let console = self
             .console_url(shown["item"]["id"].as_str().unwrap_or_default())
@@ -434,6 +434,23 @@ impl Bot {
                     }
                     Err(err) => answer(short(&err.to_string(), 190)).await,
                 }
+                return;
+            }
+            (Some("s"), Some(source_id), None) => {
+                match self.take_note_back(source_id, &from).await {
+                    Ok(text) => {
+                        answer(w.undone.to_owned()).await;
+                        if let (Some(chat), Some(message_id)) = (chat, message_id) {
+                            self.edit(chat, message_id, &text, None).await;
+                        }
+                    }
+                    Err(err) => answer(short(&err, 190)).await,
+                }
+                return;
+            }
+            (Some(kind @ ("b" | "B")), Some(key), None) => {
+                let at = chat.zip(message_id);
+                answer(self.batch(key, &from, at, kind == "B").await).await;
                 return;
             }
             _ => return,

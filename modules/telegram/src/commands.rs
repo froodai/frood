@@ -193,13 +193,38 @@ impl Bot {
                 .await;
             return;
         }
+        // Changes with one option can be accepted together, from one button under the cards.
+        let mut batch = Vec::new();
         for shown in open.iter().take(SHOWN) {
             let id = shown["item"]["id"].as_str().unwrap_or_default();
             let console = self.console_url(id).await;
-            let _ = self
+            let sent = self
                 .telegram(
                     "sendMessage",
                     json!({ "chat_id": chat, "text": text(shown, w), "reply_markup": keyboard(shown, w, console.as_deref()) }),
+                )
+                .await;
+            let one_option = shown["item"]["kind"] == "proposal"
+                && shown["actions"]
+                    .as_array()
+                    .is_some_and(|a| a.iter().filter(|x| x["action"] == "accept").count() == 1);
+            if let (Ok(sent), true) = (sent, one_option)
+                && let Some(message_id) = sent["message_id"].as_i64()
+            {
+                batch.push((id.to_owned(), chat, message_id));
+            }
+        }
+        if batch.len() > 1 {
+            let key = batch_key();
+            let label = t.accept_all.replace("{n}", &batch.len().to_string());
+            self.batches
+                .lock()
+                .expect("batches")
+                .insert(key.clone(), batch);
+            let _ = self
+                .telegram(
+                    "sendMessage",
+                    json!({ "chat_id": chat, "text": "⬆️", "reply_markup": { "inline_keyboard": [[{ "text": label, "callback_data": format!("b:{key}") }]] } }),
                 )
                 .await;
         }
@@ -212,6 +237,103 @@ impl Bot {
                 .await;
         }
     }
+}
+
+impl Bot {
+    /// "Undo" under a saved note; the text the reply turns into.
+    pub(crate) async fn take_note_back(
+        &self,
+        source_id: &str,
+        from: &str,
+    ) -> Result<String, String> {
+        let t = self.lang.texts();
+        let response = self
+            .frood(
+                self.http
+                    .post(format!("{}/v1/sources/{source_id}/withdraw", self.frood)),
+            )
+            .json(&json!({ "external_id": from }))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        let ok = response.status().is_success();
+        let body: Value = response.json().await.unwrap_or(Value::Null);
+        if !ok {
+            return Err(body["detail"].as_str().unwrap_or("?").to_owned());
+        }
+        Ok(match body["kept"].as_u64().unwrap_or(0) {
+            0 => t.taken_back.to_owned(),
+            n => t.taken_back_kept.replace("{n}", &n.to_string()),
+        })
+    }
+
+    /// "Accept all" (or, with `undo`, taking them all back): acts on each card as the person,
+    /// edits the cards and the button's message. Returns the callback's answer.
+    pub(crate) async fn batch(
+        &self,
+        key: &str,
+        from: &str,
+        at: Option<(i64, i64)>,
+        undo: bool,
+    ) -> String {
+        let t = self.lang.texts();
+        let w = self.lang.words();
+        let Some(cards) = self.batches.lock().expect("batches").get(key).cloned() else {
+            return t.batch_gone.to_owned();
+        };
+        let mut done = 0;
+        for (item, chat, message_id) in &cards {
+            let request = if undo {
+                self.http
+                    .post(format!("{}/v1/inbox/{item}/undo", self.frood))
+                    .json(&json!({ "external_id": from }))
+            } else {
+                self.http
+                    .post(format!("{}/v1/inbox/{item}/act", self.frood))
+                    .json(&json!({ "action": "accept", "external_id": from }))
+            };
+            if self
+                .frood(request)
+                .send()
+                .await
+                .is_ok_and(|r| r.status().is_success())
+            {
+                done += 1;
+            }
+            if let Some(shown) = self.inbox_item(item).await {
+                self.edit_shown(*chat, *message_id, &shown).await;
+            }
+        }
+        if let Some((chat, message_id)) = at {
+            let (text, button, data) = if undo {
+                (
+                    w.undone.to_owned(),
+                    t.accept_all.replace("{n}", &cards.len().to_string()),
+                    format!("b:{key}"),
+                )
+            } else {
+                (
+                    t.accepted_all.replace("{n}", &done.to_string()),
+                    w.undo.to_owned(),
+                    format!("B:{key}"),
+                )
+            };
+            let markup =
+                json!({ "inline_keyboard": [[{ "text": button, "callback_data": data }]] });
+            self.edit(chat, message_id, &text, Some(&markup)).await;
+        }
+        if undo { w.undone } else { w.ok }.to_owned()
+    }
+}
+
+/// A short name for a batch of cards, unique enough within one bot's run.
+fn batch_key() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64);
+    format!("{:x}{:x}", now, NEXT.fetch_add(1, Ordering::Relaxed))
 }
 
 /// Items waiting for a person now.
