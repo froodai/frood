@@ -477,7 +477,10 @@ mod tests {
         assert!(caddyfile.contains(
             "path /.well-known/oauth-authorization-server /.well-known/oauth-authorization-server/frood /.well-known/oauth-protected-resource/frood/*"
         ));
-        assert!(caddyfile.contains("\thandle {\n\t\trespond 404\n"), "the root is not Frood's");
+        assert!(
+            caddyfile.contains("\thandle {\n\t\trespond 404\n"),
+            "the root is not Frood's"
+        );
         let out = render(
             &loaded,
             Path::new("/x/frood.yaml"),

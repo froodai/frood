@@ -1042,7 +1042,10 @@ mod tests {
             edited["text"].as_str().unwrap().ends_with("✅ Принято"),
             "{edited}"
         );
-        assert_eq!(edited["reply_markup"]["inline_keyboard"][0][0]["callback_data"], "u:item-1", "a decision here can be taken back");
+        assert_eq!(
+            edited["reply_markup"]["inline_keyboard"][0][0]["callback_data"], "u:item-1",
+            "a decision here can be taken back"
+        );
     }
 
     #[tokio::test]
