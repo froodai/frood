@@ -55,7 +55,8 @@ handle_path /pages/* {
 }
 ```
 
-Caddy sees the routes file's folder at the same path, so the file may import files next to it.
+Paths that no route claims answer 404. Caddy sees the routes file's folder at the same path, so
+the file may import files next to it.
 `frood apply` checks the routes with `caddy validate` before it changes anything and reloads
 Caddy after an edit. A sign-in provider's redirect address follows the path:
 `https://203-0-113-7.sslip.io/frood/oauth/callback/google`.
