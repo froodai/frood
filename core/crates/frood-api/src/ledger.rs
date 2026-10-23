@@ -16,7 +16,7 @@ use crate::error::ApiError;
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/v1/sources", post(capture))
+        .route("/v1/sources", post(capture).get(list_sources))
         .route("/v1/sources/{id}", get(source))
         .route("/v1/sources/{id}/withdraw", post(withdraw))
         .route("/v1/evidence", post(add_evidence))
@@ -62,6 +62,28 @@ async fn capture(
         StatusCode::OK
     };
     Ok((status, Json(result)))
+}
+
+#[derive(Deserialize)]
+struct SourcesQuery {
+    origin: Option<String>,
+    /// RFC 3339: sources captured before this, for the next page.
+    before: Option<DateTime<Utc>>,
+    limit: Option<i64>,
+}
+
+/// What was sent and read, newest first.
+async fn list_sources(
+    State(state): State<AppState>,
+    _caller: Caller<Read>,
+    Query(q): Query<SourcesQuery>,
+) -> ApiResult<Vec<SourceSummary>> {
+    Ok(Json(
+        state
+            .ledger
+            .sources(q.origin.as_deref(), q.before, q.limit.unwrap_or(50))
+            .await?,
+    ))
 }
 
 #[derive(Deserialize, Default)]

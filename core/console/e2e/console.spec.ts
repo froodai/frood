@@ -92,3 +92,33 @@ test("on a phone: bottom navigation and details in a sheet", async ({ page }) =>
   await page.getByRole("button", { name: /Atlas release on/ }).click();
   await expect(page.getByRole("dialog").getByText("Proposed")).toBeVisible();
 });
+
+test("a note written in the console, and taken back", async ({ page }) => {
+  await signIn(page, "/admin/sources");
+  await page.getByLabel(/Write a note/).fill("The design review moves to Thursday");
+  await page.getByRole("button", { name: "Save note" }).click();
+  await expect(page.getByText("Saved; processing")).toBeVisible();
+  const row = page.getByRole("button", { name: /The design review moves to Thursday/ });
+  await row.click();
+  const detail = page.getByRole("dialog");
+  await expect(detail.getByText("What came of it")).toBeVisible();
+  page.once("dialog", (d) => d.accept());
+  await detail.getByRole("button", { name: "Take the note back" }).click();
+  await expect(page.getByText(/Taken back/).first()).toBeVisible();
+});
+
+test("automations show each job with its schedule and runs", async ({ page }) => {
+  await signIn(page, "/admin/automations");
+  await expect(page.getByText("Digest").first()).toBeVisible();
+  await expect(page.getByText(/weekdays at 08:30/)).toBeVisible();
+  await page.getByRole("button", { name: /Run now/ }).click();
+  await expect(page.getByText("Started; it shows up in Automations.")).toBeVisible();
+});
+
+test("logs read as lines, filtered by level", async ({ page }) => {
+  await signIn(page, "/admin/system");
+  await expect(page.getByText("[object Object]")).toHaveCount(0);
+  await expect(page.getByText(/dispatcher started/)).toBeVisible();
+  await page.getByRole("button", { name: "Errors" }).click();
+  await expect(page.getByText(/dispatcher started/)).toHaveCount(0);
+});

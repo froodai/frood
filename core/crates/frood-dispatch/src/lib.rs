@@ -387,6 +387,14 @@ impl Dispatch {
         }
     }
 
+    /// The jobs this installation runs, as the console shows them: name, what they use, when.
+    pub fn jobs_shown(&self) -> Vec<Value> {
+        self.jobs
+            .iter()
+            .map(|j| json!({ "name": j.name, "uses": j.uses, "triggers": j.triggers }))
+            .collect()
+    }
+
     /// A person takes back a note they sent (docs/25 §4): only their own.
     pub async fn withdraw_source(
         &self,

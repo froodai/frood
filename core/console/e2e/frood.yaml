@@ -8,3 +8,6 @@ auth:
   allow: [demo@example.com]
   providers:
     - { kind: dev, id: dev }
+# A scheduled job without a model, so Automations has something to show.
+jobs:
+  digest: { on: [{ schedule: "30 8 * * 1-5", timezone: Europe/Belgrade }] }

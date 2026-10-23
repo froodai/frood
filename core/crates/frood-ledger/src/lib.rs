@@ -194,6 +194,16 @@ impl Ledger {
         })
     }
 
+    /// The newest sources first (the console's list of what was sent).
+    pub async fn sources(
+        &self,
+        origin: Option<&str>,
+        before: Option<Timestamp>,
+        limit: i64,
+    ) -> Result<Vec<SourceSummary>> {
+        query::sources(&self.pool, origin, before, limit).await
+    }
+
     /// The file of a source, with its bytes.
     pub async fn source_file(&self, source_id: Uuid) -> Result<(BlobInfo, Vec<u8>)> {
         let row = sqlx::query(

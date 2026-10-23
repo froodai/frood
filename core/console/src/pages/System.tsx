@@ -119,30 +119,88 @@ export function System() {
   );
 }
 
+type LogLine = { seq: number; line: string | { timestamp?: string; level?: string; target?: string; fields?: Record<string, unknown> } };
+type Parsed = { seq: number; time: string; level: string; target: string; message: string; rest: string };
+
+/** A log line: the server writes JSON (time, level, target, message and fields); anything else as it is. */
+function parse({ seq, line }: LogLine): Parsed {
+  if (typeof line === "string") return { seq, time: "", level: "", target: "", message: line, rest: "" };
+  const { message, ...fields } = line.fields ?? {};
+  const rest = Object.entries(fields)
+    .map(([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`)
+    .join(" ");
+  return {
+    seq,
+    time: line.timestamp ? new Date(line.timestamp).toLocaleTimeString([], { hour12: false }) : "",
+    level: (line.level ?? "").toUpperCase(),
+    target: line.target ?? "",
+    message: typeof message === "string" ? message : JSON.stringify(message ?? ""),
+    rest,
+  };
+}
+
+const LEVEL_TONE: Record<string, string> = {
+  ERROR: "bg-destructive/15 text-destructive",
+  WARN: "bg-warning-soft text-warning",
+  INFO: "bg-secondary text-muted-foreground",
+  DEBUG: "bg-secondary text-muted-foreground",
+};
+
 function Logs() {
   const { t } = useI18n();
   const [filter, setFilter] = useState("");
+  const [level, setLevel] = useState<"" | "WARN" | "ERROR">("");
   const logs = useQuery({
     queryKey: ["logs"],
-    queryFn: () => api<{ seq: number; line: string }[]>("/v1/logs?limit=400"),
+    queryFn: () => api<LogLine[]>("/v1/logs?limit=500"),
     refetchInterval: 10_000,
   });
   const lines = useMemo(() => {
     const needle = filter.toLowerCase();
-    return (logs.data ?? []).filter((l) => !needle || l.line.toLowerCase().includes(needle)).slice(-300);
-  }, [logs.data, filter]);
+    const wanted = level === "ERROR" ? ["ERROR"] : level === "WARN" ? ["WARN", "ERROR"] : null;
+    return (logs.data ?? [])
+      .map(parse)
+      .filter((l) => !wanted || wanted.includes(l.level))
+      .filter((l) => !needle || `${l.target} ${l.message} ${l.rest}`.toLowerCase().includes(needle))
+      .slice(-300)
+      .reverse();
+  }, [logs.data, filter, level]);
   return (
     <Card title={t("system.logs")}>
-      <input
-        value={filter}
-        onChange={(e) => setFilter(e.target.value)}
-        placeholder={t("system.logsFilter")}
-        aria-label={t("system.logsFilter")}
-        className="h-9 rounded-md border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring/40"
-      />
-      <pre dir="ltr" className="max-h-[28rem] overflow-auto rounded-md bg-muted p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-all">
-        {lines.map((l) => l.line).join("\n")}
-      </pre>
+      <div className="flex flex-wrap items-center gap-2">
+        {(
+          [
+            ["", "system.logsAll"],
+            ["WARN", "system.logsWarn"],
+            ["ERROR", "system.logsError"],
+          ] as const
+        ).map(([value, label]) => (
+          <Button key={value} size="sm" variant={level === value ? "default" : "outline"} className="rounded-full" onClick={() => setLevel(value)}>
+            {t(label)}
+          </Button>
+        ))}
+        <input
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          placeholder={t("system.logsFilter")}
+          aria-label={t("system.logsFilter")}
+          className="h-9 min-w-40 flex-1 rounded-md border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring/40"
+        />
+      </div>
+      <div dir="ltr" className="max-h-[32rem] overflow-auto rounded-md border bg-background font-mono text-xs">
+        {lines.map((l) => (
+          <div key={l.seq} className="flex gap-2 border-b px-3 py-1.5 last:border-b-0">
+            <span className="w-16 shrink-0 text-muted-foreground">{l.time}</span>
+            {l.level && <span className={cn("h-fit shrink-0 rounded px-1.5 text-[10px] font-semibold", LEVEL_TONE[l.level] ?? LEVEL_TONE.INFO)}>{l.level}</span>}
+            <span className="min-w-0 break-words">
+              <span className={cn(l.level === "ERROR" && "text-destructive")}>{l.message}</span>
+              {l.rest && <span className="text-muted-foreground"> {l.rest}</span>}
+              {l.target && <span className="block text-[11px] text-muted-foreground/70">{l.target}</span>}
+            </span>
+          </div>
+        ))}
+        {lines.length === 0 && <p className="p-3 text-muted-foreground">{t("now.nothing")}</p>}
+      </div>
     </Card>
   );
 }
