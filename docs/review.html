@@ -295,13 +295,14 @@ details.area[open] summary .tw{transform:rotate(90deg)}
         <span class="pill done">Inbox и уведомления v0.2</span>
         <span class="pill done">платформа v0.2</span>
         <span class="pill done">план MVP</span>
-        <span class="pill wait">После MVP · консоль и бот</span>
+        <span class="pill done">консоль и бот (M8)</span>
+        <span class="pill wait">после 0.1.4 · вложения, сферы, подключения</span>
         <span class="pill">исходники: docs/*.md</span>
       </div>
     </header>
 
     <div class="tabs" role="tablist" aria-label="Этапы ревью">
-      <button class="tab" role="tab" id="t-now" data-tab="now" aria-controls="now" aria-selected="true">Сейчас на ревью <span class="n">5</span></button>
+      <button class="tab" role="tab" id="t-now" data-tab="now" aria-controls="now" aria-selected="true">Сейчас на ревью <span class="n">4</span></button>
       <button class="tab" role="tab" id="t-mvp" data-tab="mvp" aria-controls="mvp" aria-selected="false">План MVP</button>
       <button class="tab" role="tab" id="t-platform" data-tab="platform" aria-controls="platform" aria-selected="false">Платформа</button>
       <button class="tab" role="tab" id="t-notify" data-tab="notify" aria-controls="notify" aria-selected="false">Inbox и уведомления</button>
@@ -318,51 +319,47 @@ details.area[open] summary .tw{transform:rotate(90deg)}
       <section id="now-intro">
         <div class="sh"><h2>Что нужно от вас</h2></div>
         <div class="prose">
-          <p>Раунд 21. По QN1 — хаб и удобство. План — <code>docs/25_hub_ux_plan.md</code>, макет консоли и бота — <a href="https://claude.ai/artifact/7mSAV5WGGMGHHmo5h1g1uz" target="_blank" rel="noopener"><b>«Консоль Frood — макет»</b></a>. Консоль на макете кликается: разделы, разбор пачкой с отменой, панель подробностей, палитра команд, тёмная тема (в Tweaks).</p>
+          <p>Раунд 22 — ваши замечания к 0.1.4. Заметка — <code>docs/26_attachments_spheres_connect.md</code>.</p>
           <ul>
-            <li><b>Выпуск 0.1.1</b> опубликован, <b>0.1.2</b> публикуется этой ночью: Frood умеет жить под путём (<code>…/frood</code>), а маршруты других приложений — ваш <code>/pages</code> — задаются в <code>frood.yaml</code> и переживают <code>frood apply</code>.</li>
-            <li>После выпуска переведу сервер на <code>https://178-104-154-183.sslip.io/frood</code> — для этого нужен один шаг от вас (ниже).</li>
+            <li><b>Делаю сразу, выпуск 0.1.5:</b> короткий заголовок и описание вместо огромной формулировки; вид знания (решение, факт, статус, вопрос…) — цветной плашкой; ссылка «Открыть оригинал» у того, что принесли агенты.</li>
+            <li><b>На решение</b> — то, что меняет модель знаний и конфиг: вложения, сферы, подключения из консоли.</li>
           </ul>
           <p>Отметки сохраняются в странице. Напишите в чат «готово», и я их прочитаю.</p>
         </div>
-        <div class="locked"><span class="caption">Принято:</span><span class="chip">MVP</span><span class="chip">Фазы 1–6</span><span class="chip">M0–M7</span><span class="chip">F1, F2</span><span class="chip">QN1: хаб и UX</span></div>
+        <div class="locked"><span class="caption">Принято:</span><span class="chip">MVP</span><span class="chip">Фазы 1–6</span><span class="chip">M0–M8</span><span class="chip">U1–U4</span><span class="chip">QH1 + 8 языков</span></div>
       </section>
 
-      <section id="now-steps">
-        <div class="sh"><span class="tag need">нужно ваше действие</span><h2>Переезд на /frood</h2></div>
+      <section id="now-done">
+        <div class="sh"><span class="tag ref">делается</span><h2>0.1.5: читаемость</h2></div>
         <div class="prose">
-          <ol>
-            <li><a href="https://console.cloud.google.com/auth/clients" target="_blank" rel="noopener">Google Auth Platform → Clients</a> → клиент Frood → Authorized redirect URIs → <b>Add URI</b>: <code>https://178-104-154-183.sslip.io/frood/oauth/callback/google</code>. Старый адрес пока не удаляйте. Save.</li>
-            <li>Напишите в чат, что добавили. Я обновлю сервер до 0.1.2, включу извлечение и перенесу Frood на <code>/frood</code>; <code>/pages</code> останется как есть.</li>
-            <li>После этого в Claude: Settings → Connectors → Frood → удалить и добавить заново с адресом <code>https://178-104-154-183.sslip.io/frood/mcp</code>. Админка будет на <code>…/frood/admin/</code>.</li>
-          </ol>
-          <p class="muted">Корень сайта Frood больше не занимает: там только адреса OAuth-описаний, которые клиенты ищут в корне.</p>
+          <ul>
+            <li><b>Заголовок и описание.</b> У знания — короткий заголовок до ~80 знаков, формулировка становится описанием под ним. Заголовок пишет извлечение, агент или человек; у старых записей он берётся из начала формулировки. Заголовок в подробностях — обычного размера, «Предлагается» не повторяет его.</li>
+            <li><b>Вид знания цветом.</b> Решение, обязательство, правило, ответственность, факт, статус, событие, открытый вопрос — каждый своим цветом плашки с фоном, одинаково во всех разделах. «Новое» — без цвета, «изменение» — контуром, «конфликт» — красным.</li>
+            <li><b>Ссылка на оригинал.</b> Агенты передают адрес задачи, PR или треда; в «Откуда» и в боте — «Открыть оригинал».</li>
+          </ul>
         </div>
       </section>
 
       <section id="now-decisions">
-        <div class="sh"><span class="tag need">нужно ваше решение</span><h2>Консоль и бот</h2></div>
+        <div class="sh"><span class="tag need">нужно ваше решение</span><h2>Вложения, сферы, подключения</h2></div>
         <div class="rv-list">
-          <div class="rv" data-id="impl12_U1" data-kind="decision" data-label="U1 Стек консоли">
-            <div class="txt"><span class="id">U1</span><h3>Консоль — одностраничное приложение на React + TypeScript (Vite, Tailwind, компоненты shadcn/ui на Radix, таблицы TanStack, палитра cmdk), встроенное в бинарник ядра, как сейчас <code>admin.html</code></h3><p class="why">На этом сделаны консоли из вашего примера (Vercel, Supabase, Linear) — так меньше всего своего кода для такого вида. Установка остаётся одним образом; Node нужен только при сборке. Вход прежний — OAuth с PKCE, API прежний — <code>/v1</code>, недостающее (пачка, отмена, «Сейчас») добавляется в ядро.</p></div><div class="ctl"></div>
+          <div class="rv" data-id="impl13_Y1" data-kind="decision" data-label="Y1 Вложения">
+            <div class="txt"><span class="id">Y1</span><h3>Вложения: к заметке и к любому знанию — фото, видео, документ или ссылка (на оригинал или вспомогательное: макет, дашборд, тред). В консоли — «Прикрепить», перетаскивание, превью и плеер; в боте — фото или видео с подписью, ответ на карточку прикрепляет к ней. Файлы — в хранилище объектов: по умолчанию папка на диске сервера, по желанию S3-совместимое</h3><p class="why">Вложение — источник Frood, связанный со знанием как доказательство. Видео расшифровывается, как голосовые. Ссылка — с заголовком страницы; текст страницы и фото читаются моделью, только если установка это включила. Сейчас файлы лежат в Postgres до 25 МБ — для видео это раздувает базу и бэкапы. Telegram отдаёт боту файлы до 20 МБ; больше — через консоль.</p></div><div class="ctl"></div>
           </div>
-          <div class="rv" data-id="impl12_U2" data-kind="decision" data-label="U2 Разделы и принципы консоли">
-            <div class="txt"><span class="id">U2</span><h3>Разделы: Сейчас · Inbox · Знания · Источники · Автоматизации · Система; поиск и команды по ⌘K; панель подробностей справа без перехода; разбор пачкой; каждое действие — с отменой; клавиши j k a o s x; светлая и тёмная тема; на телефоне — карточки</h3><p class="why">Как на макете. Главная — «Сейчас»: сроки, действующие решения, кто за что отвечает, что изменилось, у каждой строки источник и история (H7). Inbox — разбор по одной или пачкой, сгруппированный по источнику (H5).</p></div><div class="ctl"></div>
+          <div class="rv" data-id="impl13_Y2" data-kind="decision" data-label="Y2 Сферы">
+            <div class="txt"><span class="id">Y2</span><h3>Сферы: у каждого знания — «Работа · техника», «Работа · бизнес» или «Личное» (список меняется в <code>frood.yaml</code>). Ставят извлечение и агент, подсказка — сфера проекта; человек меняет в одно нажатие. Значок и фильтр во всех разделах, <code>/now</code> и сводка — по сферам</h3><p class="why">Сфера — пометка для чтения, не граница видимости (D9″ не меняется): кто видит установку, видит все сферы. Скрыть личное от коллег — по-прежнему отдельная установка; в личной установке работа и личное лежат в одной памяти, но не вперемешку.</p></div><div class="ctl"></div>
           </div>
-          <div class="rv" data-id="impl12_U3" data-kind="decision" data-label="U3 Telegram-бот">
-            <div class="txt"><span class="id">U3</span><h3>Бот: меню команд (<code>/now</code>, <code>/inbox</code>, <code>/ask</code>, <code>/settings</code>); связка ссылкой из консоли в одно касание; любая заметка или голосовое — «Записал» с кнопкой «Отменить»; карточка решения с «Принять / Оставить старое / Отложить / Подробнее»; пачка «Принять все N»; вопрос «?» — ответ из памяти со ссылкой на источник; сообщения правятся, а не копятся</h3><p class="why">Как на втором артборде макета. Ответ на «?» тратит модель по аккаунту из конфига; остальное — без модели.</p></div><div class="ctl"></div>
-          </div>
-          <div class="rv" data-id="impl12_U4" data-kind="decision" data-label="U4 Слова в интерфейсе">
-            <div class="txt"><span class="id">U4</span><h3>Снаружи — действия: «Принять», «Оставить старое», «Отложить», «Что изменилось», «Сейчас в памяти / Предлагается»; «утверждение», «предложение», «вердикт» — только в подробностях и API</h3><p class="why">HC4 из исследования «Frood как хаб». Модель знаний не меняется.</p></div><div class="ctl"></div>
+          <div class="rv" data-id="impl13_Y3" data-kind="decision" data-label="Y3 Подключения из консоли">
+            <div class="txt"><span class="id">Y3</span><h3>Подключения из консоли: каталог (YouTrack, Jira, GitHub, GitLab, Linear, Notion, Confluence, Google Drive, Slack, любой MCP-сервер), вход через OAuth, где сервер умеет, иначе токен; проверка сразу; читать начинает без перезапуска. Настройки из консоли — второй слой конфига в базе с ревизиями; <code>frood.yaml</code> главнее; токены — в базе зашифрованными</h3><p class="why">Это «push через API» из W7′. <code>frood config export</code> выгружает всё в yaml. Ключ шифрования создаётся при <code>frood init</code> и лежит в комплекте восстановления. Модули с контейнерами (Telegram, речь, бэкап), адрес и вход остаются за <code>frood apply</code>. Альтернатива — консоль правит сам <code>frood.yaml</code>: источник правды один, но серверу нужна запись в файл хоста, а у тех, кто держит конфиг в git, правки будут перетираться.</p></div><div class="ctl"></div>
           </div>
         </div>
         <div class="rv-list" style="margin-top:16px">
-          <div class="rv q" data-id="impl12_Q1" data-kind="question" data-label="QH1 Порядок этапов">
-            <div class="txt"><span class="id">QH1</span><h3>Порядок: M8 — консоль и бот; M9 — первый час (стандартный набор, ноутбук по умолчанию, мастер <code>frood init</code>, свои правки без ревью, импорт памяти); M10 — хаб (OpenClaw и Hermes, туннель, вход без Google). Так или иначе?</h3><p class="affects">Я предлагаю начать с M8: импорт с противоречиями, разбор пачкой и «Сейчас» показываются через интерфейс.</p></div><div class="ctl"></div>
+          <div class="rv q" data-id="impl13_Q1" data-kind="question" data-label="QY1 Что менять из консоли">
+            <div class="txt"><span class="id">QY1</span><h3>Что можно менять из консоли: (а) только источники или (б) всё, что не требует контейнеров, — источники, джобы и расписания, правила внимания, настройки каналов?</h3><p class="affects">Я предлагаю (б) по шагам, начиная с источников. Порядок работ: 0.1.5 сразу → сферы → вложения → подключения из консоли вместе с M9 «Первый час».</p></div><div class="ctl"></div>
           </div>
         </div>
-        <div class="overall" data-id="impl12_overall" data-kind="overall" data-label="Общий вердикт по раунду 21">
-          <h3>Общий вердикт по раунду 21</h3>
+        <div class="overall" data-id="impl13_overall" data-kind="overall" data-label="Общий вердикт по раунду 22">
+          <h3>Общий вердикт по раунду 22</h3>
           <div class="ctl"></div>
         </div>
       </section>
@@ -1729,7 +1726,8 @@ jobs:
             <tr><td class="k">18</td><td>Сервер, бот, вход Google; QS1–QS3</td><td>сервер поднят, прогон пройден</td></tr>
             <tr><td class="k">19</td><td>Итог MVP; F1, F2, QX1</td><td>MVP принят; F1, F2 сделаны; бот у сервера</td></tr>
             <tr><td class="k">20</td><td>Что дальше (QN1)</td><td>Хаб и UX: консоль как у современных консолей, удобный бот</td></tr>
-            <tr><td class="k">21</td><td>Консоль, бот, порядок (U1–U4, QH1)</td><td><span class="st wait">идёт</span></td></tr>
+            <tr><td class="k">21</td><td>Консоль, бот, порядок (U1–U4, QH1)</td><td>всё принято; интерфейс на восьми языках; M8 сделан (0.1.3, 0.1.4)</td></tr>
+            <tr><td class="k">22</td><td>После 0.1.4: вложения, сферы, подключения из консоли (Y1–Y3, QY1)</td><td><span class="st wait">идёт</span></td></tr>
           </tbody>
         </table></div>
         <p class="caption">Все отметки хранятся в странице и продублированы в docs/README.md.</p>
@@ -1834,7 +1832,7 @@ jobs:
 
 <div class="bar" role="region" aria-label="Итог ревью">
   <div class="bar-in">
-    <div class="tally"><span>Решения <b id="n-model">0</b>/4</span><span>Вопросы <b id="n-q">0</b>/1</span><span>Вердикт <b id="n-all">—</b></span></div>
+    <div class="tally"><span>Решения <b id="n-model">0</b>/3</span><span>Вопросы <b id="n-q">0</b>/1</span><span>Вердикт <b id="n-all">—</b></span></div>
     <div class="status" id="status" aria-live="polite">Подключаюсь к хранилищу страницы…</div>
     <button class="btn" id="copy" type="button">Скопировать ответ</button>
   </div>
@@ -1964,13 +1962,13 @@ jobs:
     var a = 0, m = 0, q = 0;
     items.forEach(function(el){
       var id = el.dataset.id, s = state[id] || {};
-      if (el.dataset.kind === "decision" && s.verdict) { if (id.indexOf("impl12_") === 0) m++; else a++; }
+      if (el.dataset.kind === "decision" && s.verdict) { if (id.indexOf("impl13_") === 0) m++; else a++; }
       if (el.dataset.kind === "question" && (s.comment || "").trim()) q++;
     });
     var na = document.getElementById("n-arch"); if (na) na.textContent = a;
     document.getElementById("n-model").textContent = m;
     document.getElementById("n-q").textContent = q;
-    var o = state.impl12_overall || {};
+    var o = state.impl13_overall || {};
     document.getElementById("n-all").textContent = o.verdict ? LABEL[o.verdict] : "—";
   }
 
@@ -1997,9 +1995,9 @@ jobs:
   }
 
   function compose(){
-    var lines = ["Ревью Frood, раунд 21: консоль и бот"];
-    var o = state.impl12_overall || {};
-    lines.push("Общее по раунду 21: " + (o.verdict ? LABEL[o.verdict] : "без вердикта") + (o.comment ? ". " + o.comment.trim() : ""));
+    var lines = ["Ревью Frood, раунд 22: вложения, сферы, подключения"];
+    var o = state.impl13_overall || {};
+    lines.push("Общее по раунду 22: " + (o.verdict ? LABEL[o.verdict] : "без вердикта") + (o.comment ? ". " + o.comment.trim() : ""));
     items.forEach(function(el){
       var k = el.dataset.kind, s = state[el.dataset.id] || {}, c = (s.comment || "").trim();
       if (k === "decision") lines.push(el.dataset.label + ": " + (s.verdict ? LABEL[s.verdict] : "без отметки") + (c ? ". " + c : ""));
