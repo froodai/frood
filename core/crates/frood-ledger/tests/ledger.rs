@@ -61,6 +61,7 @@ async fn capture(ledger: &Ledger, text: &str) -> Uuid {
 fn commitment(text: &str, due: &str, said_at: DateTime<Utc>, evidence: Uuid) -> AssertionContent {
     AssertionContent {
         kind: "commitment".into(),
+        title: None,
         text: text.into(),
         subjects: vec![],
         slots: json!({ "due": due }),
@@ -126,6 +127,38 @@ async fn capture_is_deduplicated() {
 }
 
 #[tokio::test]
+async fn a_source_links_only_to_the_web() {
+    let ledger = ledger_or_skip!("ledger_source_uri");
+    let note = |uri: &str| NewSource {
+        kind: "note".into(),
+        origin: "capture".into(),
+        uri: Some(uri.into()),
+        title: Some("AIRC-1808".into()),
+        content: format!("seen at {uri}"),
+        said_at: None,
+        metadata: json!({}),
+    };
+    let kept = ledger
+        .capture_source(&user(), note(" https://youtrack.example/issue/AIRC-1808 "))
+        .await
+        .unwrap();
+    assert_eq!(
+        kept.source.uri.as_deref(),
+        Some("https://youtrack.example/issue/AIRC-1808")
+    );
+    for bad in [
+        "javascript:alert(1)",
+        "file:///etc/passwd",
+        "youtrack.example",
+    ] {
+        assert!(matches!(
+            ledger.capture_source(&user(), note(bad)).await,
+            Err(LedgerError::Invalid(_))
+        ));
+    }
+}
+
+#[tokio::test]
 async fn own_fact_is_accepted_by_policy_but_agent_fact_waits() {
     let ledger = ledger_or_skip!("ledger_policy");
     let evidence = capture(&ledger, "agreed with Olya: release 2.4 on Nov 14").await;
@@ -160,12 +193,15 @@ async fn own_fact_is_accepted_by_policy_but_agent_fact_waits() {
                 vec![],
                 vec![Operation::Create {
                     key: None,
-                    assertion: commitment(
-                        "Docs freeze on Nov 10",
-                        "2026-11-10",
-                        day(2026, 9, 3),
-                        evidence,
-                    ),
+                    assertion: AssertionContent {
+                        title: Some("  Docs freeze  ".into()),
+                        ..commitment(
+                            "Docs freeze on Nov 10",
+                            "2026-11-10",
+                            day(2026, 9, 3),
+                            evidence,
+                        )
+                    },
                 }],
             ),
         )
@@ -189,6 +225,8 @@ async fn own_fact_is_accepted_by_policy_but_agent_fact_waits() {
         .await
         .unwrap();
     assert_eq!(all.len(), 2);
+    let titles: Vec<_> = all.iter().map(|a| a.title.as_deref()).collect();
+    assert!(titles.contains(&Some("Docs freeze")) && titles.contains(&None));
 }
 
 /// The worked example of docs/11 §14: the release moves from Nov 14 to Nov 28.
@@ -320,6 +358,7 @@ async fn stale_base_blocks_the_second_change() {
                     key: None,
                     assertion: AssertionContent {
                         kind: "responsibility".into(),
+                        title: None,
                         text: "Petr owns billing".into(),
                         subjects: vec![],
                         slots: json!({ "person": "Petr", "area": "billing" }),
@@ -348,6 +387,7 @@ async fn stale_base_blocks_the_second_change() {
                 assertion_id: id,
                 assertion: AssertionContent {
                     kind: "responsibility".into(),
+                    title: None,
                     text: format!("{who} owns billing"),
                     subjects: vec![],
                     slots: json!({ "person": who, "area": "billing" }),
@@ -592,6 +632,7 @@ async fn entities_refs_and_merges() {
                         key: Some("owner".into()),
                         assertion: AssertionContent {
                             kind: "responsibility".into(),
+                            title: None,
                             text: "Olya owns the Orion release".into(),
                             subjects: vec!["ref:orion".into()],
                             slots: json!({ "person": "Olya" }),
@@ -697,6 +738,17 @@ async fn validation_and_journal_order() {
                 key: None,
                 assertion: AssertionContent {
                     evidence: vec![],
+                    ..commitment("x", "2026-10-30", day(2026, 10, 1), evidence)
+                },
+            }],
+        ),
+        proposal(
+            Risk::New,
+            vec![],
+            vec![Operation::Create {
+                key: None,
+                assertion: AssertionContent {
+                    title: Some("t".repeat(frood_ledger::MAX_TITLE_CHARS + 1)),
                     ..commitment("x", "2026-10-30", day(2026, 10, 1), evidence)
                 },
             }],

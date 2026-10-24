@@ -1,6 +1,6 @@
 // Shapes of the API responses the console reads (core/crates/frood-*).
 
-export type Change = { kind: string; before: string | null; after: string | null };
+export type Change = { kind: string; title?: string | null; before: string | null; after: string | null };
 
 export type ProposalContent = {
   proposal_id: string;
@@ -10,6 +10,8 @@ export type ProposalContent = {
   state: string;
   alternatives: { key: string; label: string | null; changes: Change[] }[];
   quote: string | null;
+  /** Where a person opens the original, when the source has an address. */
+  origin?: { uri: string; title: string | null } | null;
 };
 
 export type QuestionContent = {
@@ -46,6 +48,7 @@ export type Assertion = {
   assertion_id: string;
   version: number;
   kind: string;
+  title?: string | null;
   text: string;
   subjects: string[];
   slots: Record<string, unknown>;

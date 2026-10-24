@@ -211,13 +211,15 @@ async fn restore(
     let mut next = from_version + 1;
     for row in &replaced {
         sqlx::query(
-            "INSERT INTO assertion_versions (assertion_id, version, kind, text, subjects, slots, modality, authority, \
-             said_at, valid_from, valid_to, recorded_from, status, review_after, evidence, proposal_id, verdict_id) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)",
+            "INSERT INTO assertion_versions (assertion_id, version, kind, title, text, subjects, slots, modality, \
+             authority, said_at, valid_from, valid_to, recorded_from, status, review_after, evidence, proposal_id, \
+             verdict_id) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)",
         )
         .bind(assertion_id)
         .bind(next)
         .bind(&row.kind)
+        .bind(&row.title)
         .bind(&row.text)
         .bind(&row.subjects)
         .bind(&row.slots)

@@ -213,15 +213,22 @@ pub struct CaptureParams {
     pub text: String,
     /// What it is about (a project or person), as a hint for later processing.
     pub about: Option<String>,
+    /// Address of the original this note comes from (an issue, a pull request, a thread), so a
+    /// person can open it.
+    pub uri: Option<String>,
+    /// Name of the original, e.g. "AIRC-1808: Task view keeps loading".
+    pub title: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub struct ProposeParams {
     /// Operations as in the Frood API (docs/11 §6), each an object with `op`: create
-    /// {assertion: {kind, text, modality, subjects?, slots?, said_at?, valid_from?, evidence?}},
+    /// {assertion: {kind, title, text, modality, subjects?, slots?, said_at?, valid_from?, evidence?}},
     /// supersede {assertion_id, assertion}, close {assertion_id, status, valid_to?},
     /// reverify {assertion_id}, link {from, to, kind}, create_entity {ref?, type, name, aliases?}.
     /// kind: decision, commitment, rule, responsibility, fact, status, event or open_question.
+    /// title: a headline of a few words (under 80 characters) a person reads first, e.g.
+    /// "AIRC-1808: finished session loads for 22 minutes"; text: the full statement under it.
     /// modality: mentioned, proposed, agreed, decided, reported, observed or inferred.
     /// subjects: entity ids, or `ref:<key>` of a create_entity earlier in the same list.
     /// slots: an object such as {"due": "2026-11-14", "owner": "<entity id>"}.
@@ -232,6 +239,11 @@ pub struct ProposeParams {
     /// The words this change is based on (a quote from the conversation). Stored as a source and
     /// used as evidence for assertions that name none.
     pub source_text: Option<String>,
+    /// Address of the original source_text comes from (an issue, a pull request, a thread): pass
+    /// it whenever there is one, so a person can open the original.
+    pub source_uri: Option<String>,
+    /// Name of that original, e.g. "AIRC-1808: Task view keeps loading".
+    pub source_title: Option<String>,
     /// Evidence ids (from captured sources) for the whole proposal.
     pub evidence: Option<Vec<String>>,
     /// Current versions the change is based on: [{assertion_id, version}].
@@ -650,8 +662,8 @@ impl FroodMcp {
         let input = NewSource {
             kind: "note".into(),
             origin: "capture".into(),
-            uri: None,
-            title: None,
+            uri: p.uri,
+            title: p.title,
             content: p.text,
             said_at: Some(Utc::now()),
             metadata,
@@ -722,8 +734,8 @@ impl FroodMcp {
                     let input = NewSource {
                         kind: "conversation".into(),
                         origin: "capture".into(),
-                        uri: None,
-                        title: None,
+                        uri: p.source_uri.clone(),
+                        title: p.source_title.clone(),
                         content: text.clone(),
                         said_at: Some(Utc::now()),
                         metadata: match (&principal.run, &run_source) {

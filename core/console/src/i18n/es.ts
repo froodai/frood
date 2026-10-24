@@ -63,6 +63,7 @@ export const es: Catalog = {
   "inbox.removed": "eliminar",
   "inbox.from": "De dónde viene",
   "inbox.why": "Por qué",
+  "inbox.openOriginal": "Abrir el original",
   "inbox.recordedAs": "Se registra a tu nombre; se puede deshacer y el historial se conserva.",
   "inbox.done.accept": { one: "Aceptado", other: "Aceptados: {n}" },
   "inbox.done.keep": { one: "Se mantuvo el actual", other: "Se mantuvieron los actuales: {n}" },

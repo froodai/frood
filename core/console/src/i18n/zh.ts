@@ -63,6 +63,7 @@ export const zh: Catalog = {
   "inbox.removed": "移除",
   "inbox.from": "出处",
   "inbox.why": "原因",
+  "inbox.openOriginal": "打开原文",
   "inbox.recordedAs": "以你的名义记录；可以撤销，历史会保留。",
   "inbox.done.accept": { other: "已接受：{n}" },
   "inbox.done.keep": { other: "已保留现有：{n}" },

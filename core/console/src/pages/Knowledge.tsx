@@ -2,17 +2,15 @@ import { useQuery } from "@tanstack/react-query";
 import { Search } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
-import { Badge } from "@/components/ui/badge";
+import { KindBadge } from "@/components/badges";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useI18n } from "@/i18n";
-import type { Key } from "@/i18n/en";
 import { api } from "@/lib/frood";
 import { useMediaQuery } from "@/lib/hooks";
+import { titled } from "@/lib/situations";
 import type { Assertion, SearchHit } from "@/lib/types";
 import { cn } from "@/lib/utils";
-
-export const kindKey = (kind: string) => `kind.${kind}` as Key;
 
 export function Knowledge() {
   const { t, date } = useI18n();
@@ -73,7 +71,9 @@ export function Knowledge() {
               <span>{t("knowledge.col.kind")}</span>
               <span>{t("knowledge.col.since")}</span>
             </div>
-            {list.data?.map((a) => (
+            {list.data?.map((a) => {
+              const { title, description } = titled(a.title, a.text);
+              return (
               <button
                 key={a.assertion_id}
                 type="button"
@@ -83,15 +83,17 @@ export function Knowledge() {
                   a.assertion_id === id && "bg-accent",
                 )}
               >
-                <span className="line-clamp-2">{a.text}</span>
+                <span className="flex min-w-0 flex-col gap-0.5">
+                  <span className="line-clamp-1">{title}</span>
+                  {description && <span className="line-clamp-1 text-[13px] text-muted-foreground">{description}</span>}
+                </span>
                 <span>
-                  <Badge variant="secondary" className="font-normal">
-                    {t(kindKey(a.kind))}
-                  </Badge>
+                  <KindBadge kind={a.kind} />
                 </span>
                 <span className="font-mono text-xs text-muted-foreground">{date(a.valid_from)}</span>
               </button>
-            ))}
+              );
+            })}
           </div>
         )}
       </section>
@@ -126,14 +128,15 @@ function History({ id }: { id: string }) {
     ...held.map((v) => ({ v, live: !v.valid_to && v.status === "active", corrected: false })),
     ...corrected.map((v) => ({ v, live: false, corrected: true })),
   ];
+  const { title } = titled(head.title, head.text);
+  const full = head.text.trim();
   const span = (v: Assertion) => (v.valid_to ? `${date(v.valid_from, "long")} – ${date(v.valid_to, "long")}` : date(v.valid_from, "long"));
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-1.5">
-        <Badge variant="secondary" className="self-start font-normal">
-          {t(kindKey(head.kind))}
-        </Badge>
-        <h2 className="text-lg font-semibold tracking-tight">{head.text}</h2>
+        <KindBadge kind={head.kind} className="self-start" />
+        <h2 className="text-[15px] leading-snug font-semibold">{title}</h2>
+        {full !== title && <p className="text-sm leading-relaxed text-foreground/85">{full}</p>}
       </div>
       <span className="text-xs text-muted-foreground">{t("knowledge.history")}</span>
       <ol className="flex flex-col">

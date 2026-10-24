@@ -63,6 +63,7 @@ export const ar: Catalog = {
   "inbox.removed": "إزالة",
   "inbox.from": "المصدر",
   "inbox.why": "السبب",
+  "inbox.openOriginal": "فتح الأصل",
   "inbox.recordedAs": "يُسجَّل باسمك؛ يمكن التراجع عنه، ويبقى السجل.",
   "inbox.done.accept": { zero: "لم يُقبل شيء", one: "تم القبول", two: "تم قبول عنصرين", few: "تم قبول {n} عناصر", many: "تم قبول {n} عنصرًا", other: "تم قبول {n} عنصر" },
   "inbox.done.keep": { zero: "لم يتغير شيء", one: "أُبقي الحالي", two: "أُبقي الحالي لعنصرين", few: "أُبقي الحالي لـ{n} عناصر", many: "أُبقي الحالي لـ{n} عنصرًا", other: "أُبقي الحالي لـ{n} عنصر" },

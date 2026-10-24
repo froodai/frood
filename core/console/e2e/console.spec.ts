@@ -26,7 +26,9 @@ test("Now shows deadlines, decisions and changes, by project", async ({ page }) 
   await expect(page.getByRole("heading", { name: "Now", level: 1 })).toBeVisible();
   const deadlines = page.getByRole("region", { name: "Deadlines" });
   await expect(deadlines.getByRole("link", { name: /overdue\s*Expense report for October/ })).toBeVisible();
-  await expect(page.getByRole("region", { name: "Decisions in force" }).getByText("Payments go through one provider; no billing of our own")).toBeVisible();
+  // Older knowledge without a title: its first clause, and the rest under it.
+  const decisions = page.getByRole("region", { name: "Decisions in force" });
+  await expect(decisions.getByRole("link", { name: /^Payments go through one provider\s*no billing of our own/ })).toBeVisible();
   await page.getByRole("button", { name: "Website" }).click();
   await expect(deadlines.getByText("Copy for the landing page")).toBeVisible();
   await expect(deadlines.getByText("Security review of Atlas")).toHaveCount(0);
@@ -42,6 +44,17 @@ test("a decision leaves the Inbox at once and comes back with Undo", async ({ pa
   await page.getByRole("button", { name: "Undo" }).click();
   await expect(page.getByText("Undone")).toBeVisible();
   await expect(item).toBeVisible();
+});
+
+test("an item reads as a title with its kind, and opens the original", async ({ page }) => {
+  await signIn(page, "/admin/inbox");
+  const row = page.getByRole("button", { name: /^ATL-142: a finished session loads for 22 minutes/ });
+  await expect(row.getByText("Fact")).toBeVisible();
+  await row.click();
+  const detail = page.getByRole("main").getByRole("complementary");
+  await expect(detail.getByRole("heading", { level: 2 })).toHaveText("ATL-142: a finished session loads for 22 minutes");
+  await expect(detail.getByText(/the proposed fix is to attach with session\/resume/)).toBeVisible();
+  await expect(detail.getByRole("link", { name: /ATL-142: Task view keeps loading/ })).toHaveAttribute("href", "https://tracker.example/issue/ATL-142");
 });
 
 test("several are decided in one go", async ({ page }) => {

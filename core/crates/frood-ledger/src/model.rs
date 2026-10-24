@@ -350,6 +350,9 @@ pub struct Entity {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AssertionContent {
     pub kind: String,
+    /// A short headline a person reads first; `text` is the full wording under it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
     pub text: String,
     /// Entity ids, or `ref:<key>` of an entity created earlier in the same proposal.
     #[serde(default)]
@@ -516,6 +519,7 @@ pub struct AssertionVersion {
     pub assertion_id: Uuid,
     pub version: i32,
     pub kind: String,
+    pub title: Option<String>,
     pub text: String,
     pub subjects: Vec<Uuid>,
     pub slots: serde_json::Value,

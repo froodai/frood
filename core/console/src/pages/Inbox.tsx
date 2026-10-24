@@ -1,8 +1,9 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronDown, Search, X } from "lucide-react";
+import { Check, ChevronDown, ExternalLink, Search, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
+import { KindBadge, TypeBadge } from "@/components/badges";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -13,7 +14,8 @@ import type { Key } from "@/i18n/en";
 import { api } from "@/lib/frood";
 import { useKeys, useMediaQuery } from "@/lib/hooks";
 import { useInbox, waiting } from "@/lib/queries";
-import { headline, kindOf, type Origin, originOf, proposal, TONE, type Type, TYPES, typeKey, typeOf } from "@/lib/situations";
+import { kindTone } from "@/lib/kinds";
+import { headline, kindOf, type Origin, originOf, proposal, summary, TONE, type Type, TYPES, typeKey, typeOf } from "@/lib/situations";
 import type { Change, InboxEntry, QuestionContent } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -45,11 +47,6 @@ function useUndo() {
     mutationFn: (ids: string[]) => Promise.all(ids.map((id) => api(`/v1/inbox/${id}/undo`, { method: "POST" }))),
     onSettled: () => client.invalidateQueries({ queryKey: ["inbox"] }),
   });
-}
-
-export function TypeBadge({ type }: { type: Type }) {
-  const { t } = useI18n();
-  return <span className={cn("inline-flex items-center rounded-md px-1.5 py-0.5 text-[11px] font-medium", TONE[type].badge)}>{t(typeKey(type))}</span>;
 }
 
 function useOriginLabel() {
@@ -192,6 +189,7 @@ export function Inbox() {
                 <SelectItem value="all">{t("inbox.filter.anyKind")}</SelectItem>
                 {kinds.map((k) => (
                   <SelectItem key={k} value={k}>
+                    <span className={cn("size-2 rounded-full", kindTone(k).dot)} />
                     {t(`kind.${k}` as Key)}
                   </SelectItem>
                 ))}
@@ -261,6 +259,7 @@ export function Inbox() {
             {visible.map((entry) => {
               const ty = typeOf(entry);
               const k = kindOf(entry);
+              const { title, description } = summary(entry);
               const active = entry.item.id === current?.item.id;
               return (
                 <div
@@ -270,14 +269,14 @@ export function Inbox() {
                     active ? "bg-accent shadow-[inset_2px_0_0_var(--primary)] rtl:shadow-[inset_-2px_0_0_var(--primary)]" : "hover:bg-accent/40",
                   )}
                 >
-                  <CheckBox checked={selected.has(entry.item.id)} label={headline(entry)} onClick={() => toggle(entry.item.id)} />
+                  <CheckBox checked={selected.has(entry.item.id)} label={title} onClick={() => toggle(entry.item.id)} />
                   <button type="button" onClick={() => show(entry)} className="flex min-w-0 flex-1 flex-col gap-1 text-start">
-                    <span className={cn("line-clamp-2 text-sm leading-snug", !entry.seen && "font-medium")}>{headline(entry)}</span>
-                    <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-                      <TypeBadge type={ty} />
-                      {k && <span>{t(`kind.${k}` as Key)}</span>}
-                      <span aria-hidden>·</span>
-                      <span>{originLabel(entry)}</span>
+                    <span className={cn("line-clamp-1 text-sm leading-snug", !entry.seen && "font-medium")}>{title}</span>
+                    {description && <span className="line-clamp-1 text-[13px] leading-snug text-muted-foreground">{description}</span>}
+                    <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted-foreground">
+                      {k && <KindBadge kind={k} />}
+                      {(!k || ty !== "new") && <TypeBadge type={ty} />}
+                      <span className="ms-0.5">{originLabel(entry)}</span>
                     </span>
                   </button>
                   <span className="shrink-0 pt-0.5 text-xs text-muted-foreground">{ago(entry.item.created_at)}</span>
@@ -338,10 +337,11 @@ function CheckBox({ checked, label, onClick }: { checked: boolean; label: string
   );
 }
 
-function ChangeBoxes({ change }: { change: Change }) {
+function ChangeBoxes({ change, title }: { change: Change; title: string }) {
   const { t } = useI18n();
   if (!change.before) {
-    return <p className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3 text-sm">{change.after}</p>;
+    // New knowledge: the text under the title, unless the title already says it all.
+    return change.after && change.after.trim() !== title ? <p className="text-sm leading-relaxed text-foreground/85">{change.after}</p> : null;
   }
   return (
     <div className="grid grid-cols-1 gap-2">
@@ -355,6 +355,14 @@ function ChangeBoxes({ change }: { change: Change }) {
       </div>
     </div>
   );
+}
+
+function host(uri: string) {
+  try {
+    return new URL(uri).host;
+  } catch {
+    return "";
+  }
 }
 
 /** Long text folded to a few lines, open on demand. */
@@ -383,28 +391,30 @@ function Detail({ entry, busy, onAct }: { entry: InboxEntry; busy: boolean; onAc
   const has = (action: string) => entry.actions.some((a) => a.action === action);
   const ty = typeOf(entry);
   const k = kindOf(entry);
+  const { title, description } = summary(entry);
   const several = (p?.alternatives.length ?? 0) > 1;
 
   return (
     <div className="flex min-h-full flex-col">
       <div className="flex flex-1 flex-col gap-4 p-5">
         <div className="flex flex-col gap-2">
-          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+            {k && <KindBadge kind={k} />}
             <TypeBadge type={ty} />
-            {k && <span>{t(`kind.${k}` as Key)}</span>}
             {entry.item.urgency === "now" && <span className="font-medium text-warning">{t("inbox.urgent")}</span>}
           </div>
-          <h2 className="text-base leading-snug font-semibold">{headline(entry)}</h2>
+          <h2 className="text-[15px] leading-snug font-semibold">{title}</h2>
           <span className="text-xs text-muted-foreground">
             {originLabel(entry)} · {ago(entry.item.created_at)}
           </span>
+          {!p && description && <p className="text-sm leading-relaxed text-foreground/85">{description}</p>}
         </div>
 
         {p?.alternatives.map((alternative) => (
           <div key={alternative.key} className="flex flex-col gap-2">
             {several && <span className="text-sm font-medium">{alternative.label ?? alternative.key}</span>}
             {alternative.changes.map((change, i) => (
-              <ChangeBoxes key={i} change={change} />
+              <ChangeBoxes key={i} change={change} title={title} />
             ))}
             {several && (
               <Button size="sm" className="self-start" disabled={busy} onClick={() => onAct({ action: "accept", alternative: alternative.key })}>
@@ -414,10 +424,24 @@ function Detail({ entry, busy, onAct }: { entry: InboxEntry; busy: boolean; onAc
           </div>
         ))}
 
-        {p?.quote && (
+        {(p?.quote || p?.origin) && (
           <div className="flex flex-col gap-1.5">
             <span className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">{t("inbox.from")}</span>
-            <blockquote className="border-s-2 border-primary/50 ps-3 text-sm italic">{p.quote}</blockquote>
+            {p.quote && <blockquote className="border-s-2 border-primary/50 ps-3 text-sm italic">{p.quote}</blockquote>}
+            {p.origin && (
+              <a
+                href={p.origin.uri}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex max-w-full items-center gap-1.5 self-start rounded-md border px-2.5 py-1.5 text-sm hover:bg-accent"
+              >
+                <ExternalLink className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                <span className="truncate">{p.origin.title || t("inbox.openOriginal")}</span>
+                <span className="shrink-0 text-xs text-muted-foreground" dir="ltr">
+                  {host(p.origin.uri)}
+                </span>
+              </a>
+            )}
           </div>
         )}
         {p?.rationale && (
