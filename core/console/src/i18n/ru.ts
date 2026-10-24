@@ -63,6 +63,7 @@ export const ru: Catalog = {
   "inbox.removed": "убрать",
   "inbox.from": "Откуда",
   "inbox.why": "Почему",
+  "inbox.openOriginal": "Открыть оригинал",
   "inbox.recordedAs": "Решение записывается от вашего имени; его можно отменить, а история остаётся.",
   "inbox.done.accept": { one: "Принято", few: "Принято: {n}", many: "Принято: {n}", other: "Принято: {n}" },
   "inbox.done.keep": { one: "Оставлено старое", few: "Оставлено старое: {n}", many: "Оставлено старое: {n}", other: "Оставлено старое: {n}" },

@@ -66,6 +66,7 @@ export const en = {
   "inbox.removed": "removed",
   "inbox.from": "Where it comes from",
   "inbox.why": "Why",
+  "inbox.openOriginal": "Open the original",
   "inbox.recordedAs": "Recorded under your name; it can be undone, and the history stays.",
   "inbox.done.accept": { one: "Accepted", other: "Accepted: {n}" },
   "inbox.done.keep": { one: "Kept the current one", other: "Kept the current ones: {n}" },

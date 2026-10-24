@@ -138,7 +138,10 @@ impl Bot {
                 out.push(format!(
                     "• <b>{}</b> — {}",
                     esc(&when),
-                    esc(&short(d["text"].as_str().unwrap_or("?"), 110))
+                    esc(&short(
+                        d["title"].as_str().or(d["text"].as_str()).unwrap_or("?"),
+                        110
+                    ))
                 ));
             }
         }

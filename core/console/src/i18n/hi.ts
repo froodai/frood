@@ -63,6 +63,7 @@ export const hi: Catalog = {
   "inbox.removed": "हटाना",
   "inbox.from": "कहाँ से आया",
   "inbox.why": "क्यों",
+  "inbox.openOriginal": "मूल खोलें",
   "inbox.recordedAs": "आपके नाम से दर्ज होता है; इसे पलटा जा सकता है और इतिहास बना रहता है।",
   "inbox.done.accept": { one: "स्वीकारा गया", other: "स्वीकारे गए: {n}" },
   "inbox.done.keep": { one: "मौजूदा रखा गया", other: "मौजूदा रखे गए: {n}" },

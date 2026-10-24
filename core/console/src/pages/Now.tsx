@@ -6,6 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useI18n } from "@/i18n";
 import { api } from "@/lib/frood";
 import { useInbox, waiting } from "@/lib/queries";
+import { titled } from "@/lib/situations";
 import type { Assertion } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -30,6 +31,17 @@ function Panel({ title, sub, children, empty }: { title: string; sub?: string; c
       </div>
       {children.length ? children : <p className="px-4 py-3 text-sm text-muted-foreground">{empty}</p>}
     </section>
+  );
+}
+
+/** A title, with the text under it in one line when there is more to say. */
+function What({ a }: { a: Assertion }) {
+  const { title, description } = titled(a.title, a.text);
+  return (
+    <>
+      <span>{title}</span>
+      {description && <span className="line-clamp-1 text-[13px] text-muted-foreground">{description}</span>}
+    </>
   );
 }
 
@@ -111,9 +123,9 @@ export function Now() {
             {v.deadlines.map((d) => (
               <Row key={d.assertion_id} to={link(d)} className="items-baseline">
                 <span className={cn("w-20 shrink-0 font-mono text-xs", d.overdue ? "text-destructive" : "text-muted-foreground")}>{d.overdue ? t("now.overdue") : date(d.due)}</span>
-                <span className="min-w-0 flex-1">
-                  {d.text}
-                  {about(d) && <span className="block text-xs text-muted-foreground">{about(d)}</span>}
+                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <What a={d} />
+                  {about(d) && <span className="text-xs text-muted-foreground">{about(d)}</span>}
                 </span>
               </Row>
             ))}
@@ -121,7 +133,7 @@ export function Now() {
           <Panel title={t("now.decisions")} empty={t("now.nothing")}>
             {v.decisions.map((d) => (
               <Row key={d.assertion_id} to={link(d)} className="flex-col gap-0.5">
-                <span>{d.text}</span>
+                <What a={d} />
                 <span className="text-xs text-muted-foreground">
                   {[about(d), date(d.valid_from)].filter(Boolean).join(" · ")}
                 </span>
@@ -131,7 +143,9 @@ export function Now() {
           <Panel title={t("now.owners")} empty={t("now.nothing")}>
             {v.owners.map((o) => (
               <Row key={o.assertion_id} to={link(o)}>
-                <span className="min-w-0 flex-1">{o.text}</span>
+                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <What a={o} />
+                </span>
               </Row>
             ))}
           </Panel>
@@ -139,7 +153,7 @@ export function Now() {
             {v.changes.map(({ assertion: a, before }) => (
               <Row key={`${a.assertion_id}/${a.version}`} to={link(a)} className="flex-col gap-0.5">
                 {before && <span className="text-[13px] text-muted-foreground line-through">{before}</span>}
-                <span>{a.text}</span>
+                <What a={a} />
                 <span className="text-xs text-muted-foreground">{ago(a.recorded_from)}</span>
               </Row>
             ))}
@@ -148,7 +162,9 @@ export function Now() {
             <Panel title={t("now.questions")} empty={t("now.nothing")}>
               {v.questions.map((q) => (
                 <Row key={q.assertion_id} to={link(q)}>
-                  <span className="min-w-0 flex-1">{q.text}</span>
+                  <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                    <What a={q} />
+                  </span>
                 </Row>
               ))}
             </Panel>

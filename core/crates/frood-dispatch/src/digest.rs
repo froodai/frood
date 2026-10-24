@@ -51,7 +51,12 @@ impl Dispatch {
                     if let Operation::Create { assertion, .. }
                     | Operation::Supersede { assertion, .. } = op
                     {
-                        accepted.push(assertion.text.clone());
+                        accepted.push(
+                            assertion
+                                .title
+                                .clone()
+                                .unwrap_or_else(|| assertion.text.clone()),
+                        );
                     }
                 }
             }
@@ -63,11 +68,15 @@ impl Dispatch {
         for item in open.iter().take(LIST) {
             let shown = self.inbox_shown(item.clone()).await?;
             let what = match item.kind.as_str() {
-                "proposal" => shown.content["alternatives"][0]["changes"][0]["after"]
-                    .as_str()
-                    .or_else(|| shown.content["alternatives"][0]["changes"][0]["before"].as_str())
-                    .unwrap_or("?")
-                    .to_owned(),
+                "proposal" => {
+                    let change = &shown.content["alternatives"][0]["changes"][0];
+                    change["title"]
+                        .as_str()
+                        .or_else(|| change["after"].as_str())
+                        .or_else(|| change["before"].as_str())
+                        .unwrap_or("?")
+                        .to_owned()
+                }
                 "question" => shown.content["text"].as_str().unwrap_or("?").to_owned(),
                 "reminder" => item.data["text"].as_str().unwrap_or("?").to_owned(),
                 "alert" => item.data["job"].as_str().unwrap_or("?").to_owned(),
@@ -101,7 +110,7 @@ impl Dispatch {
             .await
             .unwrap_or_default()
             .into_iter()
-            .map(|a| json!({ "text": a.text, "due": a.slots["due"] }))
+            .map(|a| json!({ "text": a.title.unwrap_or(a.text), "due": a.slots["due"] }))
             .collect::<Vec<_>>();
 
         let failed: Vec<Run> = runs::list(pool, None, Some("failed"), 50)

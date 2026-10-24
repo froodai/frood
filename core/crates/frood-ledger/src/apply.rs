@@ -107,6 +107,11 @@ fn validate_content(
     if content.text.trim().is_empty() {
         return Err("text must not be empty".to_owned());
     }
+    if title(content.title.as_deref()).is_some_and(|t| t.chars().count() > MAX_TITLE_CHARS) {
+        return Err(format!(
+            "title must be at most {MAX_TITLE_CHARS} characters; the rest belongs in text"
+        ));
+    }
     if !content.slots.is_object() {
         return Err("slots must be an object".to_owned());
     }
@@ -120,6 +125,14 @@ fn validate_content(
         check_reference(subject, entity_refs)?;
     }
     Ok(())
+}
+
+/// Longest title a person still reads at a glance.
+pub const MAX_TITLE_CHARS: usize = 120;
+
+/// A title as stored: trimmed, and none when blank.
+fn title(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|t| !t.is_empty())
 }
 
 fn require_base(base_ids: &HashSet<Uuid>, id: Uuid) -> std::result::Result<(), String> {
@@ -506,13 +519,15 @@ impl<'a> Applier<'a> {
     ) -> Result<()> {
         let slots = self.resolve_slot_refs(&content.slots)?;
         sqlx::query(
-            "INSERT INTO assertion_versions (assertion_id, version, kind, text, subjects, slots, modality, authority, \
-             said_at, valid_from, valid_to, recorded_from, status, review_after, evidence, proposal_id, verdict_id) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)",
+            "INSERT INTO assertion_versions (assertion_id, version, kind, title, text, subjects, slots, modality, \
+             authority, said_at, valid_from, valid_to, recorded_from, status, review_after, evidence, proposal_id, \
+             verdict_id) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)",
         )
         .bind(id)
         .bind(version)
         .bind(&content.kind)
+        .bind(title(content.title.as_deref()))
         .bind(content.text.trim())
         .bind(subjects)
         .bind(&slots)
@@ -544,6 +559,7 @@ impl<'a> Applier<'a> {
     ) -> Result<()> {
         let content = AssertionContent {
             kind: row.kind.clone(),
+            title: row.title.clone(),
             text: row.text.clone(),
             subjects: Vec::new(),
             slots: row.slots.clone(),

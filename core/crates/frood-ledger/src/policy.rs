@@ -119,6 +119,7 @@ mod tests {
             key: None,
             assertion: AssertionContent {
                 kind: "fact".to_owned(),
+                title: None,
                 text: "x".to_owned(),
                 subjects: Vec::new(),
                 slots: serde_json::json!({}),

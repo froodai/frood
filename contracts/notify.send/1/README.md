@@ -25,8 +25,9 @@ person's channel account in `external_id`: the action is that linked person's
       "rationale": "#release, Olya, 18:02",
       "quote": "релиз переносим на 28.11",
       "alternatives": [
-        { "key": "default", "label": null, "changes": [ { "kind": "commitment", "before": "Релиз 2.4 — 14 ноября", "after": "Релиз 2.4 — 28 ноября" } ] }
-      ]
+        { "key": "default", "label": null, "changes": [ { "kind": "commitment", "title": "Релиз 2.4 — 28 ноября", "before": "Релиз 2.4 — 14 ноября", "after": "Оля переносит релиз 2.4 на 28 ноября" } ] }
+      ],
+      "origin": { "uri": "https://chat.example/release/p1762707720", "title": "#release, Olya" }
     },
     "actions": [
       { "action": "accept", "alternative": "default", "label": null },
@@ -43,8 +44,10 @@ person's channel account in `external_id`: the action is that linked person's
 - `item.item.kind` is `proposal`, `question`, `reminder`, `alert` or `digest`; `content` depends on
   it:
   - `proposal`: `risk`, `author`, `rationale`, `quote` (the words it rests on), `alternatives`
-    with `changes` (`before` / `after` texts; `before` is null for new knowledge, `after` is null
-    for a closing);
+    with `changes` (`kind`; `title`, a short headline, null for knowledge recorded without one;
+    `before` / `after` texts — `before` is null for new knowledge, `after` is null for a closing),
+    and `origin` (`uri`, `title`) — where to open the original, an http or https address — or
+    null;
   - `question`: `text`, `options`, `context`, `job`;
   - `reminder`: `assertion_id`, `text`, `due`, `step` (`before`, `today`, `overdue`);
   - `alert`: `run_id`, `job`, `error`;

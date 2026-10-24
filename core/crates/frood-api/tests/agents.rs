@@ -894,17 +894,35 @@ async fn daily_sweep_reads_its_source_and_proposes() {
             &chat_token,
             "propose_change",
             json!({
-                "operations": [{ "op": "supersede", "assertion_id": known["assertion_id"], "assertion": { "kind": "commitment", "text": "Релиз 2.4 — 28 ноября", "modality": "reported", "slots": { "due": "2026-11-28" } } }],
+                "operations": [{ "op": "supersede", "assertion_id": known["assertion_id"], "assertion": { "kind": "commitment", "title": "Релиз 2.4 — 28 ноября", "text": "Оля переносит релиз 2.4 на 28 ноября", "modality": "reported", "slots": { "due": "2026-11-28" } } }],
                 "base": [{ "assertion_id": known["assertion_id"], "version": known["version"] }],
                 "risk": "conflict",
                 "rationale": "#release, Olya, 2026-11-09 18:02",
                 "source_text": "Оля: релиз переносим на 28.11",
+                "source_uri": "https://chat.example/release/p1762707720",
+                "source_title": "#release, Olya",
             }),
         )
         .await,
     );
     assert_eq!(conflict["state"], "open", "{conflict}");
     assert_eq!(conflict["author"], "agent:daily-sweep");
+    // The Inbox shows its title and where to open the original.
+    dispatch.drain().await.unwrap();
+    let (_, inbox) = call(&app, get_json("/v1/inbox", &pat)).await;
+    let entry = inbox
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["content"]["proposal_id"] == conflict["id"])
+        .unwrap_or_else(|| panic!("no Inbox entry for the conflict: {inbox}"));
+    let change = &entry["content"]["alternatives"][0]["changes"][0];
+    assert_eq!(change["title"], "Релиз 2.4 — 28 ноября", "{entry}");
+    assert_eq!(change["before"], "Релиз 2.4 — 14 ноября");
+    assert_eq!(
+        entry["content"]["origin"],
+        json!({ "uri": "https://chat.example/release/p1762707720", "title": "#release, Olya" })
+    );
 
     // In the authoritative ADR repository: a new decision is accepted by the job's policy; a
     // contradiction still waits.

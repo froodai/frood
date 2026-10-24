@@ -9,7 +9,7 @@ use std::collections::BTreeSet;
 use chrono::{DateTime, Duration, Utc};
 use frood_config::{Attention, BeforeNotify};
 use frood_ledger::model::{
-    Actor, Decision, Operation, Proposal, ProposalState, Risk, VerdictInput,
+    Actor, Decision, Operation, Proposal, ProposalState, Risk, Source, VerdictInput,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -774,22 +774,33 @@ impl Dispatch {
         for alternative in &p.alternatives {
             let mut changes = Vec::new();
             for op in &alternative.operations {
-                let (kind, before, after) = match op {
-                    Operation::Create { assertion, .. } => {
-                        (assertion.kind.clone(), None, Some(assertion.text.clone()))
-                    }
+                let (kind, title, before, after) = match op {
+                    Operation::Create { assertion, .. } => (
+                        assertion.kind.clone(),
+                        assertion.title.clone(),
+                        None,
+                        Some(assertion.text.clone()),
+                    ),
                     Operation::Supersede {
                         assertion_id,
                         assertion,
                     } => {
-                        let before = self
+                        let current = self
                             .ctx
                             .ledger
                             .assertion(*assertion_id, None, None)
                             .await
-                            .ok()
-                            .map(|a| a.version.text);
-                        (assertion.kind.clone(), before, Some(assertion.text.clone()))
+                            .ok();
+                        let title = assertion
+                            .title
+                            .clone()
+                            .or_else(|| current.as_ref().and_then(|a| a.version.title.clone()));
+                        (
+                            assertion.kind.clone(),
+                            title,
+                            current.map(|a| a.version.text),
+                            Some(assertion.text.clone()),
+                        )
                     }
                     Operation::Close { assertion_id, .. } => {
                         let current = self
@@ -803,13 +814,16 @@ impl Dispatch {
                                 .as_ref()
                                 .map(|a| a.version.kind.clone())
                                 .unwrap_or_default(),
+                            current.as_ref().and_then(|a| a.version.title.clone()),
                             current.map(|a| a.version.text),
                             None,
                         )
                     }
                     _ => continue,
                 };
-                changes.push(json!({ "kind": kind, "before": before, "after": after }));
+                changes.push(
+                    json!({ "kind": kind, "title": title, "before": before, "after": after }),
+                );
             }
             alternatives.push(
                 json!({ "key": alternative.key, "label": alternative.label, "changes": changes }),
@@ -822,15 +836,27 @@ impl Dispatch {
             .evidence(&p.evidence)
             .await
             .unwrap_or_default();
+        let mut sources = Vec::new();
+        for e in evidence.iter().take(5) {
+            if !sources.iter().any(|s: &Source| s.id == e.source_id)
+                && let Ok(source) = self.ctx.ledger.source(e.source_id).await
+            {
+                sources.push(source);
+            }
+        }
         let mut quote = evidence.iter().find_map(|e| e.quote.clone());
-        if quote.is_none()
-            && let Some(first) = evidence.first()
-            && let Ok(source) = self.ctx.ledger.source(first.source_id).await
-        {
-            quote = source
-                .content
+        if quote.is_none() {
+            quote = sources
+                .first()
+                .and_then(|s| s.content.as_ref())
                 .map(|text| text.chars().take(500).collect::<String>());
         }
+        // Where a person opens the original: the first source with an address.
+        let origin = sources.iter().find_map(|s| {
+            s.uri
+                .as_ref()
+                .map(|uri| json!({ "uri": uri, "title": s.title }))
+        });
         json!({
             "proposal_id": p.id,
             "risk": risk_name(p.risk),
@@ -839,6 +865,7 @@ impl Dispatch {
             "state": p.state,
             "alternatives": alternatives,
             "quote": quote,
+            "origin": origin,
         })
     }
 

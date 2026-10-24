@@ -48,6 +48,8 @@ struct EntityOut {
 struct ChangeOut {
     action: String,
     kind: String,
+    #[serde(default)]
+    title: Option<String>,
     text: String,
     subjects: Vec<String>,
     slots: Vec<SlotOut>,
@@ -88,10 +90,11 @@ pub(crate) fn schema() -> Value {
             } },
             "changes": { "type": "array", "items": {
                 "type": "object", "additionalProperties": false,
-                "required": ["action", "kind", "text", "subjects", "slots", "modality", "valid_from", "target_assertion_id", "close_status", "conflict", "confidence", "quote", "reason"],
+                "required": ["action", "kind", "title", "text", "subjects", "slots", "modality", "valid_from", "target_assertion_id", "close_status", "conflict", "confidence", "quote", "reason"],
                 "properties": {
                     "action": { "type": "string", "enum": ["create", "supersede", "close", "skip"] },
                     "kind": { "type": "string", "enum": KNOWN_KINDS },
+                    "title": { "type": "string" },
                     "text": { "type": "string" },
                     "subjects": { "type": "array", "items": { "type": "string" } },
                     "slots": { "type": "array", "items": {
@@ -189,9 +192,10 @@ fn script(text: &str) -> Option<&'static str> {
 fn language_line(text: &str) -> String {
     match script(text) {
         Some(script) => format!(
-            "The source is written in {script} script: write every assertion text, entity name and alias in the source's language and script, not in English unless the source is in English.\n"
+            "The source is written in {script} script: write every assertion title and text, entity name and alias in the source's language and script, not in English unless the source is in English.\n"
         ),
-        None => "Write every assertion text and entity name in the source's language.\n".to_owned(),
+        None => "Write every assertion title, text and entity name in the source's language.\n"
+            .to_owned(),
     }
 }
 
@@ -263,6 +267,20 @@ impl Entities {
             })
             .collect()
     }
+}
+
+/// A model's title as the ledger takes it: trimmed, and cut when it runs long.
+fn headline(title: &str) -> Option<String> {
+    let title = title.trim();
+    if title.is_empty() {
+        return None;
+    }
+    let limit = frood_ledger::MAX_TITLE_CHARS;
+    if title.chars().count() <= limit {
+        return Some(title.to_owned());
+    }
+    let cut: String = title.chars().take(limit - 1).collect();
+    Some(format!("{}…", cut.trim_end()))
 }
 
 fn clean_key(key: &str) -> String {
@@ -471,6 +489,7 @@ async fn apply(
         }
         let content = AssertionContent {
             kind: change.kind.clone(),
+            title: change.title.as_deref().and_then(headline),
             text: change.text.trim().to_owned(),
             subjects,
             slots: Value::Object(slots),
@@ -707,5 +726,17 @@ mod tests {
         );
         assert!(parse_time("2026-11-14T10:00:00+02:00").is_some());
         assert!(parse_time("soon").is_none());
+    }
+
+    #[test]
+    fn long_titles_are_cut() {
+        assert_eq!(
+            headline("  Релиз 2.4 — 14 ноября "),
+            Some("Релиз 2.4 — 14 ноября".into())
+        );
+        assert_eq!(headline(" "), None);
+        let long = headline(&"слово ".repeat(40)).unwrap();
+        assert_eq!(long.chars().count(), frood_ledger::MAX_TITLE_CHARS);
+        assert!(long.ends_with('…'));
     }
 }

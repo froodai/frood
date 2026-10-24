@@ -8,6 +8,7 @@ import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, C
 import { LANGUAGES, useI18n } from "@/i18n";
 import { api } from "@/lib/frood";
 import { useHealth, useStartJob } from "@/lib/queries";
+import { titled } from "@/lib/situations";
 import type { SearchHit } from "@/lib/types";
 import { SECTIONS } from "./sections";
 
@@ -72,7 +73,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
                 onSelect={() => run(() => navigate(`knowledge/${hit.assertion_id}`))}
               >
                 <FileSearch />
-                <span className="line-clamp-1">{hit.text}</span>
+                <span className="line-clamp-1">{titled(hit.title, hit.text).title}</span>
               </CommandItem>
             ))}
           </CommandGroup>

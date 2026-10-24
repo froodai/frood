@@ -21,6 +21,7 @@ use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use uuid::Uuid;
 
+pub use apply::MAX_TITLE_CHARS;
 pub use error::{LedgerError, Result};
 use error::{invalid, is_unique_violation};
 use journal::Event;
@@ -59,9 +60,20 @@ impl Ledger {
     pub async fn capture(
         &self,
         actor: &Actor,
-        input: NewSource,
+        mut input: NewSource,
         blob: Option<NewBlob>,
     ) -> Result<CaptureResult> {
+        // A person opens it from the console and the bot: only web addresses, never a script.
+        input.uri = input
+            .uri
+            .map(|uri| uri.trim().to_owned())
+            .filter(|uri| !uri.is_empty());
+        if let Some(uri) = &input.uri {
+            let scheme = uri.split_once("://").map(|(s, _)| s.to_ascii_lowercase());
+            if !matches!(scheme.as_deref(), Some("http" | "https")) {
+                return Err(invalid(format!("{uri:?} is not an http or https address")));
+            }
+        }
         if input.kind.trim().is_empty() {
             return Err(invalid("source kind must not be empty"));
         }

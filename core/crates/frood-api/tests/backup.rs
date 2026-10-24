@@ -171,9 +171,10 @@ async fn backups_seal_the_secrets_and_alert_when_they_stop() {
     let now = chrono::Utc::now();
     dispatch.detect_once(now).await.unwrap();
     assert_eq!(alerts(dispatch.clone()).await, ["backup/verify"]);
-    // Every six hours: nothing for two intervals is missed.
+    // Every six hours: nothing for two intervals is missed. With room for a clock change, when
+    // one interval lasts seven hours.
     dispatch
-        .detect_once(now + chrono::Duration::hours(13))
+        .detect_once(now + chrono::Duration::hours(15))
         .await
         .unwrap();
     assert_eq!(

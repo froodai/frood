@@ -5,7 +5,7 @@
 use serde_json::{Value, json};
 
 use crate::Bot;
-use crate::lang::Words;
+use crate::lang::{KINDS, Words};
 
 fn short(text: &str, max: usize) -> String {
     if text.chars().count() <= max {
@@ -44,11 +44,20 @@ pub(crate) fn text(shown: &Value, w: &Words) -> String {
                 Some("entity_merge") => w.merge,
                 _ => w.new,
             };
-            lines.push(format!("<b>{}</b>", esc(headline)));
             let alternatives = content["alternatives"]
                 .as_array()
                 .cloned()
                 .unwrap_or_default();
+            // What happened, and to what kind of knowledge: «🆕 New knowledge · Decision».
+            let kind = alternatives
+                .first()
+                .and_then(|a| a["changes"][0]["kind"].as_str())
+                .and_then(|k| KINDS.iter().position(|known| *known == k))
+                .map(|i| w.kinds[i]);
+            lines.push(match kind {
+                Some(kind) => format!("<b>{}</b> · {}", esc(headline), esc(kind)),
+                None => format!("<b>{}</b>", esc(headline)),
+            });
             for alternative in &alternatives {
                 if alternatives.len() > 1 {
                     let name = alternative["label"]
@@ -58,6 +67,10 @@ pub(crate) fn text(shown: &Value, w: &Words) -> String {
                     lines.push(format!("\n<b>{} «{}»</b>", esc(w.variant), esc(name)));
                 }
                 for change in alternative["changes"].as_array().into_iter().flatten() {
+                    let title = change["title"].as_str().filter(|t| !t.trim().is_empty());
+                    if let Some(title) = title {
+                        lines.push(format!("<b>{}</b>", esc(&short(title, 120))));
+                    }
                     match (change["before"].as_str(), change["after"].as_str()) {
                         (Some(before), Some(after)) => {
                             lines.push(format!(
@@ -71,7 +84,10 @@ pub(crate) fn text(shown: &Value, w: &Words) -> String {
                                 esc(&short(after, 220))
                             ));
                         }
-                        (None, Some(after)) => lines.push(esc(&short(after, 300))),
+                        (None, Some(after)) if Some(after.trim()) != title.map(str::trim) => {
+                            lines.push(esc(&short(after, 300)))
+                        }
+                        (None, Some(_)) => {}
                         (Some(before), None) => lines.push(format!(
                             "<b>{}:</b> {}",
                             esc(w.closed),
@@ -344,8 +360,17 @@ pub(crate) fn keyboard(shown: &Value, w: &Words, console: Option<&str>) -> Value
         })
         .collect();
     let mut rows = rows;
+    // Links: the original the knowledge comes from (the core keeps only web addresses), and
+    // the item in the console.
+    let mut links = Vec::new();
+    if let Some(uri) = shown["content"]["origin"]["uri"].as_str() {
+        links.push(json!({ "text": w.original, "url": uri }));
+    }
     if let Some(url) = console {
-        rows.push(json!([{ "text": w.details, "url": url }]));
+        links.push(json!({ "text": w.details, "url": url }));
+    }
+    if !links.is_empty() {
+        rows.push(Value::Array(links));
     }
     json!({ "inline_keyboard": rows })
 }
@@ -590,7 +615,7 @@ mod tests {
         let shown = conflict();
         assert_eq!(
             text(&shown, w),
-            "<b>⚠️ Противоречит записанному</b>\n<b>Было:</b> Релиз 2.4 — 14 ноября\n<b>Стало:</b> Релиз 2.4 — 28 ноября\n\n<i>«релиз переносим на 28.11»</i>\n<b>Почему:</b> #release, 18:02\n<i>От агента: daily-sweep</i>\n\n🔎 <b>Агент выяснил:</b> Olya confirmed in #release"
+            "<b>⚠️ Противоречит записанному</b> · Обязательство\n<b>Было:</b> Релиз 2.4 — 14 ноября\n<b>Стало:</b> Релиз 2.4 — 28 ноября\n\n<i>«релиз переносим на 28.11»</i>\n<b>Почему:</b> #release, 18:02\n<i>От агента: daily-sweep</i>\n\n🔎 <b>Агент выяснил:</b> Olya confirmed in #release"
         );
         assert_eq!(
             keyboard(&shown, w, None),
@@ -598,6 +623,36 @@ mod tests {
                 [{ "text": "Принять", "callback_data": "i:0199-item:0" }],
                 [{ "text": "Оставить старое", "callback_data": "i:0199-item:1" }],
                 [{ "text": "Отложить", "callback_data": "i:0199-item:2" }]
+            ] })
+        );
+    }
+
+    #[test]
+    fn new_knowledge_reads_as_title_and_text_with_a_link_to_the_original() {
+        let w = Lang::Ru.words();
+        let shown = json!({
+            "item": { "id": "0199-item", "kind": "proposal", "state": "open" },
+            "content": {
+                "risk": "new", "author": "agent:daily-sweep",
+                "alternatives": [{ "key": "default", "label": null, "changes": [{ "kind": "fact", "title": "AIRC-1808: сессия грузится 22 минуты", "before": null, "after": "Завершённая сессия с длинной историей показывает только хвост и грузится около 22 минут" }] }],
+                "origin": { "uri": "https://youtrack.example/issue/AIRC-1808", "title": "AIRC-1808" }
+            },
+            "actions": [{ "action": "accept", "alternative": "default" }]
+        });
+        assert_eq!(
+            text(&shown, w),
+            "<b>🆕 Новое знание</b> · Факт\n<b>AIRC-1808: сессия грузится 22 минуты</b>\nЗавершённая сессия с длинной историей показывает только хвост и грузится около 22 минут\n<i>От агента: daily-sweep</i>"
+        );
+        assert_eq!(
+            keyboard(
+                &shown,
+                w,
+                Some("https://frood.example/admin/inbox/0199-item")
+            ),
+            json!({ "inline_keyboard": [
+                [{ "text": "Принять", "callback_data": "i:0199-item:0" }],
+                [{ "text": "Открыть оригинал", "url": "https://youtrack.example/issue/AIRC-1808" },
+                 { "text": "Подробнее", "url": "https://frood.example/admin/inbox/0199-item" }]
             ] })
         );
     }

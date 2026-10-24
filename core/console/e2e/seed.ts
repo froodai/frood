@@ -30,7 +30,7 @@ async function note(text: string, daysAgo = 1): Promise<string> {
   return r.source.evidence[0].id;
 }
 
-type Content = { kind: string; text: string; subjects?: string[]; slots?: Record<string, unknown>; modality?: string };
+type Content = { kind: string; title?: string; text: string; subjects?: string[]; slots?: Record<string, unknown>; modality?: string };
 
 function assertion(c: Content, evidence: string, daysAgo: number) {
   return { modality: "agreed", subjects: [], slots: {}, ...c, said_at: ago(daysAgo), evidence: [evidence] };
@@ -98,6 +98,47 @@ await change(release, { kind: "commitment", text: "Atlas release on " + day(27),
 await change(owner, { kind: "responsibility", text: "Maria is responsible for the payments module", subjects: [atlas] }, "Maria takes over payments, Igor moves to search", "Ownership changed in the tracker");
 await change(migration, { kind: "status", text: "Migration to PostgreSQL 17: done", subjects: [atlas], slots: { state: "done" } }, "Migration to PostgreSQL 17 rolled out everywhere", "The migration task was closed");
 await change(cadence, { kind: "decision", text: "Atlas releases every second Tuesday", subjects: [atlas], modality: "decided" }, "Team chat: let's release every two weeks", "The team chat agreed on a release every two weeks", "conflict");
+
+// New knowledge an agent found in the tracker, with a link to the issue. A base keeps the
+// own-facts policy off, so it waits for a person the way an agent's proposal does.
+async function found(c: Content, quote: string, uri: string, title: string, rationale: string): Promise<Proposal> {
+  const r = await call<{ source: { evidence: { id: string }[] } }>("POST", "/v1/sources", {
+    kind: "conversation",
+    origin: "capture",
+    content: quote,
+    uri,
+    title,
+    said_at: ago(0),
+  });
+  const evidence = r.source.evidence[0].id;
+  const base = await call<{ version: number }>("GET", `/v1/assertions/${staging}`);
+  return call<Proposal>("POST", "/v1/proposals", {
+    risk: "new",
+    rationale,
+    base: [{ assertion_id: staging, version: base.version }],
+    operations: [{ op: "create", ref: "it", assertion: assertion(c, evidence, 0) }],
+    evidence: [evidence],
+  });
+}
+await found(
+  {
+    kind: "fact",
+    title: "ATL-142: a finished session loads for 22 minutes",
+    text: "ATL-142 (Bug, Chat): a finished session with a long history (1987 records) shows only the last part and keeps loading for about 22 minutes; the proposed fix is to attach with session/resume instead of session/load. Assigned to Maria.",
+    subjects: [atlas],
+  },
+  "Task view: a finished session with a long history shows only the projected tail and keeps loading (ATL-142, created by Oleg)",
+  "https://tracker.example/issue/ATL-142",
+  "ATL-142: Task view keeps loading",
+  "Tracker (ATL): ATL-142 was created today by Oleg, state Submitted, priority Normal, assignee Maria.",
+);
+await found(
+  { kind: "decision", title: "Search moves to OpenSearch", text: "Atlas search moves from PostgreSQL full-text to OpenSearch in the next quarter.", subjects: [atlas], modality: "decided" },
+  "ADR-12: Status accepted. Search moves to OpenSearch next quarter.",
+  "https://git.example/atlas/adr/012-search.md",
+  "ADR-12: Search engine",
+  "ADR-12 was accepted today.",
+);
 
 console.log("seeded the demo knowledge");
 
