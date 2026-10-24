@@ -1,7 +1,7 @@
 [package]
 name = "frood-runtime-docker"
 description = "Frood module: agents.execute@1, one Docker container per agent turn (Claude Code, Codex)"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2024"
 rust-version = "1.99"
 license = "Apache-2.0"
