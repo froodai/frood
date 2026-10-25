@@ -116,7 +116,11 @@ impl Ctx {
                     spec.name
                 ))
             })?;
-            servers.push(sources::mcp_server(name, source));
+            let source = self
+                .signed(source.clone())
+                .await
+                .map_err(|e| JobError::transient(format!("source {name}: {e}")))?;
+            servers.push(sources::mcp_server(name, &source));
         }
         Ok(Value::Array(servers))
     }

@@ -253,3 +253,197 @@ async fn sources_connect_from_the_console() {
         .unwrap();
     assert_eq!(left, 0);
 }
+
+/// An MCP server that signs people in itself (MCP authorization): it names its authorization
+/// server, lets Frood register, takes PKCE, and gives a token that runs out at once.
+async fn fake_oauth_mcp() -> String {
+    use axum::extract::{Form, Query, State};
+    use axum::routing::get;
+    use std::sync::{Arc, Mutex};
+    #[derive(Default)]
+    struct Shared {
+        base: String,
+        challenge: Option<String>,
+    }
+    let shared: Arc<Mutex<Shared>> = Arc::default();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    shared.lock().unwrap().base = base.clone();
+    let app = Router::new()
+        .route("/mcp", post(|State(s): State<Arc<Mutex<Shared>>>, headers: HeaderMap, axum::Json(message): axum::Json<Value>| async move {
+            let auth = headers.get(header::AUTHORIZATION).and_then(|v| v.to_str().ok()).unwrap_or_default();
+            if auth != "Bearer access-2" {
+                let base = s.lock().unwrap().base.clone();
+                return Response::builder()
+                    .status(StatusCode::UNAUTHORIZED)
+                    .header("www-authenticate", format!("Bearer resource_metadata=\"{base}/.well-known/oauth-protected-resource/mcp\""))
+                    .body(Body::empty())
+                    .unwrap();
+            }
+            let result = match message["method"].as_str() {
+                Some("initialize") => json!({ "protocolVersion": "2025-06-18", "capabilities": {}, "serverInfo": { "name": "notes" } }),
+                Some("tools/list") => json!({ "tools": [{ "name": "search_pages", "annotations": { "readOnlyHint": true } }] }),
+                _ => return StatusCode::ACCEPTED.into_response(),
+            };
+            axum::Json(json!({ "jsonrpc": "2.0", "id": message["id"], "result": result })).into_response()
+        }))
+        .route("/.well-known/oauth-protected-resource/mcp", get(|State(s): State<Arc<Mutex<Shared>>>| async move {
+            let base = s.lock().unwrap().base.clone();
+            axum::Json(json!({ "resource": format!("{base}/mcp"), "authorization_servers": [format!("{base}/auth")] }))
+        }))
+        .route("/.well-known/oauth-authorization-server/auth", get(|State(s): State<Arc<Mutex<Shared>>>| async move {
+            let base = s.lock().unwrap().base.clone();
+            axum::Json(json!({ "issuer": format!("{base}/auth"), "authorization_endpoint": format!("{base}/auth/authorize"),
+                               "token_endpoint": format!("{base}/auth/token"), "registration_endpoint": format!("{base}/auth/register") }))
+        }))
+        .route("/auth/register", post(|axum::Json(body): axum::Json<Value>| async move {
+            assert_eq!(body["token_endpoint_auth_method"], "none");
+            axum::Json(json!({ "client_id": "client-1", "redirect_uris": body["redirect_uris"] }))
+        }))
+        .route("/auth/authorize", get(|State(s): State<Arc<Mutex<Shared>>>, Query(q): Query<std::collections::BTreeMap<String, String>>| async move {
+            assert_eq!(q["code_challenge_method"], "S256");
+            assert!(q["resource"].ends_with("/mcp"));
+            s.lock().unwrap().challenge = Some(q["code_challenge"].clone());
+            let back = format!("{}?code=code-1&state={}", q["redirect_uri"], q["state"]);
+            Response::builder().status(StatusCode::FOUND).header("location", back).body(Body::empty()).unwrap()
+        }))
+        .route("/auth/token", post(|State(s): State<Arc<Mutex<Shared>>>, Form(f): Form<std::collections::BTreeMap<String, String>>| async move {
+            use base64::Engine;
+            use sha2::Digest;
+            match f["grant_type"].as_str() {
+                "authorization_code" => {
+                    let verifier = &f["code_verifier"];
+                    let challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(sha2::Sha256::digest(verifier.as_bytes()));
+                    assert_eq!(Some(challenge), s.lock().unwrap().challenge.clone(), "PKCE");
+                    assert_eq!(f["code"], "code-1");
+                    axum::Json(json!({ "access_token": "access-1", "refresh_token": "refresh-1", "expires_in": 1, "token_type": "Bearer" }))
+                }
+                _ => {
+                    assert_eq!(f["refresh_token"], "refresh-1");
+                    axum::Json(json!({ "access_token": "access-2", "expires_in": 3600, "token_type": "Bearer" }))
+                }
+            }
+        }))
+        .with_state(shared);
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    format!("{base}/mcp")
+}
+
+#[tokio::test]
+async fn a_source_connects_by_signing_in() {
+    let Some(url) = frood_store::testing::database_url() else {
+        eprintln!("FROOD_TEST_DATABASE_URL is not set; skipping");
+        return;
+    };
+    let pool = frood_store::testing::fresh_database(&url, "api_sign_in")
+        .await
+        .expect("test database");
+    let config = frood_config::parse(
+        "version: 1\ninstallation: {name: test}\nstorage: {uses: postgres, url: 'postgres://unused', objects: {uses: database}}\n\
+         server: {public_url: 'https://frood.example/frood'}\ndeploy: {server: host}\n",
+        &frood_config::Secrets::from_pairs(Vec::<(String, String)>::new()),
+    )
+    .unwrap()
+    .config;
+    let key = {
+        use age::secrecy::ExposeSecret;
+        age::x25519::Identity::generate()
+            .to_string()
+            .expose_secret()
+            .to_owned()
+    };
+    let auth = Auth::new(pool.clone(), AuthSettings::from_config(&config));
+    let alice = auth
+        .user_id_by_email("alice@example.com", true)
+        .await
+        .unwrap();
+    let all: Vec<String> = frood_auth::scope::ALL
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect();
+    let (_, admin) = auth
+        .create_personal_token(alice, "admin", &all, None)
+        .await
+        .unwrap();
+    let state = frood_api::assemble(&config, std::path::Path::new("."), pool.clone(), |name| {
+        (name == "FROOD_VAULT_KEY").then(|| key.clone())
+    })
+    .state;
+    let dispatch = state.dispatch.clone();
+    let app = router(state);
+    let server = fake_oauth_mcp().await;
+
+    let (status, started) = call(
+        &app,
+        "POST",
+        "/v1/connections/notes/sign-in",
+        &admin,
+        Some(json!({ "server": server, "scope": "Pages changed today" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{started}");
+    let authorize = started["authorize_url"].as_str().unwrap();
+    assert!(
+        authorize.contains(
+            "redirect_uri=https%3A%2F%2Ffrood.example%2Ffrood%2Fv1%2Fconnections%2Fsigned-in"
+        ),
+        "{authorize}"
+    );
+
+    // The person signs in and the server sends them back with a code.
+    let back = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap()
+        .get(authorize)
+        .send()
+        .await
+        .unwrap();
+    let location = back.headers()["location"].to_str().unwrap().to_owned();
+    let query = location.split_once('?').unwrap().1;
+    let request = Request::builder()
+        .uri(format!("/v1/connections/signed-in?{query}"))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
+    assert!(response.status().is_redirection());
+    assert_eq!(
+        response.headers()["location"],
+        "https://frood.example/frood/admin/sources?connected=notes"
+    );
+
+    // Connected, with no tools until a person chooses them.
+    let (_, listed) = call(&app, "GET", "/v1/connections", &admin, None).await;
+    let notes = &listed["sources"][0];
+    assert_eq!(notes["name"], "notes");
+    assert_eq!(notes["signed_in"], true);
+    assert_eq!(notes["tools"], json!([]));
+    assert!(!listed.to_string().contains("access-"), "{listed}");
+
+    // The first token ran out at once: the next use refreshes it.
+    let source = dispatch.signed_source("notes").await.unwrap().unwrap();
+    assert_eq!(source.headers["Authorization"], "Bearer access-2");
+    let (status, checked) = call(
+        &app,
+        "POST",
+        "/v1/connections/check",
+        &admin,
+        Some(json!({ "server": server, "name": "notes" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{checked}");
+    assert_eq!(checked["tools"][0]["name"], "search_pages");
+
+    // A return with a state nobody started.
+    let request = Request::builder()
+        .uri("/v1/connections/signed-in?code=x&state=nobody")
+        .body(Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
+    assert!(
+        response.headers()["location"]
+            .to_str()
+            .unwrap()
+            .contains("connect_error=")
+    );
+}

@@ -241,3 +241,21 @@ test("a source connected from the console: check, tools, connect, disconnect", a
   await page.getByRole("dialog").getByRole("button", { name: "Disconnect" }).click();
   await expect(card).toHaveCount(0);
 });
+
+test("a source connected by signing in, then its tools chosen", async ({ page }) => {
+  await signIn(page, "/admin/sources");
+  await page.getByRole("tab", { name: "Connected" }).click();
+  await page.getByRole("button", { name: /Connect a source/ }).click();
+  await page.getByRole("button", { name: /Any MCP server/ }).click();
+  const form = page.getByRole("dialog");
+  await form.getByLabel("Name").fill("wiki");
+  await form.getByLabel("Server address").fill("http://127.0.0.1:18099/signed/mcp");
+  await form.getByRole("button", { name: "Sign in" }).click();
+  // The server's page sends the person straight back; the source opens to choose its tools.
+  await expect(page.getByText("Signed in: wiki. Choose the tools the agent may call.")).toBeVisible();
+  const opened = page.getByRole("dialog");
+  await expect(opened.getByText("Connected by signing in; the token renews itself.")).toBeVisible();
+  await expect(opened.getByRole("checkbox", { name: /search_issues/ })).toBeChecked();
+  await opened.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByText("Connected: wiki. The next pass reads it.")).toBeVisible();
+});
