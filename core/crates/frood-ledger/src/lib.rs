@@ -33,6 +33,8 @@ pub use search::{SearchHit, SearchQuery};
 
 /// Largest file a capture may carry.
 pub const MAX_BLOB_BYTES: usize = 25 * 1024 * 1024;
+/// The largest text file read as a source's text; a longer one is kept, not read.
+const MAX_FILE_TEXT: usize = 200 * 1024;
 
 #[derive(Clone)]
 pub struct Ledger {
@@ -202,7 +204,15 @@ impl Ledger {
         } else {
             input.metadata
         };
-        let content = (!input.content.trim().is_empty()).then_some(input.content.as_str());
+        // A text file's words are the source's text, so extraction reads them (docs/27 §5).
+        let file_text = blob
+            .as_ref()
+            .filter(|b| b.is_text() && b.data.len() <= MAX_FILE_TEXT)
+            .and_then(|b| std::str::from_utf8(&b.data).ok())
+            .filter(|t| !t.trim().is_empty());
+        let content = (!input.content.trim().is_empty())
+            .then_some(input.content.as_str())
+            .or(file_text);
         // The file first: a row never points at a file that is not there.
         let in_database = self.objects.is_database();
         if let Some(blob) = &blob
@@ -584,7 +594,19 @@ impl Ledger {
                 .await
             {
                 Ok(decided) if policy == "agent-finding" => {
-                    self.mark_unverified(&decided).await?;
+                    let author = decided
+                        .author
+                        .split("/for/")
+                        .next()
+                        .unwrap_or(&decided.author)
+                        .to_owned();
+                    self.mark_unverified(&decided, &format!("found by {author}; not verified"))
+                        .await?;
+                    return Ok(decided);
+                }
+                Ok(decided) if context.mark_unverified.is_some() => {
+                    let reason = context.mark_unverified.clone().unwrap_or_default();
+                    self.mark_unverified(&decided, &reason).await?;
                     return Ok(decided);
                 }
                 Ok(decided) => return Ok(decided),
@@ -637,27 +659,19 @@ impl Ledger {
         Ok(context)
     }
 
-    /// What an agent found in an ordinary source and a policy took is marked not verified
-    /// (QF3): answers say so, and a person's check takes the mark off.
-    async fn mark_unverified(&self, proposal: &Proposal) -> Result<()> {
+    /// What a policy took without a person's check — an agent's finding in an ordinary source
+    /// (QF3), imported memory (QF2) — is marked not verified: answers say so, and a person's
+    /// check takes the mark off.
+    async fn mark_unverified(&self, proposal: &Proposal, reason: &str) -> Result<()> {
         let created: Vec<Uuid> = sqlx::query_scalar(
             "SELECT assertion_id FROM assertion_versions WHERE proposal_id = $1 AND version = 1",
         )
         .bind(proposal.id)
         .fetch_all(&self.pool)
         .await?;
-        let author = proposal
-            .author
-            .split("/for/")
-            .next()
-            .unwrap_or(&proposal.author);
         for assertion_id in created {
-            self.flag_for_verification(
-                &Actor::policy("agent-finding"),
-                assertion_id,
-                &format!("found by {author}; not verified"),
-            )
-            .await?;
+            self.flag_for_verification(&Actor::policy("unverified"), assertion_id, reason)
+                .await?;
         }
         Ok(())
     }

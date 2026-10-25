@@ -283,6 +283,26 @@ async fn agent_asks_waits_resumes_and_proposes() {
     assert_eq!(now["session_ref"], "session-1");
     assert_eq!(now["on_behalf_of"], alice.to_string());
 
+    // A person may move an assistant's memory into Frood (docs/27 §5); an agent's run may not.
+    let (_, prompts) = mcp(&app, &pat, "prompts/list", json!({})).await;
+    assert_eq!(
+        prompts["result"]["prompts"][0]["name"], "import_memory",
+        "{prompts}"
+    );
+    let (_, prompt) = mcp(
+        &app,
+        &pat,
+        "prompts/get",
+        json!({ "name": "import_memory" }),
+    )
+    .await;
+    let wording = prompt["result"]["messages"][0]["content"]["text"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(wording.contains("capture_note"), "{prompt}");
+    let (_, prompts) = mcp(&app, &token, "prompts/list", json!({})).await;
+    assert_eq!(prompts["result"]["prompts"], json!([]), "{prompts}");
+
     // The agent sees the run's tools and not the person's ones.
     let (_, list) = mcp(&app, &token, "tools/list", json!({})).await;
     let names: Vec<&str> = list["result"]["tools"]

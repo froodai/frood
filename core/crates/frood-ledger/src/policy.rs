@@ -35,6 +35,10 @@ pub struct ProposalContext {
     /// Of the assertions the proposal changes, those only its author ever wrote — their notes,
     /// imports and edits — and that nothing contests. The ledger fills it in.
     pub own_assertions: Vec<uuid::Uuid>,
+    /// It comes from imported memory (an assistant's retelling, docs/27 §5): what is accepted
+    /// is marked not verified with this reason, and its changes to knowledge wait for a person
+    /// — that is where memories disagree.
+    pub mark_unverified: Option<String>,
 }
 
 /// Which policy, if any, accepts the proposal, and which alternative it takes.
@@ -88,6 +92,7 @@ pub(crate) fn evaluate(
     // "Postgres 16". Knowledge from anyone or anything else still changes by a verdict.
     let own = |id: &uuid::Uuid| context.own_assertions.contains(id);
     if config.auto_accept_own_changes
+        && context.mark_unverified.is_none()
         && author_is_user
         && matches!(proposal.risk, Risk::New | Risk::Change)
         && only

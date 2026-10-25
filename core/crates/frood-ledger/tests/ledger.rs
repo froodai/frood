@@ -3,7 +3,7 @@
 
 use chrono::{DateTime, TimeZone, Utc};
 use frood_ledger::model::*;
-use frood_ledger::{Ledger, LedgerError, PolicyConfig};
+use frood_ledger::{Ledger, LedgerError, PolicyConfig, ProposalContext};
 use serde_json::json;
 use uuid::Uuid;
 
@@ -1629,4 +1629,84 @@ async fn own_changes_are_taken_and_agents_findings_marked_not_verified() {
         .await
         .unwrap();
     assert_eq!(agents_change.state, ProposalState::Open);
+}
+
+#[tokio::test]
+async fn imported_memory_is_taken_unverified_and_its_changes_wait() {
+    let Some(ledger) = ledger_with("ledger_import", PolicyConfig::default()).await else {
+        eprintln!("FROOD_TEST_DATABASE_URL is not set; skipping");
+        return;
+    };
+    // A memory file: its text is the source's text, so extraction reads it.
+    let file = ledger
+        .capture(
+            &user(),
+            NewSource {
+                kind: "memory".into(),
+                origin: "capture".into(),
+                uri: None,
+                title: Some("Claude Code memory · frood".into()),
+                content: String::new(),
+                said_at: None,
+                metadata: json!({ "imported_from": "Claude Code" }),
+            },
+            Some(NewBlob {
+                content_type: "text/markdown".into(),
+                filename: Some("MEMORY.md".into()),
+                data: b"- We run Postgres 16\n".to_vec(),
+            }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        file.source.content.as_deref(),
+        Some("- We run Postgres 16\n")
+    );
+    let evidence = file.source.evidence[0].id;
+    let imported = ProposalContext {
+        mark_unverified: Some("from Claude Code memory; not verified".into()),
+        ..ProposalContext::default()
+    };
+    let taken = ledger
+        .open_proposal_in(
+            &user(),
+            proposal(
+                Risk::New,
+                vec![],
+                vec![Operation::Create {
+                    key: None,
+                    assertion: commitment("Postgres 16", "2026-12-01", day(2026, 10, 1), evidence),
+                }],
+            ),
+            &imported,
+        )
+        .await
+        .unwrap();
+    assert_eq!(taken.verdicts[0].decided_by, "policy:own-facts");
+    let journal = ledger.journal(0, 100).await.unwrap();
+    let id = created_id(&taken, &journal);
+    let view = ledger.assertion(id, None, None).await.unwrap();
+    assert!(view.version.unverified);
+
+    // Another memory says otherwise: the change waits, even though it is the same person's.
+    let other = capture(&ledger, "Codex memory: we run Postgres 17").await;
+    let disagrees = ledger
+        .open_proposal_in(
+            &user(),
+            proposal(
+                Risk::Change,
+                vec![BaseRef {
+                    assertion_id: id,
+                    version: view.version.version,
+                }],
+                vec![Operation::Supersede {
+                    assertion_id: id,
+                    assertion: commitment("Postgres 17", "2026-12-01", day(2026, 10, 2), other),
+                }],
+            ),
+            &imported,
+        )
+        .await
+        .unwrap();
+    assert_eq!(disagrees.state, ProposalState::Open);
 }

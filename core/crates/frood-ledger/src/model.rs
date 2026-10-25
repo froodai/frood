@@ -213,6 +213,21 @@ impl NewBlob {
     pub fn is_media(&self) -> bool {
         is_media_type(&self.content_type)
     }
+
+    /// Plain text or Markdown, read as the source's text.
+    pub fn is_text(&self) -> bool {
+        let t = self.content_type.to_ascii_lowercase();
+        let name = self
+            .filename
+            .as_deref()
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        t.starts_with("text/plain")
+            || t.starts_with("text/markdown")
+            || [".md", ".markdown", ".txt"]
+                .iter()
+                .any(|ext| name.ends_with(ext))
+    }
 }
 
 pub fn is_media_type(content_type: &str) -> bool {
