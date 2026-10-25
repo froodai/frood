@@ -290,6 +290,8 @@ export const hi: Catalog = {
   "me.notLinked": "आपका खाता अभी जुड़ा नहीं है।",
   "me.link": "मेरा खाता जोड़ें",
   "me.linkAnother": "दूसरा खाता जोड़ें",
+  "me.openChannel": "{channel} खोलें",
+  "me.linkOr": "या यह संदेश 15 मिनट के भीतर बॉट को भेजें:",
   "me.linkSteps": "यह संदेश 15 मिनट के भीतर बॉट को भेजें:",
   "me.linkThen": "बॉट के जवाब देने पर खाता यहाँ दिखेगा।",
   "me.copy": "कॉपी करें",

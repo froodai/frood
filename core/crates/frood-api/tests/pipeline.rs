@@ -351,6 +351,27 @@ async fn voice_and_notes_become_knowledge() {
         "codes work once: {used}"
     );
 
+    // The bot says where it opens with a code, so the console can link in one tap.
+    let about = |token: &str, url: &str| {
+        let mut request = post_json(
+            "/v1/channels/telegram/about",
+            token,
+            json!({ "start_url": url }),
+        );
+        *request.method_mut() = axum::http::Method::PUT;
+        request
+    };
+    let (status, _) = call(&app, about("tg-token", "https://t.me/frood_bot?start=")).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = call(&app, about("tg-token", "http://t.me/frood_bot?start=")).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, _) = call(&app, about(&pat, "https://t.me/other?start=")).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(
+        auth.channel_start_url("telegram").await.unwrap().as_deref(),
+        Some("https://t.me/frood_bot?start=")
+    );
+
     // Strangers cannot write through the bot.
     let (status, refused) = call(&app, voice("tg-token", "99")).await;
     assert_eq!(status, StatusCode::FORBIDDEN);

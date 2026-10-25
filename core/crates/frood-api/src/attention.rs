@@ -85,15 +85,16 @@ async fn mine(
         .links_of(caller.user_id()?)
         .await
         .map_err(|err| auth_error(&state.auth, Resource::Api, err))?;
-    let channels: Vec<Value> = state
-        .dispatch
-        .channels()
-        .into_iter()
-        .map(|channel| {
-            let linked: Vec<_> = links.iter().filter(|l| l.channel == channel).collect();
-            json!({ "channel": channel, "links": linked })
-        })
-        .collect();
+    let mut channels = Vec::new();
+    for channel in state.dispatch.channels() {
+        let linked: Vec<_> = links.iter().filter(|l| l.channel == channel).collect();
+        let start_url = state
+            .auth
+            .channel_start_url(&channel)
+            .await
+            .map_err(|err| auth_error(&state.auth, Resource::Api, err))?;
+        channels.push(json!({ "channel": channel, "links": linked, "start_url": start_url }));
+    }
     let mut out = serde_json::to_value(settings).unwrap_or_default();
     out["channels"] = json!(channels);
     Ok(Json(out))

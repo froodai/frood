@@ -38,6 +38,35 @@ impl Bot {
         }
     }
 
+    /// Tells Frood where the bot opens with a link code, so the console can link an account
+    /// in one tap: `https://t.me/<bot>?start=<code>` sends `/start <code>`.
+    pub(crate) async fn announce(&self) {
+        let username = match self.telegram("getMe", json!({})).await {
+            Ok(me) => me["username"].as_str().map(str::to_owned),
+            Err(err) => {
+                tracing::warn!(error = %err, "cannot ask Telegram for the bot's name");
+                None
+            }
+        };
+        let Some(username) = username else {
+            return;
+        };
+        let response = self
+            .frood(
+                self.http
+                    .put(format!("{}/v1/channels/{}/about", self.frood, self.channel)),
+            )
+            .json(&json!({ "start_url": format!("https://t.me/{username}?start=") }))
+            .send()
+            .await;
+        match response {
+            Ok(r) if r.status().is_success() => {}
+            // Frood before 0.1.8 has no such address; linking by `/link CODE` still works.
+            Ok(r) => tracing::warn!(status = %r.status(), "Frood did not take the bot's link"),
+            Err(err) => tracing::warn!(error = %err, "cannot tell Frood the bot's link"),
+        }
+    }
+
     /// The person behind this Telegram account, if it is linked.
     async fn linked(&self, external_id: &str) -> bool {
         let response = self

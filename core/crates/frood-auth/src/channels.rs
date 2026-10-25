@@ -117,6 +117,34 @@ impl Auth {
         .await?)
     }
 
+    /// The address that opens `channel` with a link code appended, as its module said.
+    pub async fn channel_start_url(&self, channel: &str) -> Result<Option<String>> {
+        Ok(sqlx::query_scalar::<_, Option<String>>(
+            "SELECT start_url FROM channel_about WHERE channel = $1",
+        )
+        .bind(channel)
+        .fetch_optional(self.pool())
+        .await?
+        .flatten())
+    }
+
+    /// The channel's module says where it opens with a link code (`https://t.me/<bot>?start=`).
+    pub async fn set_channel_start_url(
+        &self,
+        channel: &str,
+        start_url: Option<&str>,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO channel_about (channel, start_url) VALUES ($1, $2) \
+             ON CONFLICT (channel) DO UPDATE SET start_url = EXCLUDED.start_url, updated_at = now()",
+        )
+        .bind(channel)
+        .bind(start_url)
+        .execute(self.pool())
+        .await?;
+        Ok(())
+    }
+
     /// The person's linked channel accounts, oldest first.
     pub async fn links_of(&self, user_id: Uuid) -> Result<Vec<ChannelLink>> {
         let rows: Vec<(String, String, Option<String>, DateTime<Utc>)> = sqlx::query_as(

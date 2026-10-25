@@ -293,6 +293,8 @@ export const en = {
   "me.notLinked": "Your account is not linked yet.",
   "me.link": "Link my account",
   "me.linkAnother": "Link another account",
+  "me.openChannel": "Open {channel}",
+  "me.linkOr": "Or send this message to the bot within 15 minutes:",
   "me.linkSteps": "Send this message to the bot within 15 minutes:",
   "me.linkThen": "When the bot answers, the account shows up here.",
   "me.copy": "Copy",

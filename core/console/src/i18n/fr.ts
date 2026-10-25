@@ -290,6 +290,8 @@ export const fr: Catalog = {
   "me.notLinked": "Votre compte n'est pas encore lié.",
   "me.link": "Lier mon compte",
   "me.linkAnother": "Lier un autre compte",
+  "me.openChannel": "Ouvrir {channel}",
+  "me.linkOr": "Ou envoyez ce message au bot dans les 15 minutes :",
   "me.linkSteps": "Envoyez ce message au bot dans les 15 minutes :",
   "me.linkThen": "Quand le bot répond, le compte apparaît ici.",
   "me.copy": "Copier",

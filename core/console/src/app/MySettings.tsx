@@ -2,7 +2,7 @@
 // dates, and their accounts in channels (Telegram), linked with a one-time code.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Copy } from "lucide-react";
+import { Copy, ExternalLink } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { FromConfig, type Reminder, RemindersEditor, useReminderText } from "@/components/reminders";
@@ -22,7 +22,7 @@ type Mine = {
   quiet_hours: Setting<string | null>;
   max_push_per_day: Setting<number | null>;
   reminders: Setting<Reminder[] | null>;
-  channels: { channel: string; links: Link[] }[];
+  channels: { channel: string; links: Link[]; start_url: string | null }[];
 };
 type Code = { code: string; channel: string; expires_at: string };
 
@@ -203,7 +203,7 @@ function Channels({ channels }: { channels: Mine["channels"] }) {
     <section className="flex flex-col gap-3 border-t pt-5">
       <h3 className="font-medium">{t("me.channels")}</h3>
       {channels.length === 0 && <p className="text-muted-foreground">{t("me.channelsNone")}</p>}
-      {channels.map(({ channel, links }) => (
+      {channels.map(({ channel, links, start_url }) => (
         <div key={channel} className="flex flex-col gap-2 rounded-xl border p-3">
           <span className="font-medium">{channelName(channel)}</span>
           {links.length === 0 && <span className="text-muted-foreground">{t("me.notLinked")}</span>}
@@ -218,7 +218,14 @@ function Channels({ channels }: { channels: Mine["channels"] }) {
           ))}
           {code?.channel === channel ? (
             <div className="flex flex-col gap-2 rounded-md bg-secondary p-3">
-              <span>{t("me.linkSteps")}</span>
+              {start_url && (
+                <Button asChild className="self-start">
+                  <a href={start_url + encodeURIComponent(code.code)} target="_blank" rel="noreferrer">
+                    <ExternalLink className="size-4" /> {t("me.openChannel", { channel: channelName(channel) })}
+                  </a>
+                </Button>
+              )}
+              <span>{start_url ? t("me.linkOr") : t("me.linkSteps")}</span>
               <span className="flex items-center gap-2">
                 <code className="rounded bg-background px-2 py-1 font-mono text-base" dir="ltr">
                   {command}

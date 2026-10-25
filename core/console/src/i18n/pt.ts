@@ -290,6 +290,8 @@ export const pt: Catalog = {
   "me.notLinked": "Sua conta ainda não está vinculada.",
   "me.link": "Vincular minha conta",
   "me.linkAnother": "Vincular outra conta",
+  "me.openChannel": "Abrir {channel}",
+  "me.linkOr": "Ou envie esta mensagem ao bot em até 15 minutos:",
   "me.linkSteps": "Envie esta mensagem ao bot em até 15 minutos:",
   "me.linkThen": "Quando o bot responder, a conta aparece aqui.",
   "me.copy": "Copiar",

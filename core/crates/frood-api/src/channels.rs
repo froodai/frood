@@ -3,7 +3,7 @@
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use frood_auth::{LinkCode, Resource};
 use serde::Deserialize;
@@ -25,6 +25,40 @@ pub fn routes() -> Router<AppState> {
             "/v1/channels/{channel}/messages/{message_ref}",
             get(delivered),
         )
+        .route("/v1/channels/{channel}/about", put(about))
+}
+
+#[derive(Deserialize)]
+struct About {
+    /// Where the channel opens with a link code appended; https only.
+    start_url: Option<String>,
+}
+
+/// The channel's module says where it opens with a link code, so the console can link an
+/// account in one tap (Telegram: `https://t.me/<bot>?start=`).
+async fn about(
+    State(state): State<AppState>,
+    caller: Caller<ChannelsAct>,
+    Path(channel): Path<String>,
+    Json(about): Json<About>,
+) -> Result<StatusCode, ApiError> {
+    own_channel(&caller, &channel)?;
+    let start_url = about.start_url.map(|u| u.trim().to_owned());
+    if let Some(url) = &start_url
+        && (!url.starts_with("https://") || url.len() > 300)
+    {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid-request",
+            "start_url is an https address of up to 300 characters",
+        ));
+    }
+    state
+        .auth
+        .set_channel_start_url(&channel, start_url.as_deref())
+        .await
+        .map_err(|err| auth_error(&state.auth, Resource::Api, err))?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// Which Inbox item a channel's message showed: a reply to it is about that item.
