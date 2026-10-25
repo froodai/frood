@@ -41,6 +41,7 @@ Principal ──acts──> Source / Proposal / Verdict / Event
 | `id`, `version` | Стабильный id утверждения и номер неизменяемой версии |
 | `kind` | Вид: задаёт схему полей и жизненный цикл |
 | `title` | Короткий заголовок, который читают первым (до 120 знаков; с 0.1.5, у старых версий нет) |
+| `sphere` | Сфера жизни: `tech`, `business`, `personal` или своя из `frood.yaml` ([26 §3](26_attachments_spheres_connect.md)). Пометка для чтения и фильтров, не граница видимости. Без неё `create` берёт обычную сферу своих сущностей, `supersede` оставляет текущую |
 | `text` | Каноническая формулировка — описание под заголовком |
 | `subjects` | Сущности, о которых утверждение |
 | `slots` | Поля по виду: срок, ответственный, условие, область (JSON Schema вида) |
@@ -86,7 +87,7 @@ Principal ──acts──> Source / Proposal / Verdict / Event
 
 | Поле Proposal | Смысл |
 |---|---|
-| `operations[]` | `create`, `supersede`, `close`, `link`, `unlink`, `merge_entities`, `split_entity`, `reclassify`, `reverify` |
+| `operations[]` | `create`, `supersede`, `close`, `link`, `unlink`, `merge_entities`, `split_entity`, `reclassify`, `reverify`, `set_sphere` |
 | `base` | Версии, против которых составлено предложение |
 | `alternatives[]` | Варианты для конфликта |
 | `rationale`, `evidence` | Почему и на основании чего |
@@ -116,6 +117,7 @@ Principal ──acts──> Source / Proposal / Verdict / Event
 | Слияние дублей сущностей, уверенность ≥ порога | авто-принятие; слияние обратимо через `split_entity` |
 | Слияние дублей, уверенность ниже порога | ревью |
 | Пометка `needs_verification` | без ревью, это флаг |
+| Человек переносит знание в другую сферу (`set_sphere`) | авто-принятие (`own-sphere`): меняется пометка, не знание |
 
 ## 9. Пользователи (без пространств и ролей)
 
