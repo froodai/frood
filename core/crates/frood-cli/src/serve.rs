@@ -50,6 +50,26 @@ pub async fn run(paths: &Paths) -> anyhow::Result<()> {
     for warning in &warnings {
         tracing::warn!("{warning}");
     }
+    // Files kept in the database before go to the files store, a few at a time.
+    {
+        let ledger = state.ledger.clone();
+        tokio::spawn(async move {
+            let mut moved = 0;
+            loop {
+                match ledger.move_files_out(20).await {
+                    Ok(0) => break,
+                    Ok(n) => moved += n,
+                    Err(err) => {
+                        tracing::error!(error = %err, "cannot move files out of the database");
+                        break;
+                    }
+                }
+            }
+            if moved > 0 {
+                tracing::info!(moved, "files moved out of the database to the files store");
+            }
+        });
+    }
     let auth = state.auth.clone();
     let dispatch = state.dispatch.clone();
     tracing::info!(issuer = %auth.settings().issuer, providers = auth.settings().providers.len(), "sign-in configured");

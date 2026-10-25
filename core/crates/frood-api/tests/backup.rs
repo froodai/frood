@@ -71,7 +71,7 @@ async fn backups_seal_the_secrets_and_alert_when_they_stop() {
     let identity = age::x25519::Identity::generate();
     let raw = format!(
         "version: 1\ninstallation: {{name: test}}\n\
-         storage: {{uses: postgres, url: 'postgres://frood:dbpw@127.0.0.1:5432/frood'}}\n\
+         storage: {{uses: postgres, url: 'postgres://frood:dbpw@127.0.0.1:5432/frood', objects: {{uses: database}}}}\n\
          deploy: {{server: host}}\n\
          jobs:\n  extract: {{ enabled: false }}\n\
          \x20 backup: {{ on: [{{ schedule: '0 */6 * * *', timezone: Europe/Amsterdam }}] }}\n\

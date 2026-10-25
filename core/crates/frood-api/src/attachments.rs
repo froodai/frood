@@ -17,8 +17,9 @@ use crate::capture::{Fields, capture_actor, read_multipart};
 use crate::error::ApiError;
 use crate::links;
 
-pub fn routes() -> Router<AppState> {
-    let limit = DefaultBodyLimit::max(frood_ledger::MAX_BLOB_BYTES + (1 << 20));
+/// `max_file` is the largest file the files store takes.
+pub fn routes(max_file: usize) -> Router<AppState> {
+    let limit = DefaultBodyLimit::max(max_file + (1 << 20));
     Router::new()
         .route(
             "/v1/assertions/{id}/attachments",

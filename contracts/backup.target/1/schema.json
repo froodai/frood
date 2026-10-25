@@ -39,6 +39,11 @@
               }
             },
             "about": { "type": "object" },
+            "objects": {
+              "type": "object",
+              "required": ["path"],
+              "properties": { "path": { "type": "string" } }
+            },
             "targets": { "type": "array", "items": { "$ref": "#/$defs/target" } },
             "keep": {
               "type": "object",

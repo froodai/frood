@@ -60,6 +60,12 @@ struct FileIn {
     data_base64: String,
 }
 
+/// The installation's files folder, mounted into the module.
+#[derive(Deserialize)]
+struct ObjectsIn {
+    path: String,
+}
+
 #[derive(Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 enum Request {
@@ -70,6 +76,8 @@ enum Request {
         files: Vec<FileIn>,
         #[serde(default)]
         about: Value,
+        #[serde(default)]
+        objects: Option<ObjectsIn>,
         targets: Vec<Target>,
         keep: BTreeMap<String, u32>,
     },
@@ -132,6 +140,7 @@ async fn call(State(app): State<Arc<App>>, headers: HeaderMap, body: String) -> 
             database,
             files,
             about,
+            objects,
             targets,
             keep,
         } => {
@@ -141,6 +150,7 @@ async fn call(State(app): State<Arc<App>>, headers: HeaderMap, body: String) -> 
                 &database,
                 &files,
                 &about,
+                objects.as_ref(),
                 &targets,
                 &keep,
             )
@@ -433,12 +443,37 @@ async fn clean(dir: &str) -> Result<(), Failure> {
         .map_err(|e| Failure::Request(format!("cannot create {dir}: {e}")))
 }
 
+/// Files in a folder and their size, without the marks and files still being written.
+fn count_objects(dir: &Path) -> std::io::Result<(u64, u64)> {
+    let (mut files, mut bytes) = (0, 0);
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with('.') || name.ends_with(".partial") {
+            continue;
+        }
+        let meta = entry.metadata()?;
+        if meta.is_dir() {
+            let (f, b) = count_objects(&entry.path())?;
+            files += f;
+            bytes += b;
+        } else if meta.is_file() {
+            files += 1;
+            bytes += meta.len();
+        }
+    }
+    Ok((files, bytes))
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn backup(
     app: &App,
     installation: &str,
     database: &Database,
     files: &[FileIn],
     about: &Value,
+    objects: Option<&ObjectsIn>,
     targets: &[Target],
     keep: &BTreeMap<String, u32>,
 ) -> Result<Value, Failure> {
@@ -471,6 +506,26 @@ async fn backup(
             .map_err(|_| Failure::Request(format!("{}: data_base64 is not base64", file.name)))?;
         decoded.push((file.name.as_str(), data));
     }
+    // The files folder goes into the same snapshot (docs/26 §2).
+    let objects = match objects {
+        Some(objects) => {
+            let path = Path::new(&objects.path);
+            if !path.is_absolute() || !path.is_dir() {
+                return Err(Failure::Request(format!(
+                    "the files folder {} is not mounted into the module; run `frood apply`",
+                    objects.path
+                )));
+            }
+            let (count, bytes) = count_objects(path).map_err(|e| {
+                Failure::Request(format!(
+                    "cannot read the files folder {}: {e}",
+                    objects.path
+                ))
+            })?;
+            Some((objects.path.as_str(), count, bytes))
+        }
+        None => None,
+    };
     let db_password = url_password(&database.url);
     let mut secrets: Vec<&str> = vec![database.url.as_str()];
     if let Some(p) = &db_password {
@@ -517,13 +572,16 @@ async fn backup(
         .map(|m| m.len())
         .unwrap_or(0);
 
-    let manifest = json!({
+    let mut manifest = json!({
         "installation": installation,
         "made_at": made_at,
         "about": about,
         "files": decoded.iter().map(|(name, _)| *name).collect::<Vec<_>>(),
         "counts": counts,
     });
+    if let Some((path, count, bytes)) = objects {
+        manifest["objects"] = json!({ "path": path, "files": count, "bytes": bytes });
+    }
     tokio::fs::write(
         Path::new(&app.work).join("manifest.json"),
         serde_json::to_vec_pretty(&manifest).unwrap_or_default(),
@@ -543,17 +601,12 @@ async fn backup(
         all_secrets.extend(restic.secrets());
         let outcome: Result<Value, String> = async {
             restic.ensure().await?;
-            let out = restic
-                .run(&[
-                    "backup",
-                    &app.work,
-                    "--host",
-                    &host,
-                    "--tag",
-                    "frood",
-                    "--json",
-                ])
-                .await?;
+            let mut args = vec!["backup", app.work.as_str()];
+            if let Some((path, ..)) = objects {
+                args.extend([path, "--exclude", "*.partial"]);
+            }
+            args.extend(["--host", &host, "--tag", "frood", "--json"]);
+            let out = restic.run(&args).await?;
             // The last line is the summary.
             let summary = String::from_utf8_lossy(&out)
                 .lines()
@@ -593,6 +646,7 @@ async fn backup(
         "made_at": made_at,
         "dump_bytes": dump_bytes,
         "tables": counts.len(),
+        "objects": objects.map(|(_, count, bytes)| json!({ "files": count, "bytes": bytes })),
         "targets": results,
     }))
 }
@@ -712,6 +766,32 @@ async fn verify_target(
             return Err(fail(Some(&short), format!("{file} is missing or empty")));
         }
     }
+    // The files folder: every file the backup counted is in the snapshot.
+    if let (Some(path), Some(want)) = (
+        manifest["objects"]["path"].as_str(),
+        manifest["objects"]["files"].as_u64(),
+    ) {
+        let listed = restic
+            .run(&["ls", &id, path, "--json"])
+            .await
+            .map_err(|e| fail(Some(&short), e))?;
+        let got = String::from_utf8_lossy(&listed)
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .filter(|v| {
+                v["type"] == "file"
+                    && v["name"]
+                        .as_str()
+                        .is_some_and(|n| !n.starts_with('.') && !n.ends_with(".partial"))
+            })
+            .count() as u64;
+        if got != want {
+            return Err(fail(
+                Some(&short),
+                format!("files: {got} in the backup, it says {want}"),
+            ));
+        }
+    }
     // Separately: several statements in one query run in a transaction, and CREATE DATABASE
     // cannot.
     for statement in [
@@ -766,6 +846,7 @@ async fn verify_target(
         "snapshot": short,
         "made_at": manifest["made_at"],
         "tables": expected.len(),
+        "objects": manifest["objects"]["files"],
     }))
 }
 
@@ -882,5 +963,17 @@ mod tests {
             "postgres://frood:pw@postgres:5432/frood_verify"
         );
         assert!(database_name("postgres://h/").is_err());
+    }
+
+    #[test]
+    fn the_files_folder_counts_files_not_marks() {
+        let dir = std::env::temp_dir().join(format!("frood-objects-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("ab")).unwrap();
+        std::fs::write(dir.join(".frood-objects"), b"").unwrap();
+        std::fs::write(dir.join("ab").join("abc"), b"12345").unwrap();
+        std::fs::write(dir.join("ab").join("abd.partial"), b"half").unwrap();
+        assert_eq!(count_objects(&dir).unwrap(), (1, 5));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

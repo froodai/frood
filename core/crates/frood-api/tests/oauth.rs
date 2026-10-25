@@ -251,7 +251,7 @@ async fn setup_with(name: &str, idp: &Idp, deploy: &str) -> Option<(Router, Auth
         .await
         .expect("test database");
     let raw = format!(
-        "version: 1\ninstallation: {{name: test}}\nstorage: {{uses: postgres, url: 'postgres://unused'}}\n\
+        "version: 1\ninstallation: {{name: test}}\nstorage: {{uses: postgres, url: 'postgres://unused', objects: {{uses: database}}}}\n\
          {deploy}\nauth:\n  allow: [alice@example.com]\n  providers:\n    - {{kind: oidc, id: corp, \
          label: Corp SSO, issuer: '{}', client_id: frood-test, client_secret: s3cret}}\n",
         idp.base

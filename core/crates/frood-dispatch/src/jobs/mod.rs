@@ -428,6 +428,7 @@ impl From<frood_ledger::LedgerError> for JobError {
     fn from(err: frood_ledger::LedgerError) -> Self {
         match err {
             frood_ledger::LedgerError::Database(db) => Self::transient(format!("database: {db}")),
+            frood_ledger::LedgerError::Files(error) => Self::transient(format!("files: {error}")),
             other => Self::permanent(other.to_string()),
         }
     }

@@ -204,15 +204,15 @@ pub async fn restore(paths: &Paths, options: &RestoreOptions) -> anyhow::Result<
     }
     let snapshot = options.snapshot.as_deref().unwrap_or("latest");
     command
-        .args(["--entrypoint", "restic", &options.image])
-        // Read only: no lock in the repository, which may be mounted read-only.
-        .args([
-            "--no-cache",
-            "--no-lock",
-            "restore",
-            &format!("{snapshot}:/backup"),
-        ])
-        .args(["--tag", "frood", "--target", "/restore"]);
+        .args(["--entrypoint", "sh", &options.image, "-c"])
+        // The whole snapshot: the dump and the config under backup/, the files folder, when
+        // there is one, under frood/objects/. Read only: no lock in the repository, which may
+        // be mounted read-only. Then open to this user, who moves and removes what came back.
+        .arg(
+            "restic --no-cache --no-lock restore \"$0\" --tag frood --target /restore \
+             && chmod -R a+rwX /restore",
+        )
+        .arg(snapshot);
     println!("restoring {snapshot} from {}…", options.repository);
     let status = command
         .status()
@@ -222,6 +222,8 @@ pub async fn restore(paths: &Paths, options: &RestoreOptions) -> anyhow::Result<
         bail!("restic could not restore from the repository ({status})");
     }
 
+    let objects = work.join("frood").join("objects");
+    let work = work.join("backup");
     let manifest: serde_json::Value = serde_json::from_slice(
         &std::fs::read(work.join("manifest.json")).context("the backup has no manifest.json")?,
     )?;
@@ -280,7 +282,7 @@ pub async fn restore(paths: &Paths, options: &RestoreOptions) -> anyhow::Result<
         })
         .collect();
     if !taken.is_empty() {
-        std::fs::remove_dir_all(&work)?;
+        std::fs::remove_dir_all(work.parent().unwrap_or(&work))?;
         bail!("nothing was written:\n  {}", taken.join("\n  "));
     }
 
@@ -293,6 +295,29 @@ pub async fn restore(paths: &Paths, options: &RestoreOptions) -> anyhow::Result<
         config_path.display(),
         secrets_path.display()
     );
+
+    // The files, where the restored config keeps them.
+    if objects.is_dir() {
+        let loaded = paths.load()?;
+        match frood_api::files_on_host(&loaded.config, &loaded.base_dir) {
+            Ok(frood_store::objects::Objects::Disk { root }) => {
+                if root.exists() && std::fs::read_dir(&root)?.next().is_some() {
+                    bail!("{} is not empty: restore into a new folder", root.display());
+                }
+                if let Some(parent) = root.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                let _ = std::fs::remove_dir(&root);
+                std::fs::rename(&objects, &root)
+                    .with_context(|| format!("cannot move the files to {}", root.display()))?;
+                println!("restored the files to {}", root.display());
+            }
+            _ => println!(
+                "note: the backup has a files folder, but frood.yaml keeps files elsewhere; they are in {}",
+                objects.display()
+            ),
+        }
+    }
 
     // The database: start PostgreSQL alone and load the dump into it while it is empty.
     let loaded = paths.load()?;
@@ -329,7 +354,7 @@ pub async fn restore(paths: &Paths, options: &RestoreOptions) -> anyhow::Result<
     if !status.success() {
         bail!("loading the database failed ({status})");
     }
-    std::fs::remove_dir_all(&work)?;
+    std::fs::remove_dir_all(work.parent().unwrap_or(&work))?;
     for note in &later {
         println!("note: {note}; free it, or remove server.public_url, before `frood apply`");
     }

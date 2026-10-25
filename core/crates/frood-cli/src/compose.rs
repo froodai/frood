@@ -13,6 +13,30 @@ pub const POSTGRES_IMAGE: &str = "pgvector/pgvector:pg18-trixie";
 /// The HTTPS front (E2): takes a certificate for `server.public_url` and proxies to the server.
 pub const CADDY_IMAGE: &str = "caddy:2.10";
 
+/// The files folder on this machine, when files go to a folder (docs/26 §2).
+pub fn objects_folder(loaded: &Loaded) -> Option<std::path::PathBuf> {
+    match &loaded.config.storage.objects {
+        frood_config::Objects::Disk { path, .. } => Some(host_path(
+            &loaded
+                .base_dir
+                .join(path.as_deref().unwrap_or(".frood/objects")),
+        )),
+        _ => None,
+    }
+}
+
+/// The module that makes backups: the one `backup.module` names, else the one named `backup`.
+fn backup_module(loaded: &Loaded) -> Option<&str> {
+    let backup = loaded.config.backup.as_ref()?;
+    backup.module.as_deref().or_else(|| {
+        loaded
+            .config
+            .modules
+            .contains_key("backup")
+            .then_some("backup")
+    })
+}
+
 pub fn project_name(loaded: &Loaded) -> String {
     format!("frood-{}", loaded.config.installation.name)
 }
@@ -87,6 +111,7 @@ pub fn render(
              \x20     - {secrets}\n\
              \x20   volumes:\n\
              \x20     - {config_mount}\n\
+             {objects_mount}\
              \x20   ports:\n\
              \x20     - \"127.0.0.1:{port}:{port}\"\n\
              \x20   depends_on:\n\
@@ -101,6 +126,16 @@ pub fn render(
                 "{}:/etc/frood/frood.yaml:ro",
                 config_path.display()
             )),
+            objects_mount = objects_folder(loaded)
+                .map(|folder| format!(
+                    "      - {}\n",
+                    quote(&format!(
+                        "{}:{}",
+                        folder.display(),
+                        frood_api::OBJECTS_IN_CONTAINER
+                    ))
+                ))
+                .unwrap_or_default(),
         ));
     }
 
@@ -137,6 +172,16 @@ pub fn render(
             mounts.push("/var/run/docker.sock:/var/run/docker.sock".to_owned());
             mounts.push(format!("{data}:/data"));
             volumes.push(data);
+        }
+        // The backup module reads the files folder.
+        if backup_module(loaded) == Some(name.as_str())
+            && let Some(folder) = objects_folder(loaded)
+        {
+            mounts.push(format!(
+                "{}:{}:ro",
+                folder.display(),
+                frood_api::OBJECTS_FOR_BACKUP
+            ));
         }
         // Host folders the config gives the module, e.g. a backup disk.
         for volume in &module.volumes {
@@ -304,6 +349,46 @@ mod tests {
             postgres_port: 55432,
         });
         frood_config::parse(&text, &Secrets::from_pairs([("POSTGRES_PASSWORD", "pw")])).unwrap()
+    }
+
+    #[test]
+    fn the_files_folder_goes_to_the_server_and_the_backup_module() {
+        let key = "age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p";
+        let text = frood_config::template(&TemplateOptions {
+            name: "personal",
+            server: ServerPlacement::Container,
+            build: None,
+            image: "ghcr.io/froodai/frood:0.0.1",
+            postgres_port: 55432,
+        }) + &format!(
+            "modules:\n  backup: {{ image: ghcr.io/froodai/backup-restic:0.0.1 }}\n  stt: {{ image: ghcr.io/froodai/stt-openai:0.0.1 }}\n\
+             backup:\n  recovery_key: {key}\n  targets:\n    disk: {{ repository: /repos/disk, password: pw }}\n  keep: {{ daily: 7 }}\n"
+        );
+        let mut loaded =
+            frood_config::parse(&text, &Secrets::from_pairs([("POSTGRES_PASSWORD", "pw")]))
+                .unwrap();
+        loaded.base_dir = "/x".into();
+        let out = render(
+            &loaded,
+            Path::new("/x/frood.yaml"),
+            Path::new("/x/.frood/secrets.env"),
+            Path::new("/x/.frood/deploy"),
+        );
+        let service = |name: &str| {
+            out.split(&format!("  {name}:\n"))
+                .nth(1)
+                .unwrap()
+                .split("\n  module-")
+                .next()
+                .unwrap()
+                .to_owned()
+        };
+        assert!(service("frood").contains("\"/x/.frood/objects:/var/lib/frood/objects\""));
+        assert!(service("module-backup").contains("\"/x/.frood/objects:/frood/objects:ro\""));
+        assert!(
+            !service("module-stt").contains("objects"),
+            "only the backup module reads files"
+        );
     }
 
     #[test]

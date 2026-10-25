@@ -84,6 +84,60 @@ pub async fn plan(paths: &Paths) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Makes the files folder (docs/26 §2) with the mark the server looks for. The server and the
+/// backup module run as uid 10001: when this runs as root, the folder becomes theirs.
+fn prepare_objects(loaded: &Loaded) -> anyhow::Result<()> {
+    let frood_config::Objects::Disk { path, .. } = &loaded.config.storage.objects else {
+        return Ok(());
+    };
+    let folder = loaded
+        .base_dir
+        .join(path.as_deref().unwrap_or(".frood/objects"));
+    std::fs::create_dir_all(&folder)
+        .with_context(|| format!("cannot create {}", folder.display()))?;
+    let mark = folder.join(frood_api::OBJECTS_MARK);
+    if !mark.exists() {
+        std::fs::write(&mark, b"").with_context(|| format!("cannot write {}", mark.display()))?;
+    }
+    #[cfg(unix)]
+    if loaded.config.deploy.server == frood_config::ServerPlacement::Container && is_root() {
+        give_to_server(&folder)?;
+    }
+    Ok(())
+}
+
+/// Hands a folder and everything in it (files a restore put there) to the server's uid 10001,
+/// readable by others and writable only by it.
+#[cfg(unix)]
+fn give_to_server(path: &std::path::Path) -> anyhow::Result<()> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    const SERVER: u32 = 10001;
+    let meta = std::fs::symlink_metadata(path)?;
+    if meta.uid() != SERVER {
+        std::os::unix::fs::chown(path, Some(SERVER), Some(SERVER))
+            .with_context(|| format!("cannot give {} to the server", path.display()))?;
+    }
+    let mode = if meta.is_dir() { 0o755 } else { 0o644 };
+    if meta.mode() & 0o777 != mode {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))?;
+    }
+    if meta.is_dir() {
+        for entry in std::fs::read_dir(path)? {
+            give_to_server(&entry?.path())?;
+        }
+    }
+    Ok(())
+}
+
+/// Only root may hand files to another user.
+#[cfg(unix)]
+fn is_root() -> bool {
+    std::process::Command::new("id")
+        .arg("-u")
+        .output()
+        .is_ok_and(|out| String::from_utf8_lossy(&out.stdout).trim() == "0")
+}
+
 /// Writes the deployment files (module env files, compose.yaml); returns compose.yaml's path.
 pub(crate) fn write_deploy(paths: &Paths, loaded: &Loaded) -> anyhow::Result<PathBuf> {
     let config_abs = absolute(&paths.config)?;
@@ -101,6 +155,7 @@ pub(crate) fn write_deploy(paths: &Paths, loaded: &Loaded) -> anyhow::Result<Pat
         println!("added a service token for module {module} to the secrets file");
     }
     modules::write_env_files(loaded, &secrets_abs, &deploy_dir)?;
+    prepare_objects(loaded)?;
     let compose_path = deploy_dir.join("compose.yaml");
     std::fs::write(
         &compose_path,
@@ -231,7 +286,10 @@ pub async fn export(paths: &Paths, dir: &std::path::Path) -> anyhow::Result<()> 
     let pool = frood_store::connect(&loaded.config.storage.url, Duration::from_secs(5))
         .await
         .context("the database is not reachable; run `frood apply` first")?;
-    let exported = crate::export::export(&pool, &loaded.config.installation.name, dir).await?;
+    let objects = frood_api::files_on_host(&loaded.config, &loaded.base_dir)
+        .map_err(|e| anyhow::anyhow!("the files store: {e}"))?;
+    let exported =
+        crate::export::export(&pool, &objects, &loaded.config.installation.name, dir).await?;
     for (file, count) in &exported.counts {
         println!("{file}: {count}");
     }

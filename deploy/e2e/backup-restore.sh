@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Step 6 of the MVP scenario (docs/24, E1), on Docker: a fresh installation backs up into a
 # folder and an S3-compatible store, checks that both restore, is deleted with its database,
-# and comes back from the folder with `frood restore`. The export before and after must match.
+# and comes back from the folder with `frood restore`. The export before and after must match,
+# files (kept in the installation's files folder, docs/26 §2) included.
 #
 #   FROOD=core/target/debug/frood deploy/e2e/backup-restore.sh
 #
@@ -70,8 +71,9 @@ jobs:
   backup: { on: [{ schedule: '0 */6 * * *', timezone: UTC }] }
   backup-verify: { on: [{ schedule: '30 4 * * 0', timezone: UTC }] }
 EOF
-# The backup module runs as its own user (10001): the folder must be writable for it.
-mkdir -p "$WORK/src/disk" && chmod 0777 "$WORK/src/disk"
+# The backup module and the server run as their own user (10001): the folders must be writable
+# for it. `frood apply` hands them over when it runs as root.
+mkdir -p "$WORK/src/disk" "$WORK/src/.frood/objects" && chmod 0777 "$WORK/src/disk" "$WORK/src/.frood/objects"
 "$FROOD" --config "$WORK/src/frood.yaml" apply
 
 say "an S3-compatible store on the installation's network"
@@ -103,6 +105,12 @@ ASSERTION=$(api "$API/v1/assertions?kind=commitment" | python3 -c 'import json,s
 PROPOSAL=$(api -X POST "$API/v1/proposals" -d "{\"risk\":\"change\",\"base\":[{\"assertion_id\":\"$ASSERTION\",\"version\":1}],\"operations\":[{\"op\":\"supersede\",\"assertion_id\":\"$ASSERTION\",\"assertion\":{\"kind\":\"commitment\",\"text\":\"Release 2.4 on Nov 28\",\"slots\":{\"due\":\"2026-11-28\"},\"modality\":\"reported\",\"evidence\":[\"$EVIDENCE\"]}}]}" \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 api -X POST "$API/v1/proposals/$PROPOSAL/verdicts" -d '{"decision":"accept"}' >/dev/null
+# A photo attached to it: kept in the files folder, not in the database.
+printf 'JPEG-the-release-board' > "$WORK/board.jpg"
+curl -fsS -H "Authorization: Bearer $TOKEN" -F "text=the release board" -F "file=@$WORK/board.jpg;type=image/jpeg" \
+  "$API/v1/assertions/$ASSERTION/attachments" >/dev/null
+KEPT=$(find "$WORK/src/.frood/objects" -type f ! -name '.*' | wc -l | tr -d ' ')
+[ "$KEPT" = 1 ] || { echo "the photo is not in the files folder: $KEPT files"; exit 1; }
 
 say "backup into both targets, and a restore check of both"
 run_job backup
@@ -124,6 +132,7 @@ docker network connect "frood-${NAME}_default" "$S3"
 
 say "the same knowledge, and the restored installation backs up again"
 diff -r -x schema-version.json "$WORK/before" "$WORK/after"
+[ "$(find "$WORK/restored/.frood/objects" -type f ! -name '.*' | wc -l | tr -d ' ')" = 1 ] || { echo "the files folder did not come back"; exit 1; }
 # The same but for when each export was made.
 python3 -c 'import json,sys; a,b=(json.load(open(p)) for p in sys.argv[1:]); [d.pop("exported_at",None) for d in (a,b)]; assert a==b,(a,b)' \
   "$WORK/before/schema-version.json" "$WORK/after/schema-version.json"

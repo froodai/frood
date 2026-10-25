@@ -1249,6 +1249,7 @@ dependencies = [
  "serde_json",
  "sha2 0.11.1",
  "sqlx",
+ "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "tracing",
@@ -1318,10 +1319,15 @@ name = "frood-store"
 version = "0.1.6"
 dependencies = [
  "chrono",
+ "hex",
+ "reqwest",
+ "sha2 0.11.1",
  "sqlx",
+ "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "tracing",
+ "url",
 ]
 
 [[package]]

@@ -163,6 +163,79 @@ pub struct Storage {
     pub uses: String,
     /// Connection URL; normally built from `${secret:...}` and `${env:...}` references.
     pub url: String,
+    /// Where files go (docs/26 §2): photos, videos, voice messages, documents. Without this
+    /// section: a folder on the server's disk.
+    #[serde(default)]
+    pub objects: Objects,
+}
+
+/// A store of files.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "uses", rename_all = "snake_case", deny_unknown_fields)]
+pub enum Objects {
+    /// A folder on the machine with `frood.yaml`: `.frood/objects` next to it unless `path`
+    /// names another. Backups take it.
+    Disk {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path: Option<String>,
+        /// The largest file, in megabytes.
+        #[serde(default = "default_max_mb")]
+        max_mb: u32,
+    },
+    /// An S3-compatible storage: AWS S3, Backblaze B2, Cloudflare R2, SeaweedFS, MinIO. Backups
+    /// do not take it: keep it safe with the storage's own versioning.
+    S3 {
+        /// e.g. `https://s3.eu-central-003.backblazeb2.com`.
+        endpoint: String,
+        bucket: String,
+        /// The storage's region; `us-east-1` when it has none.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        region: Option<String>,
+        /// Keys start with it, e.g. `frood/`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        prefix: Option<String>,
+        access_key_id: String,
+        /// e.g. `${secret:S3_SECRET_KEY}`.
+        secret_access_key: String,
+        /// `endpoint/bucket/key` instead of `bucket.endpoint/key` (SeaweedFS, MinIO).
+        #[serde(default)]
+        path_style: bool,
+        #[serde(default = "default_max_mb")]
+        max_mb: u32,
+    },
+    /// In the database, as before 0.1.7: for small installations and tests.
+    Database {
+        #[serde(default = "default_database_max_mb")]
+        max_mb: u32,
+    },
+}
+
+impl Default for Objects {
+    fn default() -> Self {
+        Self::Disk {
+            path: None,
+            max_mb: default_max_mb(),
+        }
+    }
+}
+
+impl Objects {
+    /// The largest file, in megabytes.
+    pub fn max_mb(&self) -> u32 {
+        match self {
+            Self::Disk { max_mb, .. } | Self::S3 { max_mb, .. } | Self::Database { max_mb } => {
+                *max_mb
+            }
+        }
+    }
+}
+
+fn default_max_mb() -> u32 {
+    100
+}
+
+fn default_database_max_mb() -> u32 {
+    25
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]

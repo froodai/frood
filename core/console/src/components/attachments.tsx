@@ -14,8 +14,11 @@ import { api } from "@/lib/frood";
 import type { Attachment, FileInfo } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-/** The largest file the server takes. */
-const MAX_MB = 25;
+/** The largest file the server takes, as it says (`/v1/version`). */
+function useMaxMb() {
+  const version = useQuery({ queryKey: ["version"], queryFn: () => api<{ max_file_mb?: number }>("/v1/version"), staleTime: Infinity });
+  return version.data?.max_file_mb ?? 25;
+}
 
 const host = (uri: string) => {
   try {
@@ -61,10 +64,11 @@ export function Attachments({ target, also = [] }: { target: string; also?: Atta
     client.invalidateQueries({ queryKey: ["inbox"] });
   };
   const failed = (err: Error) => toast.error(t("attach.failed", { error: err.message }));
+  const maxMb = useMaxMb();
   const upload = useMutation({
     mutationFn: async (files: File[]) => {
       for (const file of files) {
-        if (file.size > MAX_MB * 1_048_576) throw new Error(t("attach.tooBig", { name: file.name, mb: MAX_MB }));
+        if (file.size > maxMb * 1_048_576) throw new Error(t("attach.tooBig", { name: file.name, mb: maxMb }));
         const form = new FormData();
         form.append("file", file, file.name);
         await api(`/v1/${target}/attachments`, { method: "POST", form });

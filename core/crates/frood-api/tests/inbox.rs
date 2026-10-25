@@ -87,7 +87,7 @@ fn config(fake: &str, attention: &str) -> frood_config::Config {
 
 fn config_with_jobs(fake: &str, jobs: &str, rest: &str) -> frood_config::Config {
     let raw = format!(
-        "version: 1\ninstallation: {{name: test}}\nstorage: {{uses: postgres, url: 'postgres://unused'}}\n\
+        "version: 1\ninstallation: {{name: test}}\nstorage: {{uses: postgres, url: 'postgres://unused', objects: {{uses: database}}}}\n\
          deploy: {{server: host}}\n\
          jobs:\n  extract: {{ enabled: false }}\n{jobs}\
          modules:\n  telegram: {{ url: '{fake}' }}\n{rest}"
