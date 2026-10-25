@@ -4,7 +4,8 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ExternalLink, Plug, Plus } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,6 +29,7 @@ type Connection = {
   tools: string[] | null;
   authoritative: boolean;
   has_token: boolean;
+  signed_in: boolean;
 };
 type Tool = { name: string; description: string | null; read_only: boolean | null };
 
@@ -59,6 +61,20 @@ export function Connected() {
   const health = useHealth();
   const connections = useQuery({ queryKey: ["connections"], queryFn: () => api<{ sources: Connection[]; vault: boolean }>("/v1/connections") });
   const [open, setOpen] = useState<Open>(null);
+  const [params, setParams] = useSearchParams();
+  // Back from signing in: say how it went, and open the source to choose its tools.
+  useEffect(() => {
+    const connected = params.get("connected");
+    const error = params.get("connect_error");
+    if (!connected && !error) return;
+    if (connected) {
+      toast.success(t("connect.signInDone", { name: connected }));
+      setOpen({ kind: "source", name: connected });
+    } else if (error) {
+      toast.error(t("connect.signInFailed", { error }));
+    }
+    setParams({}, { replace: true });
+  }, [params, setParams, t]);
   const relative = new Intl.RelativeTimeFormat(lang, { numeric: "auto" });
   if (health.isError) return <p className="text-sm text-destructive">{health.error.message}</p>;
   if (!health.data || connections.isPending) return <Skeleton className="h-48" />;
@@ -132,7 +148,7 @@ export function Connected() {
               </>
             )}
             {open?.kind === "source" && chosen?.from === "console" && (
-              <ConnectForm key={chosen.name} existing={chosen} entry={null} vault={!!connections.data?.vault} onDone={() => setOpen(null)} />
+              <ConnectForm key={chosen.name} existing={chosen} entry={null} vault={!!connections.data?.vault} checkNow={chosen.signed_in && chosen.tools?.length === 0} onDone={() => setOpen(null)} />
             )}
             {open?.kind === "module" && (
               <>
@@ -191,7 +207,22 @@ function freeName(base: string, taken: string[]) {
   return candidate;
 }
 
-function ConnectForm({ existing, entry, vault, taken = [], onDone }: { existing: Connection | null; entry: Entry | null; vault: boolean; taken?: string[]; onDone: () => void }) {
+function ConnectForm({
+  existing,
+  entry,
+  vault,
+  taken = [],
+  checkNow = false,
+  onDone,
+}: {
+  existing: Connection | null;
+  entry: Entry | null;
+  vault: boolean;
+  taken?: string[];
+  /** Check at once, as after signing in, so the tools can be chosen. */
+  checkNow?: boolean;
+  onDone: () => void;
+}) {
   const { t } = useI18n();
   const client = useQueryClient();
   const [name, setName] = useState(existing?.name ?? freeName(entry?.id ?? "mcp", taken));
@@ -217,11 +248,25 @@ function ConnectForm({ existing, entry, vault, taken = [], onDone }: { existing:
       setTools(found.tools);
       // Reading tools by default; all of them when the server says nothing about any.
       const said = found.tools.some((tool) => tool.read_only !== null);
-      if (!existing?.tools) setChosen(new Set(found.tools.filter((tool) => (said ? tool.read_only : true)).map((tool) => tool.name)));
+      if (!existing?.tools?.length) setChosen(new Set(found.tools.filter((tool) => (said ? tool.read_only : true)).map((tool) => tool.name)));
       toast.success(t("connect.checked", { n: found.tools.length }));
     },
     onError: failed,
   });
+  // Signing in leaves for the server's page; it sends the person back to this one.
+  const signIn = useMutation({
+    mutationFn: () =>
+      api<{ authorize_url: string }>(`/v1/connections/${name}/sign-in`, {
+        method: "POST",
+        json: { server: server.trim(), scope: scope.trim(), authoritative },
+      }),
+    onSuccess: ({ authorize_url }) => location.assign(authorize_url),
+    onError: failed,
+  });
+  useEffect(() => {
+    // Once, when the form opens.
+    if (checkNow) check.mutate();
+  }, []);
   const save = useMutation({
     mutationFn: () =>
       api(`/v1/connections/${name}`, {
@@ -256,7 +301,7 @@ function ConnectForm({ existing, entry, vault, taken = [], onDone }: { existing:
       }}
     >
       <h2 className="text-lg font-semibold">{existing ? existing.name : (entry?.name ?? t("connect.any"))}</h2>
-      {entry?.oauth && <p className="rounded-md border border-dashed p-3 text-muted-foreground">{t("connect.oauthSoon")}</p>}
+      {existing?.signed_in && <p className="text-muted-foreground">{t("connect.signedIn")}</p>}
       {!vault && <p className="rounded-md border border-warning/50 p-3 text-warning">{t("connect.noVault")}</p>}
       {!existing && (
         <label className={field}>
@@ -279,9 +324,17 @@ function ConnectForm({ existing, entry, vault, taken = [], onDone }: { existing:
         </span>
         <Input type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder={existing?.has_token ? t("connect.tokenKept") : ""} autoComplete="off" dir="ltr" />
       </label>
-      <Button type="button" variant="outline" className="self-start" disabled={!server.trim() || check.isPending} onClick={() => check.mutate()}>
-        {check.isPending ? t("connect.checking") : t("connect.check")}
-      </Button>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="button" variant="outline" disabled={!server.trim() || check.isPending} onClick={() => check.mutate()}>
+          {check.isPending ? t("connect.checking") : t("connect.check")}
+        </Button>
+        {!existing && (
+          <Button type="button" variant={entry?.oauth ? "default" : "outline"} disabled={!server.trim() || !name.trim() || signIn.isPending || !vault} onClick={() => signIn.mutate()}>
+            {t("connect.signIn")}
+          </Button>
+        )}
+      </div>
+      {!existing && <p className="-mt-2 text-xs text-muted-foreground">{t("connect.signInHint")}</p>}
       {tools && (
         <fieldset className={field}>
           <legend className={label}>{t("connect.tools")}</legend>

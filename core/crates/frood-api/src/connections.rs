@@ -3,11 +3,14 @@
 
 use std::collections::BTreeMap;
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
+use axum::response::Redirect;
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
-use frood_dispatch::connections::{Checked, ConnectError, Connection, NewConnection};
+use frood_dispatch::connections::{
+    Checked, ConnectError, Connection, NewConnection, SignInSettings,
+};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -19,7 +22,14 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/v1/connections", get(list))
         .route("/v1/connections/check", post(check))
+        .route("/v1/connections/signed-in", get(signed_in))
         .route("/v1/connections/{name}", put(connect).delete(disconnect))
+        .route("/v1/connections/{name}/sign-in", post(sign_in))
+}
+
+/// Where the person comes back after signing in to a server.
+fn return_address(state: &AppState) -> String {
+    format!("{}/v1/connections/signed-in", state.auth.settings().issuer)
 }
 
 fn connect_error(err: ConnectError) -> ApiError {
@@ -32,6 +42,11 @@ fn connect_error(err: ConnectError) -> ApiError {
             ApiError::new(StatusCode::CONFLICT, "in-config", err.to_string())
         }
         ConnectError::NoVault => ApiError::new(StatusCode::CONFLICT, "no-vault", err.to_string()),
+        ConnectError::SignIn(_) => ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "sign-in-failed",
+            err.to_string(),
+        ),
         ConnectError::Invalid(_) => ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             "invalid-request",
@@ -99,8 +114,14 @@ async fn check(
             headers.insert(header, format!("{scheme}{token}"));
         }
         None => {
-            if let Some(source) = body.name.as_deref().and_then(|n| state.dispatch.source(n)) {
-                headers = source.headers;
+            if let Some(name) = body.name.as_deref()
+                && let Some(source) = state.dispatch.signed_source(name).await
+            {
+                headers = source
+                    .map_err(|e| {
+                        ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "check-failed", e)
+                    })?
+                    .headers;
             }
         }
     }
@@ -135,4 +156,57 @@ async fn disconnect(
         .await
         .map_err(connect_error)?;
     Ok(Json(json!({ "name": name, "revision": revision })))
+}
+
+/// Starts signing in to the server (OAuth); the console sends the person to the address.
+async fn sign_in(
+    State(state): State<AppState>,
+    caller: Caller<Admin>,
+    Path(name): Path<String>,
+    Json(body): Json<SignInSettings>,
+) -> Result<Json<Value>, ApiError> {
+    let url = state
+        .dispatch
+        .start_sign_in(
+            caller.actor().as_str(),
+            &name,
+            body,
+            &return_address(&state),
+            &state.installation,
+        )
+        .await
+        .map_err(connect_error)?;
+    Ok(Json(json!({ "authorize_url": url })))
+}
+
+#[derive(Deserialize)]
+struct SignedIn {
+    state: Option<String>,
+    code: Option<String>,
+    error: Option<String>,
+    error_description: Option<String>,
+}
+
+/// Back from signing in: the source is connected, and the console opens it to choose tools.
+/// The `state` the sign-in started with is the proof; no bearer token comes along.
+async fn signed_in(State(state): State<AppState>, Query(back): Query<SignedIn>) -> Redirect {
+    let console = format!("{}/admin/sources", state.auth.settings().issuer);
+    let outcome = match (back.state, back.code, back.error) {
+        (_, _, Some(error)) => Err(back.error_description.unwrap_or(error)),
+        (Some(sign_in), Some(code), None) => state
+            .dispatch
+            .finish_sign_in(&sign_in, &code)
+            .await
+            .map_err(|e| e.to_string()),
+        _ => Err("the server sent the person back without a code".to_owned()),
+    };
+    let query = match outcome {
+        Ok(name) => format!("connected={}", encode(&name)),
+        Err(error) => format!("connect_error={}", encode(&error)),
+    };
+    Redirect::to(&format!("{console}?{query}"))
+}
+
+fn encode(value: &str) -> String {
+    url::form_urlencoded::byte_serialize(value.as_bytes()).collect()
 }

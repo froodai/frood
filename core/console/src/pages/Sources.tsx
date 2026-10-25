@@ -54,8 +54,11 @@ function useWho() {
 
 export function Sources() {
   const { t } = useI18n();
+  // Back from signing in to a server: its source opens on the Connected tab.
+  const back = new URLSearchParams(location.search);
+  const returned = back.has("connected") || back.has("connect_error");
   return (
-    <Tabs defaultValue="captured" className="flex flex-col gap-4 px-4 py-5 md:px-7">
+    <Tabs defaultValue={returned ? "connected" : "captured"} className="flex flex-col gap-4 px-4 py-5 md:px-7">
       <TabsList>
         <TabsTrigger value="captured">{t("sources.captured")}</TabsTrigger>
         <TabsTrigger value="connected">{t("sources.connected")}</TabsTrigger>

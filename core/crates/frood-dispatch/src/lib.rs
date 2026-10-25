@@ -12,6 +12,7 @@ pub mod health;
 pub mod inbox;
 mod jobs;
 mod mcp;
+pub mod oauth;
 pub mod questions;
 pub mod runs;
 mod schedules;
