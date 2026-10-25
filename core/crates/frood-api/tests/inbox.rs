@@ -925,3 +925,75 @@ async fn detectors_raise_and_clear_alerts() {
         .unwrap();
     assert_eq!(failing.resolution.as_ref().unwrap()["action"], "recovered");
 }
+
+#[tokio::test]
+async fn everyone_gets_the_built_in_reminders_in_the_installation_zone() {
+    use chrono::TimeZone;
+    let Some(url) = frood_store::testing::database_url() else {
+        eprintln!("FROOD_TEST_DATABASE_URL is not set; skipping");
+        return;
+    };
+    let pool = frood_store::testing::fresh_database(&url, "inbox_default_reminders")
+        .await
+        .expect("test database");
+    let fake = fake_telegram(Shared::default()).await;
+    // No attention section and no person settings: the built-in reminders, in the
+    // installation's zone (docs/27 §3).
+    let mut config = config(&fake, "");
+    config.installation.timezone = Some("Europe/Amsterdam".into());
+    let Setup {
+        dispatch, ledger, ..
+    } = setup(&config, pool.clone()).await;
+    let auth = frood_auth::Auth::new(pool.clone(), frood_auth::AuthSettings::from_config(&config));
+    let bob = auth
+        .user_id_by_email("bob@example.com", true)
+        .await
+        .unwrap();
+    let actor = Actor::parse(&format!("user:{bob}")).unwrap();
+    let captured = ledger
+        .capture_source(
+            &actor,
+            NewSource {
+                kind: "note".into(),
+                origin: "capture".into(),
+                uri: None,
+                title: None,
+                content: "Report due on the 14th".into(),
+                said_at: None,
+                metadata: json!({}),
+            },
+        )
+        .await
+        .unwrap();
+    let evidence = captured.source.evidence[0].id;
+    let operations: Vec<Operation> =
+        serde_json::from_value(json!([{ "op": "create", "assertion": {
+        "kind": "commitment", "text": "Send the report", "modality": "agreed",
+        "slots": { "due": "2026-11-14" }, "evidence": [evidence] } }]))
+        .unwrap();
+    ledger
+        .open_proposal(
+            &actor,
+            NewProposal {
+                idempotency_key: None,
+                rationale: None,
+                risk: Risk::New,
+                confidence: None,
+                base: vec![],
+                operations: Some(operations),
+                alternatives: None,
+                evidence: vec![evidence],
+            },
+        )
+        .await
+        .unwrap();
+    let at = |d, h| chrono::Utc.with_ymd_and_hms(2026, 11, d, h, 0, 0).unwrap();
+    assert_eq!(
+        dispatch.remind_once(at(13, 6)).await.unwrap(),
+        0,
+        "too early"
+    );
+    // 9:00 Amsterdam is 8:00 UTC in November: the day before, then on the day.
+    assert_eq!(dispatch.remind_once(at(13, 8)).await.unwrap(), 1);
+    assert_eq!(dispatch.remind_once(at(14, 8)).await.unwrap(), 1);
+}

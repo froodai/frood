@@ -256,7 +256,7 @@ export const zh: Catalog = {
   "attention.maxPush": "每天最多推送",
   "attention.maxPushHint": "防止刷屏的保险：超过上限，其余的等摘要。",
   "attention.reminders": "到期提醒",
-  "attention.remindersHint": "适用于所有设置了时区的人；每个人可以有自己的提醒。",
+  "attention.remindersHint": "每个人都会收到，按各自时区的时间；每个人也可以设置自己的提醒。",
   "attention.remindersNone": "没有提醒。",
   "attention.remind.before": { other: "提前 {n} 天，{time}" },
   "attention.remind.on": "当天，{time}",

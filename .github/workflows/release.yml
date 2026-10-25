@@ -2,7 +2,7 @@ name: release
 
 # A version tag (v<version>) publishes the images of the core, the modules and the agents for
 # x86 and ARM to the GitHub Container Registry, tagged <version>. The `frood` program is in the
-# core image; deploy/install.sh takes it from there.
+# core image, and for macOS a file of the GitHub release; deploy/install.sh takes it from there.
 on:
   push:
     tags: ["v*"]
@@ -64,3 +64,39 @@ jobs:
             org.opencontainers.image.version=${{ needs.version.outputs.version }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  # The `frood` program for macOS, Apple chips and Intel in one file: on a Mac Frood runs in
+  # Docker Desktop, and the program that sets it up runs natively (docs/27 §1).
+  macos:
+    needs: version
+    runs-on: macos-15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - run: npm ci --no-audit --no-fund && npm run build
+        working-directory: core/console
+      - run: |
+          rustup toolchain install 1.99 --profile minimal --target aarch64-apple-darwin --target x86_64-apple-darwin
+          rustup default 1.99
+      - name: build
+        working-directory: core
+        run: |
+          for triple in aarch64-apple-darwin x86_64-apple-darwin; do
+            cargo build --release --locked -p frood-cli --target "$triple"
+          done
+          lipo -create -output frood target/aarch64-apple-darwin/release/frood target/x86_64-apple-darwin/release/frood
+          ./frood --version
+          tar -czf frood-macos.tar.gz frood
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" --title "Frood $VERSION" \
+                 --notes "Images: ghcr.io/froodai/*:$VERSION. The frood program: deploy/install.sh $VERSION."
+          gh release upload "$GITHUB_REF_NAME" core/frood-macos.tar.gz --clobber

@@ -55,9 +55,7 @@ pub(crate) fn merge(file: &Attention, console: &Attention) -> Attention {
     out.before_notify
         .extend(console.before_notify.iter().cloned());
     out.max_push_per_day = file.max_push_per_day.or(console.max_push_per_day);
-    if file.reminders.is_empty() {
-        out.reminders = console.reminders.clone();
-    }
+    out.reminders = file.reminders.clone().or_else(|| console.reminders.clone());
     out.detectors = merge_detectors(&file.detectors, &console.detectors);
     for (email, mine) in &console.people {
         let person = out.people.entry(email.clone()).or_default();
@@ -152,7 +150,8 @@ pub struct AttentionChange {
     pub situations: Vec<SituationChange>,
     #[serde(default)]
     pub max_push_per_day: Option<u32>,
-    /// None or empty: no reminders.
+    /// The list everyone gets unless they set their own; empty: none. Left out, or the
+    /// built-in list: the built-in reminders.
     #[serde(default)]
     pub reminders: Option<Vec<Reminder>>,
     /// By name; a value left out or null is the built-in one.
@@ -321,9 +320,9 @@ impl Dispatch {
                 ),
             },
             reminders: Setting {
-                value: json_of(&now.reminders),
-                default: json!([]),
-                from: from(!file.reminders.is_empty(), !console.reminders.is_empty()),
+                value: json_of(&now.shared_reminders()),
+                default: json_of(&frood_config::default_reminders()),
+                from: from(file.reminders.is_some(), console.reminders.is_some()),
             },
             detectors,
             investigators,
@@ -402,11 +401,16 @@ impl Dispatch {
             (Some(_), _) => {}
             (None, wanted) => layer.max_push_per_day = wanted,
         }
-        let reminders = change.reminders.unwrap_or_default();
-        if file.reminders.is_empty() {
-            layer.reminders = reminders;
-        } else if !reminders.is_empty() && reminders != file.reminders {
-            return Err(ConnectError::InConfig("attention.reminders".to_owned()));
+        // The built-in list sent back is no change.
+        let reminders = change
+            .reminders
+            .filter(|r| *r != frood_config::default_reminders());
+        match (&file.reminders, reminders) {
+            (Some(set), Some(wanted)) if *set != wanted => {
+                return Err(ConnectError::InConfig("attention.reminders".to_owned()));
+            }
+            (Some(_), _) => {}
+            (None, wanted) => layer.reminders = wanted,
         }
         let file_detectors = detector_values(&file.detectors);
         let mut detectors = Map::new();
@@ -456,7 +460,8 @@ impl Dispatch {
             email: email.to_owned(),
             timezone: Setting {
                 value: json_of(&mine.timezone),
-                default: Value::Null,
+                // The installation's zone, for people who set none.
+                default: json_of(&self.ctx.timezone.map(|z| z.name())),
                 from: from(in_file.timezone.is_some(), in_console.timezone.is_some()),
             },
             quiet_hours: Setting {
@@ -480,7 +485,7 @@ impl Dispatch {
             },
             reminders: Setting {
                 value: json_of(&mine.reminders),
-                default: json_of(&now.reminders),
+                default: json_of(&now.shared_reminders()),
                 from: from(in_file.reminders.is_some(), in_console.reminders.is_some()),
             },
         })

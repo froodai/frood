@@ -431,6 +431,16 @@ async fn provider_start(
             &tx,
         )
         .into_response(),
+        Some(frood_config::Provider::Local { id, .. }) => {
+            let settings = auth.settings();
+            // One person: their address is already filled in.
+            let only = match settings.allow.as_slice() {
+                [only] => only.as_str(),
+                _ => "",
+            };
+            pages::local_form(&settings.installation, &settings.base_path, id, &tx, only)
+                .into_response()
+        }
         Some(frood_config::Provider::Oidc {
             id,
             issuer,
@@ -495,12 +505,11 @@ async fn dev_login(
     headers: HeaderMap,
     RawForm(form): RawForm,
 ) -> Response {
-    if !matches!(
-        auth.provider(&provider_id),
-        Some(frood_config::Provider::Dev { .. })
-    ) {
-        return error_page(StatusCode::NOT_FOUND, "Unknown sign-in provider.");
-    }
+    let local = match auth.provider(&provider_id) {
+        Some(frood_config::Provider::Dev { .. }) => false,
+        Some(frood_config::Provider::Local { .. }) => true,
+        _ => return error_page(StatusCode::NOT_FOUND, "Unknown sign-in provider."),
+    };
     if !auth.same_origin(&headers) {
         return error_page(StatusCode::FORBIDDEN, "Cross-site request refused.");
     }
@@ -510,6 +519,13 @@ async fn dev_login(
     };
     if let Err(err) = auth.pending("tx", tx).await {
         return error_page(StatusCode::BAD_REQUEST, &err.to_string());
+    }
+    // On this computer only the listed addresses, not whole domains.
+    if local && !auth.settings().allow.contains(&email.trim().to_lowercase()) {
+        return error_page(
+            StatusCode::FORBIDDEN,
+            "This address is not in auth.allow of this installation.",
+        );
     }
     finish_sign_in(&auth, tx, email, None).await
 }

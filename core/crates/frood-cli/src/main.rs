@@ -8,6 +8,7 @@ mod modules;
 mod recovery;
 mod serve;
 mod token;
+mod wizard;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -38,7 +39,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Create frood.yaml and a secrets file in a directory.
+    /// Create frood.yaml and a secrets file in a directory. In a terminal it asks a few
+    /// questions (Enter takes each default) and can start Frood right away.
     Init {
         #[arg(long, default_value = ".")]
         dir: PathBuf,
@@ -57,6 +59,18 @@ enum Command {
         /// Overwrite an existing frood.yaml. Existing secrets are always kept.
         #[arg(long)]
         force: bool,
+        /// Who signs in: on this computer without a password, on a server through OIDC.
+        #[arg(long)]
+        email: Option<String>,
+        /// A server's public https address; without it Frood runs on this computer.
+        #[arg(long)]
+        public_url: Option<String>,
+        /// IANA time zone, e.g. Europe/Amsterdam; this computer's by default.
+        #[arg(long)]
+        timezone: Option<String>,
+        /// Ask nothing: take every default.
+        #[arg(long)]
+        yes: bool,
     },
     /// Check the config and show what `apply` would do.
     Plan,
@@ -215,14 +229,25 @@ async fn main() -> ExitCode {
             build,
             postgres_port,
             force,
-        } => init::run(&init::Options {
-            dir,
-            name,
-            server: server.into(),
-            build,
-            postgres_port,
-            force,
-        }),
+            email,
+            public_url,
+            timezone,
+            yes,
+        } => {
+            init::run(&init::Options {
+                dir,
+                name,
+                server: server.into(),
+                build,
+                postgres_port,
+                force,
+                email,
+                public_url,
+                timezone,
+                yes,
+            })
+            .await
+        }
         Command::Plan => lifecycle::plan(&paths).await,
         Command::Apply { render_only } => lifecycle::apply(&paths, render_only).await,
         Command::Serve => serve::run(&paths).await,

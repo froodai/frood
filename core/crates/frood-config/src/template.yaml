@@ -43,6 +43,8 @@ auth:
   #    issuer: https://accounts.google.com
   #    client_id: 1234.apps.googleusercontent.com
   #    client_secret: ${secret:GOOGLE_CLIENT_SECRET}
+  #  - kind: local           # on this computer: no password, only the addresses in allow
+  #    id: local
   #  - kind: dev             # development only: type an email; local servers only
   #    id: dev
 

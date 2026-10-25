@@ -65,6 +65,8 @@ pub(crate) struct Ctx {
     pub attention: connections::Live<frood_config::Attention>,
     /// Attention as frood.yaml sets it; it wins over the console's changes.
     pub config_attention: Arc<frood_config::Attention>,
+    /// The installation's zone: for people who set none, and built-in schedules.
+    pub timezone: Option<chrono_tz::Tz>,
     pub backup: Arc<Option<jobs::backup::BackupSetup>>,
     /// The installation's spheres (docs/26 §3); empty when they are off.
     pub spheres: Arc<Vec<frood_config::Sphere>>,
@@ -113,6 +115,7 @@ impl Dispatch {
                 vault: Arc::new(connections::Vault::new(None)),
                 attention: connections::Live::default(),
                 config_attention: Arc::new(frood_config::Attention::default()),
+                timezone: None,
                 backup: Arc::new(None),
                 spheres: Arc::new(Vec::new()),
             },
@@ -126,6 +129,12 @@ impl Dispatch {
     pub fn with_attention(mut self, attention: frood_config::Attention) -> Self {
         self.ctx.attention.set(attention.clone());
         self.ctx.config_attention = Arc::new(attention);
+        self
+    }
+
+    /// The installation's zone (`installation.timezone`), for people who set none.
+    pub fn with_timezone(mut self, zone: Option<&str>) -> Self {
+        self.ctx.timezone = zone.and_then(|z| z.parse().ok());
         self
     }
 

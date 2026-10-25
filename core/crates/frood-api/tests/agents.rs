@@ -613,7 +613,7 @@ async fn schedules_tick_once_per_source() {
          accounts:\n  claude: { kind: api_key, provider: anthropic, secret: sk-test }\n\
          sources:\n  team-chat: { uses: mcp, server: 'http://team-chat:8080/mcp' }\n  \
          wiki: { uses: mcp, server: 'https://wiki.example.com/mcp' }\n\
-         jobs:\n  extract: { enabled: false }\n  nightly:\n    uses: agents.execute\n    \
+         jobs:\n  extract: { enabled: false }\n  digest: { enabled: false }\n  nightly:\n    uses: agents.execute\n    \
          on: [{ schedule: '0 3 * * *', timezone: Europe/Amsterdam, for_each: source }]\n    \
          runtime: runtime\n    agent: claude-code\n    model: claude-haiku-5-5\n    account: claude\n    \
          instructions: Sweep the source.\n    budget: { max_usd: 0.5 }\n\
@@ -804,7 +804,7 @@ async fn daily_sweep_reads_its_source_and_proposes() {
          headers: {{ Authorization: 'Bearer chat-token' }}\n    scope: {{ channels: ['#release'] }}\n    \
          tools: [search_messages]\n  \
          adr:\n    uses: mcp\n    server: 'https://adr.example.com/mcp'\n    authoritative: true\n\
-         jobs:\n  extract: {{ enabled: false }}\n  daily-sweep:\n    \
+         jobs:\n  extract: {{ enabled: false }}\n  digest: {{ enabled: false }}\n  daily-sweep:\n    \
          on: [{{ schedule: '0 3 * * *', timezone: Europe/Amsterdam, for_each: source }}]\n    \
          runtime: runtime\n    agent: claude-code\n    model: claude-haiku-5-5\n    account: claude\n    \
          budget: {{ max_usd: 0.5 }}\n    auto_accept: {{ when: authoritative_source }}\n\

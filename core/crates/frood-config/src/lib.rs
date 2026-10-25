@@ -11,13 +11,13 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
 
 pub use interpolate::Secrets;
-pub use model::BUILT_IN_SPHERES;
 pub use model::{
     Account, AccountBudget, AskUser, Attention, AttentionPerson, AttentionRoute, Auth, AutoAccept,
     Backup, BackupKeep, BackupTarget, BeforeNotify, Budget, Config, Deploy, Detectors, Embeddings,
     Installation, Job, ModelProvider, Module, Objects, OnExpire, Policies, Provider, Proxy,
     Reminder, Search, Server, ServerPlacement, SituationMatch, Source, Sphere, Storage, Trigger,
 };
+pub use model::{BUILT_IN_SPHERES, default_reminders};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
@@ -111,6 +111,13 @@ fn validate(config: &Config) -> Result<(), ConfigError> {
         problems.push(format!(
             "version {} is not supported; use 1",
             config.version
+        ));
+    }
+    if let Some(zone) = &config.installation.timezone
+        && zone.parse::<chrono_tz::Tz>().is_err()
+    {
+        problems.push(format!(
+            "installation.timezone {zone:?} is not an IANA zone like Europe/Amsterdam"
         ));
     }
     if !is_valid_name(&config.installation.name) {
@@ -357,7 +364,13 @@ fn validate_auth(config: &Config, problems: &mut Vec<String>) {
             Provider::Dev { .. } if !loopback_only => problems.push(format!(
                 "auth provider {id}: the dev provider works only on a local server (loopback server.listen or a container) without server.public_url"
             )),
-            Provider::Dev { .. } => {}
+            Provider::Local { .. } if !loopback_only => problems.push(format!(
+                "auth provider {id}: sign-in on this computer works only without server.public_url, on a loopback address or in a container; a server signs in through Google or another OIDC provider"
+            )),
+            Provider::Local { .. } if auth.allow.is_empty() => problems.push(format!(
+                "auth provider {id}: sign-in on this computer needs your address in auth.allow"
+            )),
+            Provider::Local { .. } | Provider::Dev { .. } => {}
         }
     }
     for domain in &auth.allow_domains {
@@ -734,7 +747,11 @@ fn validate_reminders(place: &str, reminders: &[model::Reminder], problems: &mut
 
 fn validate_attention(config: &Config, problems: &mut Vec<String>) {
     let attention = &config.attention;
-    validate_reminders("attention.reminders", &attention.reminders, problems);
+    if let Some(reminders) = &attention.reminders {
+        validate_reminders("attention.reminders", reminders, problems);
+    }
+    // People without a zone of their own take the installation's.
+    let zone_known = config.installation.timezone.is_some();
     let detectors = &attention.detectors;
     for (name, value) in [
         ("dispatcher_lag", &detectors.dispatcher_lag),
@@ -765,9 +782,9 @@ fn validate_attention(config: &Config, problems: &mut Vec<String>) {
                 reminders,
                 problems,
             );
-            if person.timezone.is_none() && !reminders.is_empty() {
+            if person.timezone.is_none() && !zone_known && !reminders.is_empty() {
                 problems.push(format!(
-                    "attention.people.{email}: reminders need a timezone (there is no default)"
+                    "attention.people.{email}: reminders need a timezone (set it, or installation.timezone)"
                 ));
             }
         }
@@ -787,9 +804,9 @@ fn validate_attention(config: &Config, problems: &mut Vec<String>) {
                     "attention.people.{email}: quiet_hours {quiet:?} is not like \"23:00-08:00\""
                 ));
             }
-            if person.timezone.is_none() {
+            if person.timezone.is_none() && !zone_known {
                 problems.push(format!(
-                    "attention.people.{email}: quiet hours need a timezone (there is no default)"
+                    "attention.people.{email}: quiet hours need a timezone (set it, or installation.timezone)"
                 ));
             }
         }

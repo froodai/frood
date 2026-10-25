@@ -618,13 +618,18 @@ impl Dispatch {
     }
 
     /// Reminders of due dates (B4′): each person's list of `{days, at}` — days from the due
-    /// date, a time of day in their zone — or the shared `attention.reminders`. An item is made
+    /// date, a time of day in their zone — or the shared ones (built-in unless the config says
+    /// otherwise). An item is made
     /// when its time comes (the scan runs every few minutes), and closes the earlier reminders
     /// of the same due date. Returns how many it made.
     pub async fn remind_once(&self, now: DateTime<Utc>) -> sqlx::Result<usize> {
         use frood_ledger::model::{AssertionFilter, SlotFilter, SlotOp, Status};
         let attention = &*self.ctx.attention.now();
-        let mut days: Vec<i32> = attention.reminders.iter().map(|r| r.days).collect();
+        let mut days: Vec<i32> = attention
+            .shared_reminders()
+            .iter()
+            .map(|r| r.days)
+            .collect();
         for person in attention.people.values() {
             for rule in person.reminders.iter().flatten() {
                 days.push(rule.days);
@@ -739,20 +744,27 @@ impl Dispatch {
         Ok(made)
     }
 
-    /// A person's zone and reminders, if they have both.
+    /// A person's zone (theirs, or the installation's) and reminders, if they have both.
     async fn reminders_of(
         &self,
         user: Uuid,
     ) -> Option<(chrono_tz::Tz, Vec<frood_config::Reminder>)> {
         let email = self.ctx.auth.user_email(user).await.ok()?;
         let attention = &*self.ctx.attention.now();
-        let person = attention.people.get(&email)?;
-        let zone = person.timezone.as_deref()?.parse().ok()?;
+        let person = attention.people.get(&email);
+        let zone = self.zone_of(person)?;
         let rules = person
-            .reminders
-            .clone()
-            .unwrap_or_else(|| attention.reminders.clone());
+            .and_then(|p| p.reminders.clone())
+            .unwrap_or_else(|| attention.shared_reminders());
         (!rules.is_empty()).then_some((zone, rules))
+    }
+
+    /// A person's own zone, or the installation's.
+    fn zone_of(&self, person: Option<&frood_config::AttentionPerson>) -> Option<chrono_tz::Tz> {
+        person
+            .and_then(|p| p.timezone.as_deref())
+            .and_then(|z| z.parse().ok())
+            .or(self.ctx.timezone)
     }
 
     /// The item with what a channel needs to show it.
@@ -1442,12 +1454,9 @@ impl Dispatch {
         let attention = &*self.ctx.attention.now();
         let email = self.ctx.auth.user_email(user).await.ok();
         let person = email.as_deref().and_then(|e| attention.people.get(e));
-        if let Some(person) = person
-            && let (Some(zone), Some(quiet)) = (&person.timezone, &person.quiet_hours)
-            && let (Ok(zone), Some((from, to))) = (
-                zone.parse::<chrono_tz::Tz>(),
-                frood_config::parse_quiet_hours(quiet),
-            )
+        if let Some(quiet) = person.and_then(|p| p.quiet_hours.as_deref())
+            && let (Some(zone), Some((from, to))) =
+                (self.zone_of(person), frood_config::parse_quiet_hours(quiet))
         {
             let now = Utc::now().with_timezone(&zone).time();
             let quiet_now = if from <= to {

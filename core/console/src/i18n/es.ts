@@ -256,7 +256,7 @@ export const es: Catalog = {
   "attention.maxPush": "Pushes al día, como máximo",
   "attention.maxPushHint": "Un fusible contra avalanchas: pasado el límite, el resto espera al resumen.",
   "attention.reminders": "Recordatorios de plazos",
-  "attention.remindersHint": "Para todos los que tienen zona horaria; cada persona puede tener los suyos.",
+  "attention.remindersHint": "Llegan a todos, a la hora de su propia zona horaria; cada persona puede tener los suyos.",
   "attention.remindersNone": "Sin recordatorios.",
   "attention.remind.before": { one: "{n} día antes, a las {time}", other: "{n} días antes, a las {time}" },
   "attention.remind.on": "El mismo día, a las {time}",

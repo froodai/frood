@@ -256,7 +256,7 @@ export const ar: Catalog = {
   "attention.maxPush": "الحد الأقصى للإشعارات يوميًا",
   "attention.maxPushHint": "صمام أمان ضد السيل: بعد الحد، ينتظر الباقي الملخص.",
   "attention.reminders": "تذكيرات المواعيد",
-  "attention.remindersHint": "لكل من حدد منطقته الزمنية؛ ويمكن لكل شخص ضبط تذكيراته.",
+  "attention.remindersHint": "تصل إلى الجميع في الوقت المحدد بمنطقة كل منهم الزمنية؛ ويمكن لكل شخص ضبط تذكيراته.",
   "attention.remindersNone": "لا تذكيرات.",
   "attention.remind.before": { zero: "قبل {n} يوم، الساعة {time}", one: "قبل يوم واحد، الساعة {time}", two: "قبل يومين، الساعة {time}", few: "قبل {n} أيام، الساعة {time}", many: "قبل {n} يومًا، الساعة {time}", other: "قبل {n} يوم، الساعة {time}" },
   "attention.remind.on": "في يوم الموعد، الساعة {time}",

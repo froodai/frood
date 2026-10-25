@@ -496,12 +496,14 @@ async fn jobs_change_from_the_console() {
 
     let (status, listed) = call(&app, "GET", "/v1/jobs/settings", &admin, None).await;
     assert_eq!(status, StatusCode::OK, "{listed}");
+    // The digest runs by default on weekday mornings (docs/27 §3).
     let digest = setting(&listed, "digest");
     assert_eq!(digest["from"], "default");
-    assert_eq!(digest["running"], false);
+    assert_eq!(digest["running"], true);
+    assert_eq!(digest["schedules"][0]["schedule"], "30 8 * * 1-5");
     assert_eq!(setting(&listed, "transcribe")["from"], "config");
     assert_eq!(setting(&listed, "extract")["on_events"], true);
-    assert!(!running("digest"));
+    assert!(running("digest"));
 
     // A schedule from the console: the digest runs, the next tick uses it.
     let (status, changed) = call(
@@ -575,7 +577,7 @@ async fn jobs_change_from_the_console() {
     assert!(running("digest"));
     let (status, _) = call(&app, "DELETE", "/v1/jobs/digest", &admin, None).await;
     assert_eq!(status, StatusCode::OK);
-    assert!(!running("digest"));
+    assert!(running("digest"), "by default it runs");
 }
 
 #[tokio::test]

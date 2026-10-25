@@ -129,6 +129,10 @@ impl BackupKeep {
 pub struct Installation {
     /// Short machine name: lowercase letters, digits and dashes, starting with a letter.
     pub name: String,
+    /// IANA zone, e.g. Europe/Amsterdam: the default for built-in schedules (the morning digest)
+    /// and for people who set none (quiet hours, reminders). Without it, UTC.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timezone: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -364,6 +368,13 @@ pub enum Provider {
         client_id: String,
         client_secret: String,
     },
+    /// Sign-in on this computer (docs/27 §1): no password, for the addresses in `auth.allow`
+    /// only. Allowed only while the installation has no public address (a laptop).
+    Local {
+        id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        label: Option<String>,
+    },
     /// Development only: type an email address. Allowed only on a loopback address without
     /// `server.public_url`.
     Dev {
@@ -376,13 +387,13 @@ pub enum Provider {
 impl Provider {
     pub fn id(&self) -> &str {
         match self {
-            Self::Oidc { id, .. } | Self::Dev { id, .. } => id,
+            Self::Oidc { id, .. } | Self::Local { id, .. } | Self::Dev { id, .. } => id,
         }
     }
 
     pub fn label(&self) -> &str {
         match self {
-            Self::Oidc { label, id, .. } | Self::Dev { label, id } => {
+            Self::Oidc { label, id, .. } | Self::Local { label, id } | Self::Dev { label, id } => {
                 label.as_deref().unwrap_or(id)
             }
         }
@@ -806,13 +817,31 @@ pub struct Attention {
     /// Most push messages a person gets in a day: a fuse against floods. Default 30.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_push_per_day: Option<u32>,
-    /// When to remind of due dates, for everyone with a timezone; a person's own list replaces
-    /// it. No list, no reminders.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub reminders: Vec<Reminder>,
+    /// When to remind of due dates; a person's own list replaces it. Without it, the day before
+    /// and on the day at 09:00 (docs/27 §3); `[]` turns reminders off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reminders: Option<Vec<Reminder>>,
     /// When something counts as stalled (C3); each has a built-in value.
     #[serde(default)]
     pub detectors: Detectors,
+}
+
+impl Attention {
+    /// The reminders everyone gets unless they set their own: the config's, or the built-in ones.
+    pub fn shared_reminders(&self) -> Vec<Reminder> {
+        self.reminders.clone().unwrap_or_else(default_reminders)
+    }
+}
+
+/// The day before the due date and on the day, at 09:00.
+pub fn default_reminders() -> Vec<Reminder> {
+    [-1, 0]
+        .into_iter()
+        .map(|days| Reminder {
+            days,
+            at: "09:00".to_owned(),
+        })
+        .collect()
 }
 
 /// Thresholds of the "something stalled" detectors (C3). Durations like 10m, 48h.

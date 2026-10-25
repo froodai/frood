@@ -105,6 +105,7 @@ pub fn assemble(
     .with_sources(config.sources.clone())
     .with_vault(vault_key)
     .with_attention(config.attention.clone())
+    .with_timezone(config.installation.timezone.as_deref())
     .with_spheres(config.spheres.clone())
     .with_job_base(job_base);
     if let Some(backup) = &config.backup {

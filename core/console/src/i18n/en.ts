@@ -259,7 +259,7 @@ export const en = {
   "attention.maxPush": "Pushes a day, at most",
   "attention.maxPushHint": "A fuse against floods: past it, the rest waits for the digest.",
   "attention.reminders": "Reminders of due dates",
-  "attention.remindersHint": "For everyone who has set a time zone; a person can set their own.",
+  "attention.remindersHint": "Everyone gets them, at the time of day in their own time zone; a person can set their own.",
   "attention.remindersNone": "No reminders.",
   "attention.remind.before": { one: "{n} day before, at {time}", other: "{n} days before, at {time}" },
   "attention.remind.on": "On the day, at {time}",
