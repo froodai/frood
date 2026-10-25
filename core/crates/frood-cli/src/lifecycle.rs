@@ -566,25 +566,38 @@ pub async fn config_export(paths: &Paths) -> anyhow::Result<()> {
     )
     .fetch_optional(&pool)
     .await?;
-    let sources: std::collections::BTreeMap<String, frood_config::Source> = data
-        .and_then(|d| serde_json::from_value(d["sources"].clone()).ok())
-        .unwrap_or_default();
-    if sources.is_empty() {
-        println!("# No sources were connected from the console.");
+    let data = data.unwrap_or_default();
+    let sources: std::collections::BTreeMap<String, frood_config::Source> =
+        serde_json::from_value(data["sources"].clone()).unwrap_or_default();
+    let jobs: std::collections::BTreeMap<String, frood_config::Job> =
+        serde_json::from_value(data["jobs"].clone()).unwrap_or_default();
+    let attention: Option<frood_config::Attention> =
+        serde_json::from_value(data["attention"].clone()).ok();
+    if sources.is_empty() && jobs.is_empty() && attention.is_none() {
+        println!("# Nothing was changed from the console.");
         return Ok(());
     }
     let (sources, secrets) = exported_sources(sources);
-    println!("# Sources connected from the console; add them to frood.yaml.");
+    println!(
+        "# Changes made from the console; add them to frood.yaml (what frood.yaml sets already wins)."
+    );
     if !secrets.is_empty() {
         println!(
             "# Their tokens stay in the database: put them in the secrets file as {}.",
             secrets.join(", ")
         );
     }
-    print!(
-        "{}",
-        serde_yaml_ng::to_string(&serde_json::json!({ "sources": sources }))?
-    );
+    let mut out = serde_json::Map::new();
+    if !sources.is_empty() {
+        out.insert("sources".into(), serde_json::to_value(sources)?);
+    }
+    if !jobs.is_empty() {
+        out.insert("jobs".into(), serde_json::to_value(jobs)?);
+    }
+    if let Some(attention) = attention {
+        out.insert("attention".into(), serde_json::to_value(attention)?);
+    }
+    print!("{}", serde_yaml_ng::to_string(&out)?);
     Ok(())
 }
 

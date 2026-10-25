@@ -21,6 +21,16 @@ pub struct LinkCode {
     pub expires_at: DateTime<Utc>,
 }
 
+/// A person's account in a channel, as they see it.
+#[derive(Debug, Clone, Serialize)]
+pub struct ChannelLink {
+    pub channel: String,
+    pub external_id: String,
+    /// E.g. the Telegram username.
+    pub label: Option<String>,
+    pub linked_at: DateTime<Utc>,
+}
+
 fn new_code() -> String {
     let mut bytes = [0u8; CODE_LENGTH];
     getrandom::fill(&mut bytes).expect("system randomness");
@@ -105,6 +115,44 @@ impl Auth {
         .bind(external_id)
         .fetch_optional(self.pool())
         .await?)
+    }
+
+    /// The person's linked channel accounts, oldest first.
+    pub async fn links_of(&self, user_id: Uuid) -> Result<Vec<ChannelLink>> {
+        let rows: Vec<(String, String, Option<String>, DateTime<Utc>)> = sqlx::query_as(
+            "SELECT channel, external_id, label, created_at FROM channel_links \
+             WHERE user_id = $1 ORDER BY created_at",
+        )
+        .bind(user_id)
+        .fetch_all(self.pool())
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|(channel, external_id, label, linked_at)| ChannelLink {
+                channel,
+                external_id,
+                label,
+                linked_at,
+            })
+            .collect())
+    }
+
+    /// The person unlinks one of their own channel accounts.
+    pub async fn unlink_own(
+        &self,
+        user_id: Uuid,
+        channel: &str,
+        external_id: &str,
+    ) -> Result<bool> {
+        let done = sqlx::query(
+            "DELETE FROM channel_links WHERE channel = $1 AND external_id = $2 AND user_id = $3",
+        )
+        .bind(channel)
+        .bind(external_id)
+        .bind(user_id)
+        .execute(self.pool())
+        .await?;
+        Ok(done.rows_affected() > 0)
     }
 
     pub async fn unlink(&self, channel: &str, external_id: &str) -> Result<bool> {
