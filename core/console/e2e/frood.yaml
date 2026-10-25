@@ -11,3 +11,6 @@ auth:
 # A scheduled job without a model, so Automations has something to show.
 jobs:
   digest: { on: [{ schedule: "30 8 * * 1-5", timezone: Europe/Belgrade }] }
+# The demo's waiting changes stand for an agent's: the seed writes them as the demo person, so
+# a person's change of their own knowledge must wait here too.
+policies: { auto_accept_own_changes: false }

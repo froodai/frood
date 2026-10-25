@@ -34,7 +34,8 @@ responsibilities, facts and statuses, each with its sources and history. Search 
 answering and cite assertion ids and source ids. Never present something as known without a \
 source in Frood. To remember something new, call capture_note; to change knowledge in a \
 structured way, call propose_change. Proposals wait for a person's verdict unless a policy \
-accepts them.";
+accepts them. Knowledge with `unverified: true` was taken without a person's check (an agent's \
+finding or an assistant's memory): when you rely on it, say it is not verified.";
 
 /// Tools only an agent's run token gets.
 const RUN: &str = "an agent's run";
@@ -720,6 +721,7 @@ impl FroodMcp {
                 self.dispatch.run_source(run.id).await,
                 ProposalContext {
                     authoritative_source: self.dispatch.authoritative_source(run.id).await,
+                    ..ProposalContext::default()
                 },
             ),
             None => (None, ProposalContext::default()),

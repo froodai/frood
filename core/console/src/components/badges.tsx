@@ -1,3 +1,4 @@
+import { CircleHelp } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useI18n } from "@/i18n";
 import { kindKey, kindTone } from "@/lib/kinds";
@@ -24,6 +25,17 @@ export function KindBadge({ kind, className }: { kind: string; className?: strin
 export function TypeBadge({ type }: { type: Type }) {
   const { t } = useI18n();
   return <span className={cn(BADGE, TONE[type].badge)}>{t(typeKey(type))}</span>;
+}
+
+/** Taken without a person's check: an agent's finding, an assistant's memory (docs/27). */
+export function UnverifiedBadge({ className }: { className?: string }) {
+  const { t } = useI18n();
+  return (
+    <span className={cn(BADGE, "border border-dashed border-amber-500/60 text-amber-700 dark:text-amber-300", className)} title={t("knowledge.unverifiedHint")}>
+      <CircleHelp className="size-3" aria-hidden />
+      {t("knowledge.unverified")}
+    </span>
+  );
 }
 
 /** The sphere of life it belongs to: quiet next to the kind, with its sign. */

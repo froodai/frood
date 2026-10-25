@@ -578,6 +578,9 @@ pub struct AssertionVersion {
     pub evidence: Vec<Uuid>,
     pub proposal_id: Uuid,
     pub verdict_id: Uuid,
+    /// Marked not verified now (an agent's finding, imported memory): answers should say so.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unverified: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -74,6 +74,8 @@ export type Assertion = {
   evidence: string[];
   proposal_id: string;
   verdict_id: string;
+  /** Taken without a person's check (an agent's finding, an assistant's memory). */
+  unverified?: boolean;
 };
 
 export type SearchHit = Assertion & { score: number; matched: string };

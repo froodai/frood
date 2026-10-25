@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { ArrowRight } from "lucide-react";
 import { Link, useSearchParams } from "react-router";
+import { UnverifiedBadge } from "@/components/badges";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useI18n } from "@/i18n";
@@ -49,6 +50,7 @@ function What({ a }: { a: Assertion }) {
           </span>
         )}
         {title}
+        {a.unverified && <UnverifiedBadge className="ms-1.5 align-[1px]" />}
       </span>
       {description && <span className="line-clamp-1 text-[13px] text-muted-foreground">{description}</span>}
     </>

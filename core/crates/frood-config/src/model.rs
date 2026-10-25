@@ -396,6 +396,15 @@ pub struct Policies {
     /// Accept a user's own new facts automatically when they conflict with nothing.
     #[serde(default = "default_true")]
     pub auto_accept_own_facts: bool,
+    /// Accept a user's change of knowledge only they wrote (their notes, imports, edits) when it
+    /// conflicts with nothing (docs/27 §4).
+    #[serde(default = "default_true")]
+    pub auto_accept_own_changes: bool,
+    /// Accept new knowledge agents find in ordinary sources at once, marked not verified;
+    /// changes, conflicts and merges still wait for a person (docs/27 §6). `false`: everything
+    /// agents find waits in the Inbox.
+    #[serde(default = "default_true")]
+    pub accept_agent_findings: bool,
     /// Accept entity merges at or above this confidence automatically; `null` turns it off.
     #[serde(default = "default_merge_threshold")]
     pub entity_merge_threshold: Option<f32>,
@@ -405,6 +414,8 @@ impl Default for Policies {
     fn default() -> Self {
         Self {
             auto_accept_own_facts: true,
+            auto_accept_own_changes: true,
+            accept_agent_findings: true,
             entity_merge_threshold: default_merge_threshold(),
         }
     }

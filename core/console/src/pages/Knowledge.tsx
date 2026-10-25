@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Search } from "lucide-react";
+import { Check, Search } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { toast } from "sonner";
 import { Attachments } from "@/components/attachments";
-import { KindBadge, SphereBadge, SphereFilter, SpherePicker } from "@/components/badges";
+import { KindBadge, SphereBadge, SphereFilter, SpherePicker, UnverifiedBadge } from "@/components/badges";
+import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useI18n } from "@/i18n";
@@ -105,6 +106,7 @@ export function Knowledge() {
                 <span className="flex flex-wrap items-center gap-1 sm:flex-col sm:items-start">
                   <KindBadge kind={a.kind} />
                   <SphereBadge sphere={a.sphere} />
+                  {a.unverified && <UnverifiedBadge />}
                 </span>
                 <span className="font-mono text-xs text-muted-foreground">{date(a.valid_from)}</span>
               </button>
@@ -134,6 +136,7 @@ function History({ id }: { id: string }) {
   const { t, date, ago } = useI18n();
   const history = useQuery({ queryKey: ["history", id], queryFn: () => api<Assertion[]>(`/v1/assertions/${id}/history`) });
   const move = useMove(id);
+  const verify = useVerify(id);
   if (history.isPending) return <Skeleton className="h-40" />;
   if (history.isError) return <p className="text-sm text-destructive">{history.error.message}</p>;
   const held = history.data.filter((v) => !v.recorded_to).sort((a, b) => b.valid_from.localeCompare(a.valid_from));
@@ -157,6 +160,14 @@ function History({ id }: { id: string }) {
             <SphereBadge sphere={head.sphere} />
           ) : (
             <SpherePicker value={move.isPending ? (move.variables ?? null) : (head.sphere ?? null)} onChange={(s) => move.mutate(s)} disabled={move.isPending} />
+          )}
+          {head.unverified && !head.recorded_to && (
+            <>
+              <UnverifiedBadge />
+              <Button size="sm" variant="outline" className="h-6 px-2 text-xs" disabled={verify.isPending} onClick={() => verify.mutate()}>
+                <Check className="size-3.5" /> {t("knowledge.verify")}
+              </Button>
+            </>
           )}
         </div>
         <h2 className="text-[15px] leading-snug font-semibold">{title}</h2>
@@ -184,6 +195,20 @@ function History({ id }: { id: string }) {
       </ol>
     </div>
   );
+}
+
+/** A person confirms knowledge marked not verified is right: accepted at once, the mark goes. */
+function useVerify(id: string) {
+  const { t } = useI18n();
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => api(`/v1/assertions/${id}/verify`, { method: "POST" }),
+    onSuccess: () => {
+      toast(t("knowledge.verified"));
+      for (const key of [["history", id], ["knowledge"], ["now"]]) client.invalidateQueries({ queryKey: key });
+    },
+    onError: (err: Error) => toast.error(t("inbox.failed", { error: err.message })),
+  });
 }
 
 /** Moves knowledge to another sphere: a person's own move is accepted at once. */
