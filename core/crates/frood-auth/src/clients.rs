@@ -259,7 +259,8 @@ async fn fetch_metadata_document(url: &str) -> Result<Value> {
     serde_json::from_slice(&bytes).map_err(|_| invalid("is not JSON".into()))
 }
 
-fn is_public_ip(ip: IpAddr) -> bool {
+/// Not a private, local, link-local or reserved address: safe to fetch on someone's word.
+pub fn is_public_ip(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => {
             let [a, b, ..] = v4.octets();

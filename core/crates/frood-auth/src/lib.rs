@@ -25,7 +25,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 pub use channels::LinkCode;
-pub use clients::ClientInfo;
+pub use clients::{ClientInfo, is_public_ip};
 pub use tokens::RunToken;
 pub use tokens::{PersonalToken, TokenPair};
 pub use web::routes;

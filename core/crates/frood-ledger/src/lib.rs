@@ -5,6 +5,7 @@
 //! checking that every version the proposal was built on is still current.
 
 mod apply;
+mod attach;
 mod error;
 mod journal;
 pub mod model;
@@ -114,7 +115,7 @@ impl Ledger {
         if input.kind.trim().is_empty() {
             return Err(invalid("source kind must not be empty"));
         }
-        if input.content.trim().is_empty() && blob.is_none() {
+        if input.content.trim().is_empty() && blob.is_none() && input.uri.is_none() {
             return Err(invalid("source content must not be empty"));
         }
         if let Some(blob) = &blob {
@@ -128,9 +129,13 @@ impl Ledger {
                 )));
             }
         }
-        let sha = match &blob {
-            Some(blob) => hex::encode(Sha256::digest(&blob.data)),
-            None => hex::encode(Sha256::digest(input.content.as_bytes())),
+        let sha = match (&blob, &input.uri) {
+            (Some(blob), _) => hex::encode(Sha256::digest(&blob.data)),
+            // A link with no words is the address itself.
+            (None, Some(uri)) if input.content.trim().is_empty() => {
+                hex::encode(Sha256::digest(uri.as_bytes()))
+            }
+            (None, _) => hex::encode(Sha256::digest(input.content.as_bytes())),
         };
         let existing: Option<Uuid> =
             sqlx::query_scalar("SELECT id FROM sources WHERE origin = $1 AND content_sha256 = $2")
@@ -644,6 +649,7 @@ impl Ledger {
             applier.spheres = self.spheres.as_deref();
             applier.apply(&operations).await?;
             events.append(&mut applier.events);
+            events.extend(attach::carry(&mut tx, proposal_id, at).await?);
         } else {
             at = sqlx::query_scalar("SELECT clock_timestamp()")
                 .fetch_one(&mut *tx)

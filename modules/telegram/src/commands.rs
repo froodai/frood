@@ -55,7 +55,7 @@ impl Bot {
         }
     }
 
-    async fn get(&self, path: &str) -> Result<Value, String> {
+    pub(crate) async fn get(&self, path: &str) -> Result<Value, String> {
         let response = self
             .frood(self.http.get(format!("{}{path}", self.frood)))
             .send()

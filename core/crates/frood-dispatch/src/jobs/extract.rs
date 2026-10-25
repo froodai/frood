@@ -349,6 +349,10 @@ pub(crate) async fn run(ctx: &Ctx, spec: &JobSpec, run: &Run) -> Result<Value, J
     if source.withdrawn_at.is_some() {
         return Ok(json!({ "skipped": "the note was taken back" }));
     }
+    // An attachment illustrates knowledge it is kept with; it is not read for more.
+    if source.metadata.get("attachment") == Some(&json!(true)) {
+        return Ok(json!({ "skipped": "an attachment" }));
+    }
     let Some(text) = source.content.clone().filter(|t| !t.trim().is_empty()) else {
         return Ok(json!({ "skipped": "the source has no text" }));
     };

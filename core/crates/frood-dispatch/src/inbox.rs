@@ -9,7 +9,7 @@ use std::collections::BTreeSet;
 use chrono::{DateTime, Duration, Utc};
 use frood_config::{Attention, BeforeNotify};
 use frood_ledger::model::{
-    Actor, Decision, Operation, Proposal, ProposalState, Risk, Source, VerdictInput,
+    Actor, AttachTo, Decision, Operation, Proposal, ProposalState, Risk, Source, VerdictInput,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -321,6 +321,26 @@ impl Dispatch {
     pub async fn inbox(&self, include_resolved: bool, limit: i64) -> sqlx::Result<Vec<InboxItem>> {
         self.inbox_pending().await?;
         list(&self.ctx.pool, include_resolved, limit).await
+    }
+
+    /// The item a channel showed in one of its messages, by the message's reference.
+    pub async fn delivered_in(
+        &self,
+        channel: &str,
+        message_ref: &str,
+    ) -> sqlx::Result<Option<InboxItem>> {
+        let item: Option<Uuid> = sqlx::query_scalar(
+            "SELECT item_id FROM inbox_deliveries WHERE channel = $1 AND message_ref = $2 \
+             ORDER BY sent_at DESC LIMIT 1",
+        )
+        .bind(channel)
+        .bind(message_ref)
+        .fetch_optional(&self.ctx.pool)
+        .await?;
+        match item {
+            Some(id) => get(&self.ctx.pool, id).await,
+            None => Ok(None),
+        }
     }
 
     pub async fn inbox_item(&self, id: Uuid) -> sqlx::Result<Option<InboxItem>> {
@@ -895,6 +915,34 @@ impl Dispatch {
                 .as_ref()
                 .map(|uri| json!({ "uri": uri, "title": s.title }))
         });
+        // What is attached: to the proposal, and to the knowledge it changes.
+        let mut attached = self
+            .ctx
+            .ledger
+            .attachments(AttachTo::Proposal(p.id))
+            .await
+            .unwrap_or_default();
+        for alternative in &p.alternatives {
+            for op in &alternative.operations {
+                let target = match op {
+                    Operation::Supersede { assertion_id, .. }
+                    | Operation::Close { assertion_id, .. }
+                    | Operation::SetSphere { assertion_id, .. } => *assertion_id,
+                    _ => continue,
+                };
+                for attachment in self
+                    .ctx
+                    .ledger
+                    .attachments(AttachTo::Assertion(target))
+                    .await
+                    .unwrap_or_default()
+                {
+                    if !attached.iter().any(|a| a.source_id == attachment.source_id) {
+                        attached.push(attachment);
+                    }
+                }
+            }
+        }
         json!({
             "proposal_id": p.id,
             "risk": risk_name(p.risk),
@@ -904,6 +952,7 @@ impl Dispatch {
             "alternatives": alternatives,
             "quote": quote,
             "origin": origin,
+            "attachments": attached,
         })
     }
 

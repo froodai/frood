@@ -1265,3 +1265,170 @@ async fn spheres_label_knowledge() {
             .is_empty()
     );
 }
+
+/// Attachments (docs/26 §2): a photo or a link on knowledge, kept across versions; on a
+/// waiting proposal until it is accepted; taken off without losing the source.
+#[tokio::test]
+async fn attachments_stay_with_knowledge() {
+    let ledger = ledger_or_skip!("ledger_attachments");
+    let evidence = capture(&ledger, "Atlas demo on Friday").await;
+    let own = ledger
+        .open_proposal(
+            &user(),
+            proposal(
+                Risk::New,
+                vec![],
+                vec![Operation::Create {
+                    key: None,
+                    assertion: commitment(
+                        "Atlas demo on Friday",
+                        "2026-09-04",
+                        day(2026, 9, 2),
+                        evidence,
+                    ),
+                }],
+            ),
+        )
+        .await
+        .unwrap();
+    let demo = created_id(&own, &ledger.journal(0, 1000).await.unwrap());
+
+    let photo = ledger
+        .capture(
+            &user(),
+            NewSource {
+                kind: "photo".into(),
+                origin: "capture".into(),
+                uri: None,
+                title: None,
+                content: "the demo board".into(),
+                said_at: None,
+                metadata: json!({ "attachment": true }),
+            },
+            Some(NewBlob {
+                content_type: "image/jpeg".into(),
+                filename: Some("board.jpg".into()),
+                data: vec![0xff, 0xd8, 0xff, 0xe0],
+            }),
+        )
+        .await
+        .unwrap()
+        .source;
+    let link = |uri: &str| NewSource {
+        kind: "link".into(),
+        origin: "capture".into(),
+        uri: Some(uri.into()),
+        title: Some("Demo plan".into()),
+        content: String::new(),
+        said_at: None,
+        metadata: json!({ "attachment": true }),
+    };
+    let plan = ledger
+        .capture_source(&user(), link("https://docs.example/demo"))
+        .await
+        .unwrap();
+    let other = ledger
+        .capture_source(&user(), link("https://docs.example/other"))
+        .await
+        .unwrap();
+    assert!(
+        plan.created && other.created,
+        "a link with no words is its address"
+    );
+    assert_ne!(plan.source.id, other.source.id);
+
+    let attached = ledger
+        .attach(&user(), AttachTo::Assertion(demo), photo.id)
+        .await
+        .unwrap();
+    assert_eq!(attached.len(), 1);
+    assert_eq!(
+        attached[0].file.as_ref().unwrap().content_type,
+        "image/jpeg"
+    );
+    // Twice is once.
+    ledger
+        .attach(&user(), AttachTo::Assertion(demo), photo.id)
+        .await
+        .unwrap();
+    assert_eq!(
+        ledger
+            .attachments(AttachTo::Assertion(demo))
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+
+    // On a change that waits: with the proposal, then with the knowledge once accepted.
+    let current = ledger
+        .history(demo)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|v| v.recorded_to.is_none())
+        .unwrap();
+    let waiting = ledger
+        .open_proposal(
+            &agent(),
+            proposal(
+                Risk::Change,
+                vec![BaseRef {
+                    assertion_id: demo,
+                    version: current.version,
+                }],
+                vec![Operation::Supersede {
+                    assertion_id: demo,
+                    assertion: commitment(
+                        "Atlas demo moves to Monday",
+                        "2026-09-07",
+                        day(2026, 9, 3),
+                        evidence,
+                    ),
+                }],
+            ),
+        )
+        .await
+        .unwrap();
+    ledger
+        .attach(&user(), AttachTo::Proposal(waiting.id), plan.source.id)
+        .await
+        .unwrap();
+    assert_eq!(
+        ledger
+            .attachments(AttachTo::Proposal(waiting.id))
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    ledger
+        .submit_verdict(&user(), waiting.id, accept(None))
+        .await
+        .unwrap();
+    let kept = ledger.attachments(AttachTo::Assertion(demo)).await.unwrap();
+    let kinds: Vec<&str> = kept.iter().map(|a| a.kind.as_str()).collect();
+    assert_eq!(
+        kinds,
+        ["photo", "link"],
+        "the new version keeps the photo and gains the link"
+    );
+
+    // To an accepted proposal: to the knowledge it changed.
+    let passed = ledger
+        .attach(&user(), AttachTo::Proposal(waiting.id), other.source.id)
+        .await
+        .unwrap();
+    assert_eq!(passed[0].assertion_id, Some(demo));
+
+    // Taken off: gone from the list, the source stays.
+    ledger.detach(&user(), kept[0].id).await.unwrap();
+    let left = ledger.attachments(AttachTo::Assertion(demo)).await.unwrap();
+    assert_eq!(left.len(), 2);
+    assert!(left.iter().all(|a| a.kind == "link"));
+    assert!(ledger.source(photo.id).await.is_ok());
+    assert!(matches!(
+        ledger.detach(&user(), kept[0].id).await,
+        Err(LedgerError::NotFound(_))
+    ));
+}

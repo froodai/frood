@@ -178,3 +178,38 @@ test("spheres: a sign on each item, a filter, and a move in one click", async ({
   await page.goto("/admin/knowledge?sphere=business");
   await expect(page.getByRole("button", { name: /Search moves to OpenSearch/ })).toBeVisible();
 });
+
+test("attachments: a photo and a link on knowledge, and on a change that waits", async ({ page }) => {
+  await signIn(page, "/admin/knowledge");
+  await page.getByRole("button", { name: /Payments demo for the team/ }).click();
+  const detail = page.getByRole("complementary");
+  const attachments = detail.getByRole("region", { name: "Attachments" });
+  // A tiny PNG, as if chosen in the file dialog.
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+    "base64",
+  );
+  await attachments.locator('input[type="file"]').setInputFiles({ name: "board.png", mimeType: "image/png", buffer: png });
+  await expect(attachments.getByRole("img")).toBeVisible();
+  await attachments.getByLabel("Paste a link").fill("https://docs.example/demo-plan");
+  await attachments.getByRole("button", { name: "Add" }).click();
+  const link = attachments.getByRole("link", { name: /docs\.example/ });
+  await expect(link).toHaveAttribute("href", "https://docs.example/demo-plan");
+  // Taken off again.
+  await link.hover();
+  await attachments.getByRole("button", { name: "Remove" }).last().click();
+  await expect(link).toHaveCount(0);
+  await expect(attachments.getByRole("img")).toBeVisible();
+
+  // On a change that waits: the row shows a paper clip with the count.
+  await page.goto("/admin/inbox");
+  const row = page.getByRole("button", { name: /^ATL-142: a finished session loads for 22 minutes/ });
+  await row.click();
+  // The details switch to the item before anything is typed there.
+  await expect(page.getByRole("complementary").getByRole("heading", { level: 2 })).toHaveText(/^ATL-142/);
+  const waiting = page.getByRole("complementary").getByRole("region", { name: "Attachments" });
+  await waiting.getByLabel("Paste a link").fill("https://tracker.example/issue/ATL-142#screenshot");
+  await waiting.getByRole("button", { name: "Add" }).click();
+  await expect(waiting.getByRole("link", { name: /tracker\.example/ })).toBeVisible();
+  await expect(row.getByLabel("Attachments")).toHaveText("1");
+});

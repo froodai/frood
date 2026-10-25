@@ -3,6 +3,7 @@
 
 mod account;
 mod admin;
+mod attachments;
 mod auth;
 mod capture;
 mod channels;
@@ -10,6 +11,7 @@ mod console;
 mod error;
 mod inbox;
 mod ledger;
+mod links;
 pub mod logs;
 mod work;
 
@@ -133,6 +135,7 @@ pub fn router(state: AppState) -> Router {
         .merge(ledger::routes())
         .merge(account::routes())
         .merge(capture::routes())
+        .merge(attachments::routes())
         .merge(channels::routes())
         .merge(work::routes())
         .merge(inbox::routes())
