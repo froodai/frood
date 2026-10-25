@@ -1,5 +1,5 @@
 name: telegram
-version: 0.1.8
+version: 0.1.9
 description: Telegram bot for quick capture and the Inbox. Text, voice messages, photos, videos and files go to /v1/capture as the person whose Telegram account is linked (/link <code>); a photo, a file or a link sent in reply to a card is attached to it; Inbox items arrive as messages with buttons that act as that person. Uses long polling, so no public address is needed.
 license: Apache-2.0
 provides:
