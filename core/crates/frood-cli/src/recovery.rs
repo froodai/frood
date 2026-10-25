@@ -210,7 +210,7 @@ pub async fn restore(paths: &Paths, options: &RestoreOptions) -> anyhow::Result<
         // be mounted read-only. Then open to this user, who moves and removes what came back.
         .arg(
             "restic --no-cache --no-lock restore \"$0\" --tag frood --target /restore \
-             && chmod -R a+rwX /restore",
+             && find /restore -mindepth 1 -exec chmod a+rwX {} +",
         )
         .arg(snapshot);
     println!("restoring {snapshot} from {}…", options.repository);
