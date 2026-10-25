@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::lifecycle::Paths;
 
-async fn auth(paths: &Paths) -> anyhow::Result<Auth> {
+pub(crate) async fn auth(paths: &Paths) -> anyhow::Result<Auth> {
     let loaded = paths.load()?;
     let pool = frood_store::connect(&loaded.config.storage.url, Duration::from_secs(5))
         .await

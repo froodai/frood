@@ -256,7 +256,7 @@ export const ru: Catalog = {
   "attention.maxPush": "Не больше push в день",
   "attention.maxPushHint": "Предохранитель от потока: сверх лимита всё ждёт сводки.",
   "attention.reminders": "Напоминания о сроках",
-  "attention.remindersHint": "Для всех, кто задал часовой пояс; у человека могут быть свои.",
+  "attention.remindersHint": "Приходят всем — по времени в часовом поясе каждого; у человека могут быть свои.",
   "attention.remindersNone": "Напоминаний нет.",
   "attention.remind.before": { one: "за {n} день, в {time}", few: "за {n} дня, в {time}", many: "за {n} дней, в {time}", other: "за {n} дня, в {time}" },
   "attention.remind.on": "В день срока, в {time}",

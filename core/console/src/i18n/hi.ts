@@ -256,7 +256,7 @@ export const hi: Catalog = {
   "attention.maxPush": "दिन में अधिकतम पुश",
   "attention.maxPushHint": "बाढ़ से बचाव: सीमा के बाद बाकी सब सारांश का इंतज़ार करता है।",
   "attention.reminders": "समय-सीमा के रिमाइंडर",
-  "attention.remindersHint": "उन सबके लिए जिन्होंने समय क्षेत्र तय किया है; हर व्यक्ति अपने रख सकता है।",
+  "attention.remindersHint": "सभी को मिलते हैं, हर व्यक्ति के अपने समय क्षेत्र के समय पर; कोई अपने भी रख सकता है।",
   "attention.remindersNone": "कोई रिमाइंडर नहीं।",
   "attention.remind.before": { one: "{n} दिन पहले, {time} बजे", other: "{n} दिन पहले, {time} बजे" },
   "attention.remind.on": "उसी दिन, {time} बजे",

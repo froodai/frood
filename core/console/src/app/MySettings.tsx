@@ -90,7 +90,15 @@ function PersonalForm({ mine }: { mine: Mine }) {
         <span className={label}>
           {t("me.timezone")} {fixed(mine.timezone) && <FromConfig />}
         </span>
-        <Input value={zone} onChange={(e) => setZone(e.target.value)} list="frood-zones" disabled={fixed(mine.timezone)} dir="ltr" aria-label={t("me.timezone")} />
+        <Input
+          value={zone}
+          onChange={(e) => setZone(e.target.value)}
+          list="frood-zones"
+          disabled={fixed(mine.timezone)}
+          placeholder={mine.timezone.default ? t("me.asEveryone", { value: mine.timezone.default }) : undefined}
+          dir="ltr"
+          aria-label={t("me.timezone")}
+        />
         <datalist id="frood-zones">
           {zones.map((z) => (
             <option key={z} value={z} />
@@ -152,7 +160,7 @@ function PersonalForm({ mine }: { mine: Mine }) {
         )}
       </div>
 
-      {!zone.trim() && (quiet || (own ? reminders.length > 0 : shared.length > 0)) && <p className="rounded-md border border-warning/50 p-3 text-warning">{t("me.needsZone")}</p>}
+      {!zone.trim() && !mine.timezone.default && (quiet || (own ? reminders.length > 0 : shared.length > 0)) && <p className="rounded-md border border-warning/50 p-3 text-warning">{t("me.needsZone")}</p>}
 
       <Button type="submit" className="self-start" disabled={save.isPending}>
         {t("connect.saveChanges")}

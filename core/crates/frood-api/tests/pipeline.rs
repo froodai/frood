@@ -236,7 +236,8 @@ async fn voice_and_notes_become_knowledge() {
     assert!(assembly.warnings.is_empty(), "{:?}", assembly.warnings);
     let jobs = assembly.state.dispatch.jobs();
     let names: Vec<&str> = jobs.iter().map(|j| j.name.as_str()).collect();
-    assert_eq!(names, ["transcribe", "extract", "embed"]);
+    // The digest runs by default (docs/27 §3).
+    assert_eq!(names, ["transcribe", "extract", "embed", "digest"]);
     assembly.modules.discover("stt").await.unwrap();
     let auth = assembly.state.auth.clone();
     auth.register_service_token(

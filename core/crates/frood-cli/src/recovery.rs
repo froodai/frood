@@ -36,7 +36,7 @@ pub fn key(out: Option<&Path>) -> anyhow::Result<()> {
 }
 
 /// A file only its owner can read.
-fn write_private(path: &Path, data: &[u8]) -> anyhow::Result<()> {
+pub(crate) fn write_private(path: &Path, data: &[u8]) -> anyhow::Result<()> {
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]

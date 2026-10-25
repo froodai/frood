@@ -286,7 +286,9 @@ test("notifications from the console: how urgent, the push fuse, reminders, and 
   await page.getByRole("combobox", { name: "How urgent: New" }).click();
   await page.getByRole("option", { name: "Now", exact: true }).click();
   await page.getByLabel("Pushes a day, at most").fill("12");
-  await page.getByRole("button", { name: "Add a reminder" }).click();
+  // The built-in reminders: the day before and on the day; only the day before is kept.
+  await expect(page.getByLabel("Days", { exact: true })).toHaveCount(1);
+  await page.getByRole("button", { name: "Remove" }).nth(1).click();
   await page.getByRole("button", { name: "Save" }).click();
   await expect(page.getByText("Notification settings saved")).toBeVisible();
   await page.reload();

@@ -838,3 +838,72 @@ async fn behind_a_proxy_under_a_path() {
     let page = get_with(&app, &consent, Some(cookie)).await.text();
     assert!(page.contains("action=\"/frood/oauth/consent\""));
 }
+
+/// A laptop signs in on this computer (docs/27 §1): no password, the one listed address
+/// filled in; a whole allowed domain does not count.
+#[tokio::test]
+async fn a_laptop_signs_in_on_this_computer() {
+    let Some(url) = frood_store::testing::database_url() else {
+        return;
+    };
+    let pool = frood_store::testing::fresh_database(&url, "oauth_local")
+        .await
+        .expect("test database");
+    let raw = "version: 1\ninstallation: {name: laptop}\nserver: {listen: '127.0.0.1:8080'}\n\
+               storage: {uses: postgres, url: 'postgres://unused', objects: {uses: database}}\n\
+               deploy: {server: host}\nauth:\n  allow: [alice@example.com]\n  allow_domains: [example.org]\n  \
+               providers: [{kind: local, id: local}]\n";
+    let config = frood_config::parse(
+        raw,
+        &frood_config::Secrets::from_pairs(Vec::<(String, String)>::new()),
+    )
+    .expect("config")
+    .config;
+    let app = router(frood_api::assemble(&config, std::path::Path::new("."), pool, |_| None).state);
+    let (_, challenge) = pkce();
+    let authorize = format!(
+        "/oauth/authorize?response_type=code&client_id=frood-admin&redirect_uri={}&code_challenge={challenge}&code_challenge_method=S256&state=s",
+        url::form_urlencoded::byte_serialize(format!("{ISSUER}/admin/").as_bytes())
+            .collect::<String>()
+    );
+    let reply = get_with(&app, &authorize, None).await;
+    assert!(reply.status.is_redirection(), "{}", reply.text());
+    let reply = get_with(&app, &path_and_query(&reply.location()), None).await;
+    let form = path_and_query(&reply.location());
+    let page = get_with(&app, &form, None).await;
+    let html = page.text();
+    assert!(html.contains("Sign in on this computer"), "{html}");
+    assert!(html.contains("value=\"alice@example.com\""), "{html}");
+    let tx = query(&reply.location(), "tx");
+
+    let refused = post_form(
+        &app,
+        "/oauth/login/local",
+        &[("tx", &tx), ("email", "bob@example.org")],
+        None,
+    )
+    .await;
+    assert_eq!(refused.status, StatusCode::FORBIDDEN, "{}", refused.text());
+    let signed = post_form(
+        &app,
+        "/oauth/login/local",
+        &[("tx", &tx), ("email", "alice@example.com")],
+        None,
+    )
+    .await;
+    assert!(signed.status.is_redirection(), "{}", signed.text());
+    assert_eq!(signed.location().path(), "/oauth/consent");
+
+    // A server with a public address cannot use it.
+    let public = raw.replace(
+        "server: {listen: '127.0.0.1:8080'}",
+        "server: {listen: '127.0.0.1:8080', public_url: 'https://mem.example.com'}",
+    );
+    let problems = frood_config::parse(
+        &public,
+        &frood_config::Secrets::from_pairs(Vec::<(String, String)>::new()),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(problems.contains("sign-in on this computer"), "{problems}");
+}

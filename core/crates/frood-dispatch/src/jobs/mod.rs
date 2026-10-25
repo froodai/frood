@@ -117,6 +117,28 @@ fn trigger(event: &str, filter: &[(&str, Value)]) -> Trigger {
     }
 }
 
+/// A cron schedule in a zone (none: UTC).
+fn schedule(cron: &str, timezone: Option<&str>) -> Trigger {
+    Trigger {
+        event: None,
+        filter: BTreeMap::new(),
+        schedule: Some(cron.to_owned()),
+        timezone: timezone.map(str::to_owned),
+        for_each: None,
+    }
+}
+
+/// When a standard job runs unless the config says otherwise (docs/27 §3): the digest on
+/// weekday mornings in the installation's zone; backups every six hours, checked on Sundays.
+fn default_schedule(name: &str, timezone: Option<&str>) -> Vec<Trigger> {
+    match name {
+        "digest" => vec![schedule("30 8 * * 1-5", timezone)],
+        "backup" => vec![schedule("0 */6 * * *", timezone)],
+        "backup-verify" => vec![schedule("30 4 * * 0", timezone)],
+        _ => Vec::new(),
+    }
+}
+
 /// The triggers a standard job starts with.
 pub fn standard_jobs_triggers(name: &str) -> Vec<Trigger> {
     standard()
@@ -131,7 +153,7 @@ pub fn standard_jobs() -> Vec<(String, String)> {
     standard().into_iter().map(|j| (j.name, j.uses)).collect()
 }
 
-/// The standard set (bundle `frood/standard`, built in until the registry exists).
+/// The standard set, built into the server; `frood.yaml` and the console change it.
 fn standard() -> Vec<JobSpec> {
     vec![
         JobSpec {
@@ -300,6 +322,9 @@ pub fn resolve(config: &Config, caps: &Capabilities<'_>) -> (Vec<JobSpec>, Vec<S
     let mut jobs = Vec::new();
     let mut warnings = Vec::new();
     for mut job in standard() {
+        if job.triggers.is_empty() {
+            job.triggers = default_schedule(&job.name, config.installation.timezone.as_deref());
+        }
         if let Some(change) = config.jobs.get(&job.name) {
             if change.enabled == Some(false) {
                 continue;
@@ -363,8 +388,6 @@ pub fn resolve(config: &Config, caps: &Capabilities<'_>) -> (Vec<JobSpec>, Vec<S
                     }
                 }
             }
-            // The digest runs when the config names when (a schedule) or by hand.
-            Task::Digest if !config.jobs.contains_key(&job.name) => continue,
             // Backups exist once the config says where they go; without a schedule, by hand.
             Task::Backup | Task::BackupVerify if config.backup.is_none() => continue,
             Task::Embed if !caps.embeddings => continue,
@@ -516,9 +539,22 @@ mod tests {
         let claude = ["claude".to_owned()];
         let caps = caps(&claude, false, 0);
         let (jobs, warnings) = resolve(&config(""), &caps);
-        assert!(
-            jobs.is_empty(),
-            "no account or model named, so no extraction"
+        assert_eq!(
+            names(&jobs),
+            ["digest"],
+            "no account or model named, so no extraction; the digest needs no model"
+        );
+        assert_eq!(
+            jobs[0].triggers[0].schedule.as_deref(),
+            Some("30 8 * * 1-5")
+        );
+        assert_eq!(jobs[0].triggers[0].timezone, None, "UTC without a zone");
+        let mut zoned = config("");
+        zoned.installation.timezone = Some("Europe/Belgrade".into());
+        let (jobs, _) = resolve(&zoned, &caps);
+        assert_eq!(
+            jobs[0].triggers[0].timezone.as_deref(),
+            Some("Europe/Belgrade")
         );
         assert!(
             warnings
@@ -538,11 +574,11 @@ mod tests {
             &config("jobs:\n  extract: { with: { account: claude, model: claude-haiku-5-5 } }\n"),
             &caps,
         );
-        assert_eq!(names(&jobs), ["extract"]);
+        assert_eq!(names(&jobs), ["extract", "digest"]);
         assert!(warnings.iter().any(|w| w.contains("transcribe is off")));
 
         let (jobs, warnings) = resolve(&config(""), &self::caps(&[], true, 1));
-        assert_eq!(names(&jobs), ["transcribe", "embed"]);
+        assert_eq!(names(&jobs), ["transcribe", "embed", "digest"]);
         assert!(warnings.iter().any(|w| w.contains("extract is off")));
     }
 

@@ -256,7 +256,7 @@ export const fr: Catalog = {
   "attention.maxPush": "Pushs par jour, au plus",
   "attention.maxPushHint": "Un fusible contre l'avalanche : au-delà, le reste attend le résumé.",
   "attention.reminders": "Rappels d'échéances",
-  "attention.remindersHint": "Pour tous ceux qui ont un fuseau horaire ; chacun peut avoir les siens.",
+  "attention.remindersHint": "Tout le monde les reçoit, à l'heure de son propre fuseau ; chacun peut avoir les siens.",
   "attention.remindersNone": "Aucun rappel.",
   "attention.remind.before": { one: "{n} jour avant, à {time}", other: "{n} jours avant, à {time}" },
   "attention.remind.on": "Le jour même, à {time}",

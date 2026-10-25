@@ -90,6 +90,31 @@ pub(crate) fn dev_form(installation: &str, base: &str, provider: &str, tx: &str)
     )
 }
 
+/// Sign-in on this computer (docs/27 §1): no password, the address filled in for one person.
+pub(crate) fn local_form(
+    installation: &str,
+    base: &str,
+    provider: &str,
+    tx: &str,
+    email: &str,
+) -> Html<String> {
+    page(
+        "Sign in on this computer",
+        &format!(
+            "<h1>Sign in on this computer</h1><p class=\"muted\">Installation <code>{}</code> runs on this computer \
+             and is reachable only from it, so no password is asked.</p>\
+             <form method=\"post\" action=\"{}/oauth/login/{}\"><input type=\"hidden\" name=\"tx\" value=\"{}\">\
+             <input type=\"email\" name=\"email\" value=\"{}\" placeholder=\"you@example.com\" required autofocus>\
+             <button class=\"btn\" type=\"submit\">Sign in</button></form>",
+            escape(installation),
+            escape(base),
+            escape(provider),
+            escape(tx),
+            escape(email)
+        ),
+    )
+}
+
 pub(crate) struct Consent<'a> {
     pub installation: &'a str,
     pub base: &'a str,
