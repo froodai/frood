@@ -772,7 +772,7 @@ async fn verify_target(
         manifest["objects"]["files"].as_u64(),
     ) {
         let listed = restic
-            .run(&["ls", &id, path, "--json"])
+            .run(&["ls", &id, path, "--recursive", "--json"])
             .await
             .map_err(|e| fail(Some(&short), e))?;
         let got = String::from_utf8_lossy(&listed)
