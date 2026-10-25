@@ -170,6 +170,7 @@ test("spheres: a sign on each item, a filter, and a move in one click", async ({
   const row = page.getByRole("button", { name: /^Search moves to OpenSearch/ });
   await expect(row.getByText("Work · tech")).toBeVisible();
   await row.click();
+  await expect(page.getByRole("complementary").getByRole("heading", { level: 2 })).toHaveText(/^Search moves to OpenSearch/);
   const proposed = page.getByRole("complementary").getByRole("combobox", { name: "Sphere" });
   await proposed.click();
   await page.getByRole("option", { name: "Work · business" }).click();
