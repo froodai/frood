@@ -24,6 +24,7 @@ than the ones it needs to reach the database and the storages.
     { "name": "secrets.env.age", "data_base64": "YWdlLWVuY3J5cHRpb24ub3JnL3Yx…" }
   ],
   "about": { "frood_version": "0.0.1", "schema_version": 6 },
+  "objects": { "path": "/frood/objects" },
   "targets": [
     { "name": "disk", "repository": "/repos/disk", "password": "…", "env": {} },
     { "name": "b2", "repository": "s3:https://s3.eu-central-003.backblazeb2.com/frood-backups", "password": "…",
@@ -39,6 +40,10 @@ than the ones it needs to reach the database and the storages.
 - A target's repository is created on first use. `keep` is applied after each backup (restic's
   `forget --prune` rules, by installation).
 - One target failing does not stop the others.
+- `objects`, when given, is the installation's files folder (photos, videos, documents — docs/26
+  §2), mounted into the module at that path. It goes into the same snapshot, without names that
+  start with `.` or end with `.partial`; `manifest.json` counts its files (`objects`: `path`,
+  `files`, `bytes`). A folder that is not there is an error: the deployment did not mount it.
 
 Response:
 
@@ -47,6 +52,7 @@ Response:
   "made_at": "2026-10-20T03:00:04Z",
   "dump_bytes": 18234112,
   "tables": 31,
+  "objects": { "files": 214, "bytes": 401230111 },
   "targets": [
     { "name": "disk", "ok": true, "snapshot": "4f2a9c1e", "added_bytes": 1203311 },
     { "name": "b2", "ok": false, "error": "Fatal: unable to open config file: Stat: 403 Forbidden" }
@@ -62,7 +68,8 @@ Response:
 
 For each target: restore its latest backup of the installation, load the dump into a separate,
 temporary database on the same server, compare every table's row count with `manifest.json`,
-check the files are there, and drop the temporary database.
+check the files are there — and that the snapshot holds as many files of the files folder as
+the manifest counted — and drop the temporary database.
 
 Response:
 
@@ -86,6 +93,7 @@ the recovery key:
 | `manifest.json` | `installation`, `made_at`, `frood_version`, `schema_version`, `counts` (rows per table) |
 | `frood.yaml` | The config as written, with `${secret:…}` references |
 | `secrets.env.age` | The secrets file, encrypted to the recovery key ([age](https://age-encryption.org)) |
+| `<objects.path>/…` | The files folder, when the installation keeps files in one (`frood restore` puts it back) |
 
 Errors: 400 for a request the module cannot use (final); 5xx or `retryable: true` when the
 database is unreachable. Per-target failures are not errors: they are in the response.

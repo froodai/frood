@@ -22,6 +22,9 @@ pub enum LedgerError {
     AlreadyDecided(Uuid, ProposalState),
     #[error("database error: {0}")]
     Database(#[from] sqlx::Error),
+    /// The files store did not take or give a file.
+    #[error("files store: {0}")]
+    Files(String),
 }
 
 pub type Result<T> = std::result::Result<T, LedgerError>;

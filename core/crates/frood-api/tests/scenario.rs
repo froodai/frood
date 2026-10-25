@@ -312,7 +312,7 @@ async fn the_mvp_scenario() {
     let runs = Runs::default();
     let runtime = runtime(runs.clone()).await;
     let raw = format!(
-        "version: 1\ninstallation: {{name: scenario}}\nstorage: {{uses: postgres, url: 'postgres://unused'}}\n\
+        "version: 1\ninstallation: {{name: scenario}}\nstorage: {{uses: postgres, url: 'postgres://unused', objects: {{uses: database}}}}\n\
          deploy: {{server: host}}\n\
          accounts:\n  claude: {{ kind: api_key, provider: anthropic, secret: test, base_url: '{providers}' }}\n  \
          openai: {{ kind: api_key, provider: openai, secret: test, base_url: '{providers}' }}\n\

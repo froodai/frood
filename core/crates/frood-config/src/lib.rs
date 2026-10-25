@@ -15,8 +15,8 @@ pub use model::BUILT_IN_SPHERES;
 pub use model::{
     Account, AccountBudget, AskUser, Attention, AttentionPerson, AttentionRoute, Auth, AutoAccept,
     Backup, BackupKeep, BackupTarget, BeforeNotify, Budget, Config, Deploy, Detectors, Embeddings,
-    Installation, Job, ModelProvider, Module, OnExpire, Policies, Provider, Proxy, Reminder,
-    Search, Server, ServerPlacement, SituationMatch, Source, Sphere, Storage, Trigger,
+    Installation, Job, ModelProvider, Module, Objects, OnExpire, Policies, Provider, Proxy,
+    Reminder, Search, Server, ServerPlacement, SituationMatch, Source, Sphere, Storage, Trigger,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -153,6 +153,7 @@ fn validate(config: &Config) -> Result<(), ConfigError> {
     {
         problems.push("storage.url must be a postgres:// URL".to_owned());
     }
+    validate_objects(&config.storage.objects, &mut problems);
     if let Some(threshold) = config.policies.entity_merge_threshold
         && !(0.0..=1.0).contains(&threshold)
     {
@@ -183,6 +184,34 @@ fn validate(config: &Config) -> Result<(), ConfigError> {
         Ok(())
     } else {
         Err(ConfigError::Invalid(problems))
+    }
+}
+
+fn validate_objects(objects: &model::Objects, problems: &mut Vec<String>) {
+    let (limit, most) = match objects {
+        model::Objects::Database { .. } => (objects.max_mb(), 512),
+        _ => (objects.max_mb(), 4096),
+    };
+    if limit == 0 || limit > most {
+        problems.push(format!(
+            "storage.objects.max_mb {limit} must be between 1 and {most}"
+        ));
+    }
+    if let model::Objects::S3 {
+        endpoint, bucket, ..
+    } = objects
+    {
+        if !endpoint.starts_with("https://")
+            && !is_loopback_http(endpoint)
+            && !is_internal_http(endpoint)
+        {
+            problems.push(format!(
+                "storage.objects.endpoint {endpoint:?} must be an https:// address"
+            ));
+        }
+        if bucket.trim().is_empty() {
+            problems.push("storage.objects.bucket must not be empty".to_owned());
+        }
     }
 }
 
@@ -1291,6 +1320,37 @@ jobs:
             parse(&raw, &secrets()),
             Err(ConfigError::Invalid(_))
         ));
+    }
+
+    #[test]
+    fn files_go_to_a_folder_unless_the_config_says_otherwise() {
+        let loaded = parse(&template_for(ServerPlacement::Host), &secrets()).unwrap();
+        assert_eq!(loaded.config.storage.objects, Objects::default());
+        assert_eq!(loaded.config.storage.objects.max_mb(), 100);
+        let with = |objects: &str| {
+            template_for(ServerPlacement::Host).replace(
+                "storage:\n  uses: postgres\n",
+                &format!("storage:\n  uses: postgres\n  objects: {objects}\n"),
+            )
+        };
+        let s3 = parse(
+            &with("{ uses: s3, endpoint: 'https://s3.example', bucket: frood, access_key_id: k, secret_access_key: s }"),
+            &secrets(),
+        )
+        .unwrap();
+        assert!(matches!(s3.config.storage.objects, Objects::S3 { .. }));
+        let db = parse(&with("{ uses: database }"), &secrets()).unwrap();
+        assert_eq!(db.config.storage.objects.max_mb(), 25);
+        for bad in [
+            "{ uses: s3, endpoint: 'http://s3.example', bucket: frood, access_key_id: k, secret_access_key: s }",
+            "{ uses: disk, max_mb: 0 }",
+            "{ uses: database, max_mb: 1000 }",
+        ] {
+            assert!(
+                matches!(parse(&with(bad), &secrets()), Err(ConfigError::Invalid(_))),
+                "{bad}"
+            );
+        }
     }
 
     #[test]

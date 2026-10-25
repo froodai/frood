@@ -40,6 +40,9 @@ pub struct Ledger {
     policy: PolicyConfig,
     /// The installation's sphere ids; `None` takes any well-formed id.
     spheres: Option<std::sync::Arc<[String]>>,
+    /// Where files go, and the largest one taken.
+    objects: std::sync::Arc<frood_store::objects::Objects>,
+    max_file_bytes: usize,
 }
 
 impl Ledger {
@@ -48,7 +51,46 @@ impl Ledger {
             pool,
             policy,
             spheres: None,
+            objects: std::sync::Arc::new(frood_store::objects::Objects::Database),
+            max_file_bytes: MAX_BLOB_BYTES,
         }
+    }
+
+    /// Files go to this store (docs/26 §2), up to `max_mb` megabytes each.
+    pub fn with_objects(mut self, objects: frood_store::objects::Objects, max_mb: u32) -> Self {
+        self.objects = std::sync::Arc::new(objects);
+        self.max_file_bytes = max_mb as usize * 1_048_576;
+        self
+    }
+
+    /// The largest file a capture may carry.
+    pub fn max_file_bytes(&self) -> usize {
+        self.max_file_bytes
+    }
+
+    /// Moves up to `limit` files kept in the database to the files store; how many it moved.
+    /// Files stay in the database when that is the store.
+    pub async fn move_files_out(&self, limit: i64) -> Result<usize> {
+        if self.objects.is_database() {
+            return Ok(0);
+        }
+        let rows: Vec<(Uuid, String, Vec<u8>)> = sqlx::query_as(
+            "SELECT id, sha256, data FROM blobs WHERE stored = 'database' ORDER BY created_at LIMIT $1",
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+        for (id, sha, data) in &rows {
+            self.objects
+                .put(sha, data)
+                .await
+                .map_err(|e| LedgerError::Files(e.to_string()))?;
+            sqlx::query("UPDATE blobs SET data = NULL, stored = 'objects' WHERE id = $1")
+                .bind(id)
+                .execute(&self.pool)
+                .await?;
+        }
+        Ok(rows.len())
     }
 
     /// Only these spheres may be named (docs/26 §3); an empty list turns spheres off.
@@ -122,10 +164,10 @@ impl Ledger {
             if blob.data.is_empty() {
                 return Err(invalid("the file is empty"));
             }
-            if blob.data.len() > MAX_BLOB_BYTES {
+            if blob.data.len() > self.max_file_bytes {
                 return Err(invalid(format!(
                     "the file is larger than {} MB",
-                    MAX_BLOB_BYTES / 1_048_576
+                    self.max_file_bytes / 1_048_576
                 )));
             }
         }
@@ -161,20 +203,31 @@ impl Ledger {
             input.metadata
         };
         let content = (!input.content.trim().is_empty()).then_some(input.content.as_str());
+        // The file first: a row never points at a file that is not there.
+        let in_database = self.objects.is_database();
+        if let Some(blob) = &blob
+            && !in_database
+        {
+            self.objects
+                .put(&sha, &blob.data)
+                .await
+                .map_err(|e| LedgerError::Files(e.to_string()))?;
+        }
         let mut tx = self.pool.begin().await?;
         let blob_id = match &blob {
             Some(blob) => {
                 let blob_id = Uuid::now_v7();
                 sqlx::query(
-                    "INSERT INTO blobs (id, content_type, filename, size_bytes, sha256, data) \
-                     VALUES ($1, $2, $3, $4, $5, $6)",
+                    "INSERT INTO blobs (id, content_type, filename, size_bytes, sha256, data, stored) \
+                     VALUES ($1, $2, $3, $4, $5, $6, $7)",
                 )
                 .bind(blob_id)
                 .bind(&blob.content_type)
                 .bind(&blob.filename)
                 .bind(i32::try_from(blob.data.len()).unwrap_or(i32::MAX))
                 .bind(&sha)
-                .bind(&blob.data)
+                .bind(in_database.then_some(&blob.data))
+                .bind(if in_database { "database" } else { "objects" })
                 .execute(&mut *tx)
                 .await?;
                 Some(blob_id)
@@ -258,10 +311,10 @@ impl Ledger {
         query::sources(&self.pool, origin, before, limit).await
     }
 
-    /// The file of a source, with its bytes.
+    /// The file of a source, with its bytes: from the database or from the files store.
     pub async fn source_file(&self, source_id: Uuid) -> Result<(BlobInfo, Vec<u8>)> {
         let row = sqlx::query(
-            "SELECT b.id, b.content_type, b.filename, b.size_bytes, b.data FROM sources s \
+            "SELECT b.id, b.content_type, b.filename, b.size_bytes, b.sha256, b.data FROM sources s \
              JOIN blobs b ON b.id = s.blob_id WHERE s.id = $1",
         )
         .bind(source_id)
@@ -269,6 +322,14 @@ impl Ledger {
         .await?
         .ok_or_else(|| LedgerError::NotFound(format!("file of source {source_id}")))?;
         use sqlx::Row;
+        let data = match row.try_get::<Option<Vec<u8>>, _>("data")? {
+            Some(data) => data,
+            None => self
+                .objects
+                .get(row.try_get::<&str, _>("sha256")?)
+                .await
+                .map_err(|e| LedgerError::Files(e.to_string()))?,
+        };
         Ok((
             BlobInfo {
                 id: row.try_get("id")?,
@@ -276,7 +337,7 @@ impl Ledger {
                 filename: row.try_get("filename")?,
                 size_bytes: row.try_get("size_bytes")?,
             },
-            row.try_get("data")?,
+            data,
         ))
     }
 

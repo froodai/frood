@@ -18,12 +18,17 @@ struct Tokens {
 }
 
 async fn app(name: &str) -> Option<(Router, Tokens)> {
+    app_in(name, "{uses: database}", std::path::Path::new(".")).await
+}
+
+/// An app whose files go to the `objects` store, with `base` as the config's folder.
+async fn app_in(name: &str, objects: &str, base: &std::path::Path) -> Option<(Router, Tokens)> {
     let url = frood_store::testing::database_url()?;
     let pool = frood_store::testing::fresh_database(&url, name)
         .await
         .expect("test database");
     let config = frood_config::parse(
-        "version: 1\ninstallation: {name: test}\nstorage: {uses: postgres, url: 'postgres://unused'}\ndeploy: {server: host}\n",
+        &format!("version: 1\ninstallation: {{name: test}}\nstorage: {{uses: postgres, url: 'postgres://unused', objects: {objects}}}\ndeploy: {{server: host}}\n"),
         &frood_config::Secrets::from_pairs(Vec::<(String, String)>::new()),
     )
     .unwrap()
@@ -46,7 +51,7 @@ async fn app(name: &str) -> Option<(Router, Tokens)> {
         .create_personal_token(alice, "reader", &["knowledge:read".to_owned()], Some(1))
         .await
         .unwrap();
-    let app = router(frood_api::assemble(&config, std::path::Path::new("."), pool, |_| None).state);
+    let app = router(frood_api::assemble(&config, base, pool, |_| None).state);
     Some((
         app,
         Tokens {
@@ -510,7 +515,9 @@ fn multipart(text: &str, filename: &str, content_type: &str, data: &[u8]) -> (St
 /// page that would run downloads instead, one taken off, one on a change that waits.
 #[tokio::test]
 async fn attachments_on_knowledge_and_changes() {
-    let Some((app, tokens)) = app("api_attachments").await else {
+    // Files in a folder, as on a server.
+    let folder = tempfile::tempdir().unwrap();
+    let Some((app, tokens)) = app_in("api_attachments", "{uses: disk}", folder.path()).await else {
         eprintln!("FROOD_TEST_DATABASE_URL is not set; skipping");
         return;
     };
@@ -572,6 +579,17 @@ async fn attachments_on_knowledge_and_changes() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(headers["content-type"], "image/jpeg");
     assert_eq!(bytes, photo);
+    let objects = folder.path().join(".frood/objects");
+    let kept: Vec<_> = std::fs::read_dir(&objects)
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|e| e.path().is_dir())
+        .collect();
+    assert_eq!(
+        kept.len(),
+        1,
+        "the photo is in the folder, not in the database"
+    );
     // A page someone attached downloads, never runs.
     let (content_type, body) =
         multipart("", "page.html", "text/html", b"<script>alert(1)</script>");

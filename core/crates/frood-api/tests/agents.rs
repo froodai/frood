@@ -209,7 +209,7 @@ async fn agent_asks_waits_resumes_and_proposes() {
     let runtime = Shared::default();
     let fake = fake_runtime(runtime.clone()).await;
     let raw = format!(
-        "version: 1\ninstallation: {{name: test}}\nstorage: {{uses: postgres, url: 'postgres://unused'}}\n\
+        "version: 1\ninstallation: {{name: test}}\nstorage: {{uses: postgres, url: 'postgres://unused', objects: {{uses: database}}}}\n\
          deploy: {{server: host}}\n\
          accounts:\n  claude: {{ kind: api_key, provider: anthropic, secret: sk-test }}\n\
          jobs:\n  extract: {{ enabled: false }}\n  sweep:\n    uses: agents.execute\n    runtime: runtime\n    agent: claude-code\n    \
@@ -587,7 +587,7 @@ async fn schedules_tick_once_per_source() {
     let pool = frood_store::testing::fresh_database(&url, "schedules")
         .await
         .expect("test database");
-    let raw = "version: 1\ninstallation: {name: test}\nstorage: {uses: postgres, url: 'postgres://unused'}\n\
+    let raw = "version: 1\ninstallation: {name: test}\nstorage: {uses: postgres, url: 'postgres://unused', objects: {uses: database}}\n\
          deploy: {server: host}\n\
          accounts:\n  claude: { kind: api_key, provider: anthropic, secret: sk-test }\n\
          sources:\n  team-chat: { uses: mcp, server: 'http://team-chat:8080/mcp' }\n  \
@@ -675,7 +675,7 @@ async fn subscriptions_and_monthly_budgets() {
         )
     };
     let raw = format!(
-        "version: 1\ninstallation: {{name: test}}\nstorage: {{uses: postgres, url: 'postgres://unused'}}\n\
+        "version: 1\ninstallation: {{name: test}}\nstorage: {{uses: postgres, url: 'postgres://unused', objects: {{uses: database}}}}\n\
          deploy: {{server: host}}\n\
          accounts:\n  team: {{ kind: api_key, provider: anthropic, secret: sk-team, budget: {{ monthly_usd: 0.05 }} }}\n  \
          alice-max: {{ kind: subscription, provider: anthropic, owner: alice@example.com, secret: oauth-alice }}\n\
@@ -776,7 +776,7 @@ async fn daily_sweep_reads_its_source_and_proposes() {
     let runtime = Shared::default();
     let fake = fake_runtime(runtime.clone()).await;
     let raw = format!(
-        "version: 1\ninstallation: {{name: test}}\nstorage: {{uses: postgres, url: 'postgres://unused'}}\n\
+        "version: 1\ninstallation: {{name: test}}\nstorage: {{uses: postgres, url: 'postgres://unused', objects: {{uses: database}}}}\n\
          deploy: {{server: host}}\n\
          accounts:\n  claude: {{ kind: api_key, provider: anthropic, secret: sk-test }}\n\
          sources:\n  team-chat:\n    uses: mcp\n    server: 'http://team-chat:8080/mcp'\n    \

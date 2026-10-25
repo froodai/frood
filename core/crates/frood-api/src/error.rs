@@ -71,6 +71,14 @@ impl From<LedgerError> for ApiError {
                     "internal error; see server logs",
                 )
             }
+            LedgerError::Files(error) => {
+                tracing::error!(%error, "files store error");
+                Self::new(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "files-unavailable",
+                    "the files store did not answer; see server logs",
+                )
+            }
         }
     }
 }

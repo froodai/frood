@@ -26,6 +26,8 @@ pub struct BackupSetup {
     /// server sets them at start.
     pub config_yaml: Option<String>,
     pub secrets_env: Option<String>,
+    /// The files folder as the backup module sees it, when files go to a folder.
+    pub objects: Option<String>,
 }
 
 fn file(name: &str, data: &[u8]) -> Value {
@@ -84,6 +86,9 @@ pub(crate) async fn run(ctx: &Ctx, verify: bool) -> Result<Value, JobError> {
                 .await
                 .map_err(|e| JobError::transient(format!("database: {e}")))?;
         input["files"] = json!(files);
+        if let Some(path) = &setup.objects {
+            input["objects"] = json!({ "path": path });
+        }
         input["keep"] = json!(
             settings
                 .keep

@@ -1432,3 +1432,63 @@ async fn attachments_stay_with_knowledge() {
         Err(LedgerError::NotFound(_))
     ));
 }
+
+/// Files kept in the database move to a folder (docs/26 §2) and read the same afterwards.
+#[tokio::test]
+async fn files_move_from_the_database_to_a_folder() {
+    let ledger = ledger_or_skip!("ledger_files");
+    let voice = |data: &[u8]| NewBlob {
+        content_type: "audio/ogg".into(),
+        filename: Some("voice.oga".into()),
+        data: data.to_vec(),
+    };
+    let note = NewSource {
+        kind: "voice".into(),
+        origin: "capture".into(),
+        uri: None,
+        title: None,
+        content: String::new(),
+        said_at: None,
+        metadata: json!({}),
+    };
+    let old = ledger
+        .capture(&user(), note.clone(), Some(voice(b"OggS-old")))
+        .await
+        .unwrap()
+        .source;
+
+    let folder = tempfile::tempdir().unwrap();
+    let moved = ledger.clone().with_objects(
+        frood_store::objects::Objects::Disk {
+            root: folder.path().to_owned(),
+        },
+        1,
+    );
+    assert_eq!(moved.move_files_out(10).await.unwrap(), 1);
+    assert_eq!(moved.move_files_out(10).await.unwrap(), 0);
+    assert_eq!(moved.source_file(old.id).await.unwrap().1, b"OggS-old");
+
+    // New files go straight to the folder; the limit is the store's.
+    let new = moved
+        .capture(
+            &user(),
+            NewSource {
+                said_at: Some(day(2026, 9, 3)),
+                ..note.clone()
+            },
+            Some(voice(b"OggS-new")),
+        )
+        .await
+        .unwrap()
+        .source;
+    assert_eq!(moved.source_file(new.id).await.unwrap().1, b"OggS-new");
+    let in_database: i64 = sqlx::query_scalar("SELECT count(*) FROM blobs WHERE data IS NOT NULL")
+        .fetch_one(moved.pool())
+        .await
+        .unwrap();
+    assert_eq!(in_database, 0);
+    let too_big = moved
+        .capture(&user(), note, Some(voice(&vec![0; 1_048_577])))
+        .await;
+    assert!(matches!(too_big, Err(LedgerError::Invalid(_))));
+}

@@ -13,6 +13,11 @@ server:
 storage:
   uses: postgres
   url: postgres://frood:${secret:POSTGRES_PASSWORD}@${env:FROOD_DB_HOST:-127.0.0.1}:${env:FROOD_DB_PORT:-__PG_PORT__}/frood
+  # Files (photos, videos, voice messages, documents) go to .frood/objects next to this file;
+  # backups take them. Or an S3-compatible storage (docs/26 §2):
+  # objects: { uses: disk, max_mb: 100 }
+  # objects: { uses: s3, endpoint: 'https://s3.eu-central-003.backblazeb2.com', bucket: my-frood,
+  #            region: eu-central-003, access_key_id: '${secret:S3_KEY_ID}', secret_access_key: '${secret:S3_SECRET}' }
 
 deploy:
   target: compose

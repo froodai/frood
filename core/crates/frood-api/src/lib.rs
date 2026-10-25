@@ -57,6 +57,7 @@ pub fn assemble(
     token_of: impl Fn(&str) -> Option<String>,
 ) -> Assembly {
     let policies = &config.policies;
+    let (objects, max_mb, objects_warning) = files_store(config, base_dir);
     let ledger = Ledger::new(
         pool.clone(),
         frood_ledger::PolicyConfig {
@@ -64,7 +65,8 @@ pub fn assemble(
             entity_merge_threshold: policies.entity_merge_threshold,
         },
     )
-    .with_spheres(config.spheres.iter().map(|s| s.id.clone()).collect());
+    .with_spheres(config.spheres.iter().map(|s| s.id.clone()).collect())
+    .with_objects(objects, max_mb);
     let auth = Auth::new(pool, frood_auth::AuthSettings::from_config(config));
     let gateway = frood_llm::Gateway::new(&config.accounts);
     let searcher = frood_search::Searcher::new(ledger.clone(), gateway.clone(), &config.search);
@@ -76,7 +78,8 @@ pub fn assemble(
         modules: config.modules.len(),
         base_dir,
     };
-    let (jobs, warnings) = frood_dispatch::resolve(config, &caps);
+    let (jobs, mut warnings) = frood_dispatch::resolve(config, &caps);
+    warnings.extend(objects_warning);
     let mut dispatch = frood_dispatch::Dispatch::new(
         ledger.clone(),
         auth.clone(),
@@ -95,6 +98,8 @@ pub fn assemble(
             database_url: frood_modhost::database_url(config),
             config_yaml: None,
             secrets_env: None,
+            objects: matches!(config.storage.objects, frood_config::Objects::Disk { .. })
+                .then(|| OBJECTS_FOR_BACKUP.to_owned()),
         });
     }
     Assembly {
@@ -109,6 +114,111 @@ pub fn assemble(
         },
         modules,
         warnings,
+    }
+}
+
+/// Inside the server's container, the files folder `frood apply` mounts.
+pub const OBJECTS_IN_CONTAINER: &str = "/var/lib/frood/objects";
+/// Where the backup module sees the files folder `frood apply` mounts into it.
+pub const OBJECTS_FOR_BACKUP: &str = "/frood/objects";
+/// What `frood apply` leaves in a files folder it made, so the server knows the folder lasts.
+pub const OBJECTS_MARK: &str = ".frood-objects";
+
+/// The files store as the machine with `frood.yaml` reaches it — the folder itself, not the
+/// server container's mount — for `frood export` and `frood restore`.
+pub fn files_on_host(
+    config: &frood_config::Config,
+    base_dir: &std::path::Path,
+) -> Result<frood_store::objects::Objects, String> {
+    use frood_store::objects::{Objects, S3};
+    match &config.storage.objects {
+        frood_config::Objects::Database { .. } => Ok(Objects::Database),
+        frood_config::Objects::Disk { path, .. } => Ok(Objects::Disk {
+            root: base_dir.join(path.as_deref().unwrap_or(".frood/objects")),
+        }),
+        frood_config::Objects::S3 {
+            endpoint,
+            bucket,
+            region,
+            prefix,
+            access_key_id,
+            secret_access_key,
+            path_style,
+            ..
+        } => S3::new(
+            endpoint,
+            bucket,
+            region.as_deref(),
+            prefix.as_deref(),
+            access_key_id,
+            secret_access_key,
+            *path_style,
+        )
+        .map(Objects::S3)
+        .map_err(|e| e.to_string()),
+    }
+}
+
+/// The files store the config names (docs/26 §2), its size limit, and why the database keeps
+/// files instead when the store cannot be used.
+fn files_store(
+    config: &frood_config::Config,
+    base_dir: &std::path::Path,
+) -> (frood_store::objects::Objects, u32, Option<String>) {
+    use frood_store::objects::{Objects, S3};
+    let max_mb = config.storage.objects.max_mb();
+    let in_database = |why: String| (Objects::Database, max_mb.min(25), Some(why));
+    match &config.storage.objects {
+        frood_config::Objects::Database { .. } => (Objects::Database, max_mb, None),
+        frood_config::Objects::Disk { path, .. } => {
+            let root = match config.deploy.server {
+                frood_config::ServerPlacement::Container => {
+                    std::path::PathBuf::from(OBJECTS_IN_CONTAINER)
+                }
+                frood_config::ServerPlacement::Host => {
+                    base_dir.join(path.as_deref().unwrap_or(".frood/objects"))
+                }
+            };
+            // A folder the deployment did not mount would vanish with the container.
+            if !root.join(OBJECTS_MARK).exists() {
+                if config.deploy.server == frood_config::ServerPlacement::Container {
+                    return in_database(format!(
+                        "files stay in the database: {} is not the folder `frood apply` mounts; run `frood apply`",
+                        root.display()
+                    ));
+                }
+                if let Err(err) = std::fs::create_dir_all(&root)
+                    .and_then(|()| std::fs::write(root.join(OBJECTS_MARK), b""))
+                {
+                    return in_database(format!(
+                        "files stay in the database: cannot make {}: {err}",
+                        root.display()
+                    ));
+                }
+            }
+            (Objects::Disk { root }, max_mb, None)
+        }
+        frood_config::Objects::S3 {
+            endpoint,
+            bucket,
+            region,
+            prefix,
+            access_key_id,
+            secret_access_key,
+            path_style,
+            ..
+        } => match S3::new(
+            endpoint,
+            bucket,
+            region.as_deref(),
+            prefix.as_deref(),
+            access_key_id,
+            secret_access_key,
+            *path_style,
+        ) {
+            Ok(s3) => (Objects::S3(s3), max_mb, None),
+            Err(err) => in_database(format!("files stay in the database: {err}")),
+        },
     }
 }
 
@@ -134,8 +244,8 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/version", get(version))
         .merge(ledger::routes())
         .merge(account::routes())
-        .merge(capture::routes())
-        .merge(attachments::routes())
+        .merge(capture::routes(state.ledger.max_file_bytes()))
+        .merge(attachments::routes(state.ledger.max_file_bytes()))
         .merge(channels::routes())
         .merge(work::routes())
         .merge(inbox::routes())
@@ -194,6 +304,8 @@ async fn version(State(state): State<AppState>) -> Json<Value> {
         "config_sha256": state.config_sha256,
         // For links from channels to the console; only with a public address.
         "console": state.auth.settings().console_url(),
+        // The largest file a capture or an attachment may carry.
+        "max_file_mb": state.ledger.max_file_bytes() / 1_048_576,
     }))
 }
 
@@ -210,7 +322,7 @@ mod tests {
         // Nothing listens on port 1, so readiness fails fast without a real database.
         let pool = frood_store::connect_lazy("postgres://frood:x@127.0.0.1:1/frood").unwrap();
         let config = frood_config::parse(
-            "version: 1\ninstallation: {name: test}\nstorage: {uses: postgres, url: 'postgres://x'}\ndeploy: {server: host}\n",
+            "version: 1\ninstallation: {name: test}\nstorage: {uses: postgres, url: 'postgres://x', objects: {uses: database}}\ndeploy: {server: host}\n",
             &frood_config::Secrets::from_pairs(Vec::<(String, String)>::new()),
         )
         .unwrap()
@@ -272,5 +384,9 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["installation"], "test");
         assert_eq!(body["api"], "v1");
+        assert_eq!(
+            body["max_file_mb"], 25,
+            "the test keeps files in the database"
+        );
     }
 }

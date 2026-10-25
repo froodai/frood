@@ -151,6 +151,8 @@ pub async fn record_config_revision(
 }
 
 /// Test helpers shared with other crates' integration tests.
+pub mod objects;
+
 pub mod testing {
     use super::*;
 

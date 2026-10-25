@@ -18,12 +18,11 @@ use crate::AppState;
 use crate::auth::{Caller, Capture, auth_error};
 use crate::error::ApiError;
 
-pub fn routes() -> Router<AppState> {
+/// `max_file` is the largest file the files store takes.
+pub fn routes(max_file: usize) -> Router<AppState> {
     Router::new().route(
         "/v1/capture",
-        post(capture).layer(DefaultBodyLimit::max(
-            frood_ledger::MAX_BLOB_BYTES + (1 << 20),
-        )),
+        post(capture).layer(DefaultBodyLimit::max(max_file + (1 << 20))),
     )
 }
 

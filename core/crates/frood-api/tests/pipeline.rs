@@ -209,7 +209,7 @@ async fn voice_and_notes_become_knowledge() {
         .expect("test database");
     let fake = providers().await;
     let raw = format!(
-        "version: 1\ninstallation: {{name: test}}\nstorage: {{uses: postgres, url: 'postgres://unused'}}\n\
+        "version: 1\ninstallation: {{name: test}}\nstorage: {{uses: postgres, url: 'postgres://unused', objects: {{uses: database}}}}\n\
          deploy: {{server: host}}\n\
          accounts:\n  claude: {{ kind: api_key, provider: anthropic, secret: test, base_url: '{fake}' }}\n  \
          openai: {{ kind: api_key, provider: openai, secret: test, base_url: '{fake}' }}\n\

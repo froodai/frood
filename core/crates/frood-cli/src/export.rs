@@ -82,6 +82,10 @@ const TABLES: &[Table] = &[
         file: "config_revisions.jsonl",
         query: rows_of!("config_revisions", "id"),
     },
+    Table {
+        file: "attachments.jsonl",
+        query: rows_of!("attachments", "added_at, id"),
+    },
 ];
 
 /// What an export holds, by file.
@@ -91,7 +95,13 @@ pub struct Exported {
     pub entities: usize,
 }
 
-pub async fn export(pool: &PgPool, installation: &str, out: &Path) -> anyhow::Result<Exported> {
+/// `objects` is where files are when the database does not keep them.
+pub async fn export(
+    pool: &PgPool,
+    objects: &frood_store::objects::Objects,
+    installation: &str,
+    out: &Path,
+) -> anyhow::Result<Exported> {
     if out.exists() && out.read_dir()?.next().is_some() {
         anyhow::bail!("{} is not empty; export into a new folder", out.display());
     }
@@ -117,7 +127,14 @@ pub async fn export(pool: &PgPool, installation: &str, out: &Path) -> anyhow::Re
     let mut index = std::io::BufWriter::new(std::fs::File::create(out.join("files.jsonl"))?);
     for blob in &blobs {
         let id: uuid::Uuid = blob.try_get("id")?;
-        let data: Vec<u8> = blob.try_get("data")?;
+        let sha: String = blob.try_get("sha256")?;
+        let data = match blob.try_get::<Option<Vec<u8>>, _>("data")? {
+            Some(data) => data,
+            None => objects
+                .get(&sha)
+                .await
+                .map_err(|e| anyhow::anyhow!("file {id}: {e}"))?,
+        };
         let filename: Option<String> = blob.try_get("filename")?;
         let path = format!("files/{id}");
         std::fs::write(out.join(&path), &data)?;
@@ -127,7 +144,7 @@ pub async fn export(pool: &PgPool, installation: &str, out: &Path) -> anyhow::Re
             "content_type": blob.try_get::<String, _>("content_type")?,
             "filename": filename,
             "size_bytes": blob.try_get::<i32, _>("size_bytes")?,
-            "sha256": blob.try_get::<String, _>("sha256")?,
+            "sha256": sha,
             "created_at": blob.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")?,
         });
         writeln!(index, "{line}")?;
@@ -333,7 +350,14 @@ mod tests {
 
         let dir = tempfile::tempdir().unwrap();
         let out = dir.path().join("export");
-        let exported = export(&pool, "test", &out).await.unwrap();
+        let exported = export(
+            &pool,
+            &frood_store::objects::Objects::Database,
+            "test",
+            &out,
+        )
+        .await
+        .unwrap();
         // Bitemporal: the superseded record, its validity segment and the new version.
         assert_eq!(exported.counts["assertion_versions.jsonl"], 3);
         assert_eq!(exported.entities, 1);
@@ -379,7 +403,16 @@ mod tests {
             "{page}"
         );
         // Exports go into a new folder only.
-        assert!(export(&pool, "test", &out).await.is_err());
+        assert!(
+            export(
+                &pool,
+                &frood_store::objects::Objects::Database,
+                "test",
+                &out
+            )
+            .await
+            .is_err()
+        );
     }
 
     #[test]
