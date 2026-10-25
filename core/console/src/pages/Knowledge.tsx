@@ -3,6 +3,7 @@ import { Search } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { toast } from "sonner";
+import { Attachments } from "@/components/attachments";
 import { KindBadge, SphereBadge, SphereFilter, SpherePicker } from "@/components/badges";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -161,6 +162,7 @@ function History({ id }: { id: string }) {
         <h2 className="text-[15px] leading-snug font-semibold">{title}</h2>
         {full !== title && <p className="text-sm leading-relaxed text-foreground/85">{full}</p>}
       </div>
+      <Attachments target={`assertions/${id}`} />
       <span className="text-xs text-muted-foreground">{t("knowledge.history")}</span>
       <ol className="flex flex-col">
         {entries.map(({ v, live, corrected }, i) => (

@@ -11,6 +11,7 @@
 //! channel name), `FROOD_MODULE_CONFIG` (`{"language": "en"}`: en, zh, es, hi, ar, fr, pt or ru), `TELEGRAM_BOT_TOKEN`,
 //! optionally `TELEGRAM_API_URL`, `PORT` (8080, for `/manifest` and `/healthz`).
 
+mod attach;
 mod commands;
 mod lang;
 mod notify;
@@ -81,6 +82,47 @@ struct Message {
     audio: Option<FileRef>,
     #[serde(default)]
     document: Option<FileRef>,
+    /// Sizes of one photo, the largest last.
+    #[serde(default)]
+    photo: Option<Vec<FileRef>>,
+    #[serde(default)]
+    video: Option<FileRef>,
+    #[serde(default)]
+    video_note: Option<FileRef>,
+    /// The message this one answers, with its buttons.
+    #[serde(default)]
+    reply_to_message: Option<Box<Replied>>,
+}
+
+#[derive(Deserialize, Clone)]
+struct Replied {
+    message_id: i64,
+    #[serde(default)]
+    reply_markup: Option<Value>,
+}
+
+impl Message {
+    /// The file the message carries, with what kind of source it makes: a voice message,
+    /// audio, a photo (its largest size), a video or a document.
+    fn file(&self) -> Option<(&FileRef, &'static str)> {
+        self.voice
+            .as_ref()
+            .map(|f| (f, "voice"))
+            .or_else(|| self.audio.as_ref().map(|f| (f, "audio")))
+            .or_else(|| {
+                self.photo
+                    .as_ref()
+                    .and_then(|p| p.last())
+                    .map(|f| (f, "photo"))
+            })
+            .or_else(|| {
+                self.video
+                    .as_ref()
+                    .or(self.video_note.as_ref())
+                    .map(|f| (f, "video"))
+            })
+            .or_else(|| self.document.as_ref().map(|f| (f, "file")))
+    }
 }
 
 #[derive(Deserialize, Clone)]
@@ -272,14 +314,12 @@ impl Bot {
             }
             _ => {}
         }
+        // A file or a link in reply to a card goes with the knowledge on that card.
+        if self.attach_reply(&message, &external_id).await {
+            return;
+        }
         let said_at = message.date.map(|d| d.to_string());
-        let captured = match message
-            .voice
-            .as_ref()
-            .map(|f| (f, "voice"))
-            .or_else(|| message.audio.as_ref().map(|f| (f, "audio")))
-            .or_else(|| message.document.as_ref().map(|f| (f, "file")))
-        {
+        let captured = match message.file() {
             Some((file, kind)) => {
                 self.capture_file(
                     file,
@@ -338,6 +378,47 @@ impl Bot {
         captured(response).await
     }
 
+    /// A file of a message as a part of a form: its bytes from Telegram, its type and name.
+    pub(crate) async fn file_part(
+        &self,
+        file: &FileRef,
+        kind: &str,
+    ) -> Result<reqwest::multipart::Part, String> {
+        let info = self
+            .telegram("getFile", json!({ "file_id": file.file_id }))
+            .await?;
+        let path = info["file_path"]
+            .as_str()
+            .ok_or_else(|| "Telegram gave no file path".to_owned())?;
+        let data = self
+            .http
+            .get(format!("{}/{path}", self.files))
+            .send()
+            .await
+            .and_then(reqwest::Response::error_for_status)
+            .map_err(redact)?
+            .bytes()
+            .await
+            .map_err(redact)?;
+        let content_type = file.mime_type.clone().unwrap_or_else(|| {
+            match kind {
+                "voice" => "audio/ogg",
+                "photo" => "image/jpeg",
+                "video" => "video/mp4",
+                _ => "application/octet-stream",
+            }
+            .to_owned()
+        });
+        let filename = file
+            .file_name
+            .clone()
+            .unwrap_or_else(|| path.rsplit('/').next().unwrap_or("file").to_owned());
+        reqwest::multipart::Part::bytes(data.to_vec())
+            .file_name(filename)
+            .mime_str(&content_type)
+            .map_err(|e| e.to_string())
+    }
+
     async fn capture_file(
         &self,
         file: &FileRef,
@@ -346,35 +427,7 @@ impl Bot {
         external_id: &str,
         said_at: Option<&str>,
     ) -> Result<(bool, String), Captured> {
-        let info = self
-            .telegram("getFile", json!({ "file_id": file.file_id }))
-            .await
-            .map_err(Captured::Failed)?;
-        let path = info["file_path"]
-            .as_str()
-            .ok_or_else(|| Captured::Failed("Telegram gave no file path".into()))?;
-        let data = self
-            .http
-            .get(format!("{}/{path}", self.files))
-            .send()
-            .await
-            .and_then(reqwest::Response::error_for_status)
-            .map_err(|e| Captured::Failed(redact(e)))?
-            .bytes()
-            .await
-            .map_err(|e| Captured::Failed(redact(e)))?;
-        let content_type = file.mime_type.clone().unwrap_or_else(|| match kind {
-            "voice" => "audio/ogg".to_owned(),
-            _ => "application/octet-stream".to_owned(),
-        });
-        let filename = file
-            .file_name
-            .clone()
-            .unwrap_or_else(|| path.rsplit('/').next().unwrap_or("file").to_owned());
-        let part = reqwest::multipart::Part::bytes(data.to_vec())
-            .file_name(filename)
-            .mime_str(&content_type)
-            .map_err(|e| Captured::Failed(e.to_string()))?;
+        let part = self.file_part(file, kind).await.map_err(Captured::Failed)?;
         let mut form = reqwest::multipart::Form::new()
             .text("kind", kind.to_owned())
             .text("external_id", external_id.to_owned())
@@ -729,6 +782,36 @@ mod tests {
         acts: Vec<Value>,
         answered: Vec<Value>,
         withdrawn: Vec<Value>,
+        attached: Vec<Value>,
+    }
+
+    /// A form or JSON body as one object; a file as its type and text.
+    async fn record(headers: &HeaderMap, request: axum::extract::Request) -> Value {
+        let is_multipart = headers
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|v| v.starts_with("multipart/"));
+        let mut record = json!({});
+        if is_multipart {
+            use axum::extract::FromRequest;
+            let mut form = Multipart::from_request(request, &()).await.unwrap();
+            while let Some(field) = form.next_field().await.unwrap() {
+                let name = field.name().unwrap().to_owned();
+                if name == "file" {
+                    record["content_type"] = json!(field.content_type());
+                    record["file"] =
+                        json!(String::from_utf8(field.bytes().await.unwrap().to_vec()).unwrap());
+                } else {
+                    record[name] = json!(field.text().await.unwrap());
+                }
+            }
+        } else {
+            let bytes = axum::body::to_bytes(request.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            record = serde_json::from_slice(&bytes).unwrap();
+        }
+        record
     }
 
     type Shared = Arc<Mutex<World>>;
@@ -746,10 +829,25 @@ mod tests {
                 Json(json!({ "ok": true, "result": true }))
             }))
             .route("/botTOKEN/getFile", post(|Json(b): Json<Value>| async move {
-                assert_eq!(b["file_id"], "voice-1");
-                Json(json!({ "ok": true, "result": { "file_id": "voice-1", "file_path": "voice/file_7.oga" } }))
+                let path = match b["file_id"].as_str() {
+                    Some("voice-1") => "voice/file_7.oga",
+                    Some("photo-1") => "photos/file_9.jpg",
+                    other => panic!("no such file {other:?}"),
+                };
+                Json(json!({ "ok": true, "result": { "file_id": b["file_id"], "file_path": path } }))
             }))
             .route("/file/botTOKEN/voice/file_7.oga", get(|| async { b"OggS-voice".to_vec() }))
+            .route("/file/botTOKEN/photos/file_9.jpg", get(|| async { b"JPEG-board".to_vec() }))
+            .route("/v1/proposals/{id}/attachments", post(|State(w): State<Shared>, Path(id): Path<String>, headers: HeaderMap, request: axum::extract::Request| async move {
+                let mut attached = record(&headers, request).await;
+                attached["proposal"] = json!(id);
+                w.lock().unwrap().attached.push(attached);
+                (axum::http::StatusCode::CREATED, Json(json!([])))
+            }))
+            .route("/v1/channels/telegram/messages/{message_ref}", get(|Path(message_ref): Path<String>| async move {
+                assert_eq!(message_ref, "77:901");
+                Json(json!({ "item": { "id": "item-1" } }))
+            }))
             .route("/v1/channels/telegram/links", post(|State(w): State<Shared>, headers: HeaderMap, Json(b): Json<Value>| async move {
                 assert_eq!(headers["authorization"], "Bearer module-token");
                 w.lock().unwrap().links.push(b);
@@ -761,24 +859,7 @@ mod tests {
                     .delete(|Path(_id): Path<String>| async { axum::http::StatusCode::NO_CONTENT }),
             )
             .route("/v1/capture", post(|State(w): State<Shared>, headers: HeaderMap, request: axum::extract::Request| async move {
-                let is_multipart = headers.get("content-type").and_then(|v| v.to_str().ok()).is_some_and(|v| v.starts_with("multipart/"));
-                let mut record = json!({});
-                if is_multipart {
-                    use axum::extract::FromRequest;
-                    let mut form = Multipart::from_request(request, &()).await.unwrap();
-                    while let Some(field) = form.next_field().await.unwrap() {
-                        let name = field.name().unwrap().to_owned();
-                        if name == "file" {
-                            record["content_type"] = json!(field.content_type());
-                            record["file"] = json!(String::from_utf8(field.bytes().await.unwrap().to_vec()).unwrap());
-                        } else {
-                            record[name] = json!(field.text().await.unwrap());
-                        }
-                    }
-                } else {
-                    let bytes = axum::body::to_bytes(request.into_body(), usize::MAX).await.unwrap();
-                    record = serde_json::from_slice(&bytes).unwrap();
-                }
+                let record = record(&headers, request).await;
                 let stranger = record["external_id"] == "99";
                 w.lock().unwrap().captures.push(record);
                 if stranger {
@@ -842,7 +923,7 @@ mod tests {
     fn card(id: &str) -> Value {
         json!({
             "item": { "id": id, "kind": "proposal", "state": "open" },
-            "content": { "risk": "conflict", "alternatives": [{ "key": "default", "changes": [{ "before": "Релиз — 14.11", "after": "Релиз — 28.11" }] }] },
+            "content": { "proposal_id": "p-1", "risk": "conflict", "alternatives": [{ "key": "default", "changes": [{ "before": "Релиз — 14.11", "after": "Релиз — 28.11" }] }] },
             "actions": [{ "action": "accept", "alternative": "default" }, { "action": "reject" }]
         })
     }
@@ -953,7 +1034,7 @@ mod tests {
         let bot = bot(&url, Lang::Ru);
         let shown = json!({
             "item": { "id": "item-1", "kind": "proposal", "state": "open" },
-            "content": { "risk": "conflict", "alternatives": [{ "key": "default", "changes": [{ "before": "Релиз — 14.11", "after": "Релиз — 28.11" }] }] },
+            "content": { "proposal_id": "p-1", "risk": "conflict", "alternatives": [{ "key": "default", "changes": [{ "before": "Релиз — 14.11", "after": "Релиз — 28.11" }] }] },
             "actions": [{ "action": "accept", "alternative": "default" }, { "action": "reject" }]
         });
         let out = bot
@@ -1066,5 +1147,58 @@ mod tests {
             .as_str()
             .unwrap();
         assert!(undo.starts_with("B:"), "{undo}");
+    }
+
+    #[tokio::test]
+    async fn a_photo_or_a_link_in_reply_to_a_card_is_attached_to_it() {
+        let (url, world) = world().await;
+        let bot = bot(&url, Lang::Ru);
+        // The card's buttons name the item.
+        bot.handle(message(42, json!({
+            "photo": [{ "file_id": "small" }, { "file_id": "photo-1" }],
+            "caption": "доска после демо",
+            "reply_to_message": { "message_id": 900, "reply_markup": { "inline_keyboard": [[{ "text": "Принять", "callback_data": "i:item-1:0" }]] } }
+        })))
+        .await;
+        // A card without buttons any more: Frood remembers which item the message showed.
+        bot.handle(message(
+            42,
+            json!({
+                "text": "макет тут: https://figma.example/file/42",
+                "reply_to_message": { "message_id": 901 }
+            }),
+        ))
+        .await;
+        let w = world.lock().unwrap();
+        assert!(w.captures.is_empty(), "not notes of their own");
+        let photo = &w.attached[0];
+        assert_eq!(photo["proposal"], "p-1");
+        assert_eq!(photo["external_id"], "42");
+        assert_eq!(photo["content_type"], "image/jpeg");
+        assert_eq!(photo["file"], "JPEG-board");
+        assert_eq!(photo["text"], "доска после демо");
+        assert_eq!(w.attached[1]["uri"], "https://figma.example/file/42");
+        let replies: Vec<&str> = w.sent.iter().filter_map(|s| s["text"].as_str()).collect();
+        assert!(
+            replies
+                .iter()
+                .all(|r| r.starts_with("📎 Прикрепил к «Релиз — 28.11»")),
+            "{replies:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_photo_alone_is_a_note() {
+        let (url, world) = world().await;
+        let bot = bot(&url, Lang::En);
+        bot.handle(message(
+            42,
+            json!({ "photo": [{ "file_id": "photo-1" }], "caption": "the board" }),
+        ))
+        .await;
+        let w = world.lock().unwrap();
+        assert_eq!(w.captures[0]["kind"], "photo");
+        assert_eq!(w.captures[0]["content_type"], "image/jpeg");
+        assert_eq!(w.captures[0]["text"], "the board");
     }
 }

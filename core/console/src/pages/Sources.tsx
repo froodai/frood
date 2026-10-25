@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FileAudio, FileText, MessagesSquare, Paperclip, Plus } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import { SourceFile } from "@/components/attachments";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -11,7 +12,7 @@ import { useI18n } from "@/i18n";
 import type { Key } from "@/i18n/en";
 import { api } from "@/lib/frood";
 import { useHealth, useMe } from "@/lib/queries";
-import type { Health } from "@/lib/types";
+import type { FileInfo, Health } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Dot } from "./System";
 
@@ -27,7 +28,7 @@ type SourceSummary = {
   withdrawn_at: string | null;
   content_type: string | null;
 };
-type Source = SourceSummary & { content: string | null; uri: string | null };
+type Source = SourceSummary & { content: string | null; uri: string | null; file?: FileInfo | null };
 type Status = {
   state: string;
   proposals: { id: string; state: string; risk: string; alternatives: { operations: { op: string; assertion?: { text: string } }[] }[] }[];
@@ -74,13 +75,22 @@ function Captured() {
   const who = useWho();
   const client = useQueryClient();
   const [text, setText] = useState("");
+  const [file, setFile] = useState<File | null>(null);
   const [only, setOnly] = useState<"all" | "notes" | "read">("all");
   const [open, setOpen] = useState<string | null>(null);
   const list = useQuery({ queryKey: ["sources"], queryFn: () => api<SourceSummary[]>("/v1/sources?limit=100"), refetchInterval: 30_000 });
   const note = useMutation({
-    mutationFn: (body: string) => api("/v1/capture", { method: "POST", json: { text: body, kind: "note" } }),
+    mutationFn: (body: string) => {
+      if (!file) return api("/v1/capture", { method: "POST", json: { text: body, kind: "note" } });
+      // A photo, a video or a document with the words about it.
+      const form = new FormData();
+      if (body) form.append("text", body);
+      form.append("file", file, file.name);
+      return api("/v1/capture", { method: "POST", form });
+    },
     onSuccess: () => {
       setText("");
+      setFile(null);
       toast.success(t("sources.noted"));
       client.invalidateQueries({ queryKey: ["sources"] });
     },
@@ -94,7 +104,7 @@ function Captured() {
         className="flex flex-col gap-2 rounded-xl border bg-card p-3"
         onSubmit={(e) => {
           e.preventDefault();
-          if (text.trim()) note.mutate(text.trim());
+          if (text.trim() || file) note.mutate(text.trim());
         }}
       >
         <Textarea
@@ -104,9 +114,24 @@ function Captured() {
           aria-label={t("sources.notePlaceholder")}
           className="min-h-20 resize-y border-0 shadow-none focus-visible:ring-0"
         />
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-xs text-muted-foreground">{t("sources.noteHint")}</span>
-          <Button type="submit" size="sm" disabled={!text.trim() || note.isPending}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <label className="inline-flex size-8 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground" aria-label={t("attach.add")} title={t("attach.add")}>
+              <Paperclip className="size-4" aria-hidden />
+              <input type="file" hidden onChange={(e) => (setFile(e.target.files?.[0] ?? null), (e.target.value = ""))} />
+            </label>
+            {file ? (
+              <span className="inline-flex min-w-0 items-center gap-1 rounded-md border px-2 py-0.5 text-xs">
+                <span className="truncate">{file.name}</span>
+                <button type="button" onClick={() => setFile(null)} aria-label={t("attach.remove")} className="text-muted-foreground hover:text-foreground">
+                  ×
+                </button>
+              </span>
+            ) : (
+              <span className="text-xs text-muted-foreground">{t("sources.noteHint")}</span>
+            )}
+          </div>
+          <Button type="submit" size="sm" disabled={(!text.trim() && !file) || note.isPending}>
             {t("sources.note")}
           </Button>
         </div>
@@ -216,6 +241,7 @@ function SourceDetail({ id, onDone }: { id: string; onDone: () => void }) {
         </span>
         {s.title && <h2 className="text-lg font-semibold">{s.title}</h2>}
       </div>
+      {s.file && <SourceFile sourceId={s.id} kind={s.kind} file={s.file} title={s.title} />}
       {s.content && <p className={cn("text-sm whitespace-pre-line", s.withdrawn_at && "text-muted-foreground line-through")}>{s.content}</p>}
       {s.uri && (
         <a href={s.uri} target="_blank" rel="noreferrer" className="text-sm break-all">

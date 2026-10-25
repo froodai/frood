@@ -48,7 +48,9 @@ person's channel account in `external_id`: the action is that linked person's
     `sphere`, the sphere of life it goes to — `tech`, `business`, `personal` or the
     installation's own, named by `GET /v1/spheres` — or null; `before` / `after` texts —
     `before` is null for new knowledge, `after` is null for a closing; a move to another sphere
-    has `sphere_before` too),
+    has `sphere_before` too), `attachments` — photos, videos, documents and links kept with the
+    change or with the knowledge it changes (`kind`, `title`, `uri`, `text`, `file` with
+    `content_type` and `filename`, `source_id`; the file is `GET /v1/sources/{source_id}/file`),
     and `origin` (`uri`, `title`) — where to open the original, an http or https address — or
     null;
   - `question`: `text`, `options`, `context`, `job`;

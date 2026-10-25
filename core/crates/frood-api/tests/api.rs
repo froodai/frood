@@ -460,3 +460,198 @@ async fn spheres_list_filter_and_move() {
     assert_eq!(after["sphere"], "personal");
     assert_eq!(after["text"], "Atlas moves to Postgres 18 in December");
 }
+
+/// A raw request: a body of any type, the answer's bytes and headers.
+async fn raw(
+    app: &Router,
+    method: &str,
+    path: &str,
+    token: &str,
+    content_type: Option<&str>,
+    body: Vec<u8>,
+) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
+    let mut request = Request::builder()
+        .method(method)
+        .uri(path)
+        .header("authorization", format!("Bearer {token}"));
+    if let Some(content_type) = content_type {
+        request = request.header("content-type", content_type);
+    }
+    let response = app
+        .clone()
+        .oneshot(request.body(Body::from(body)).unwrap())
+        .await
+        .unwrap();
+    let status = response.status();
+    let headers = response.headers().clone();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    (status, headers, bytes.to_vec())
+}
+
+fn multipart(text: &str, filename: &str, content_type: &str, data: &[u8]) -> (String, Vec<u8>) {
+    let boundary = "frood-test-boundary";
+    let mut body = Vec::new();
+    body.extend_from_slice(
+        format!("--{boundary}\r\nContent-Disposition: form-data; name=\"text\"\r\n\r\n{text}\r\n")
+            .as_bytes(),
+    );
+    body.extend_from_slice(
+        format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{filename}\"\r\nContent-Type: {content_type}\r\n\r\n"
+        )
+        .as_bytes(),
+    );
+    body.extend_from_slice(data);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    (format!("multipart/form-data; boundary={boundary}"), body)
+}
+
+/// Attachments over HTTP (docs/26 §2): a photo and a link on knowledge, the file to show, a
+/// page that would run downloads instead, one taken off, one on a change that waits.
+#[tokio::test]
+async fn attachments_on_knowledge_and_changes() {
+    let Some((app, tokens)) = app("api_attachments").await else {
+        eprintln!("FROOD_TEST_DATABASE_URL is not set; skipping");
+        return;
+    };
+    let token = tokens.alice.as_str();
+    let alice = Some(token);
+    let note = json!({ "kind": "note", "content": "Atlas demo on Friday" });
+    let (_, captured, _) = call(&app, "POST", "/v1/sources", alice, Some(note)).await;
+    let evidence = captured["source"]["evidence"][0]["id"].clone();
+    let fact = commitment(
+        "Atlas demo on Friday",
+        "2026-09-04",
+        "2026-09-02T12:00:00Z",
+        &evidence,
+    );
+    call(
+        &app,
+        "POST",
+        "/v1/proposals",
+        alice,
+        Some(json!({ "risk": "new", "operations": [{ "op": "create", "assertion": fact }] })),
+    )
+    .await;
+    let (_, list, _) = call(&app, "GET", "/v1/assertions?kind=commitment", alice, None).await;
+    let id = list[0]["assertion_id"].as_str().unwrap().to_owned();
+    let path = format!("/v1/assertions/{id}/attachments");
+
+    let photo = [0xff, 0xd8, 0xff, 0xe0, 1, 2, 3];
+    let (content_type, body) = multipart("the demo board", "board.jpg", "image/jpeg", &photo);
+    let (status, _, bytes) = raw(&app, "POST", &path, token, Some(&content_type), body).await;
+    let attached: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(status, StatusCode::CREATED, "{attached}");
+    assert_eq!(attached[0]["kind"], "photo");
+    assert_eq!(attached[0]["text"], "the demo board");
+    let source = attached[0]["source_id"].as_str().unwrap().to_owned();
+
+    let (status, link, _) = call(
+        &app,
+        "POST",
+        &path,
+        alice,
+        Some(json!({ "uri": "https://docs.example/demo", "title": "Demo plan" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{link}");
+    assert_eq!(link[0]["kind"], "link");
+    let (_, all, _) = call(&app, "GET", &path, alice, None).await;
+    assert_eq!(all.as_array().unwrap().len(), 2);
+
+    // The picture opens in place.
+    let (status, headers, bytes) = raw(
+        &app,
+        "GET",
+        &format!("/v1/sources/{source}/file"),
+        token,
+        None,
+        vec![],
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers["content-type"], "image/jpeg");
+    assert_eq!(bytes, photo);
+    // A page someone attached downloads, never runs.
+    let (content_type, body) =
+        multipart("", "page.html", "text/html", b"<script>alert(1)</script>");
+    let (_, _, bytes) = raw(&app, "POST", &path, token, Some(&content_type), body).await;
+    let page: Value = serde_json::from_slice(&bytes).unwrap();
+    let page_source = page[0]["source_id"].as_str().unwrap();
+    let (_, headers, _) = raw(
+        &app,
+        "GET",
+        &format!("/v1/sources/{page_source}/file"),
+        token,
+        None,
+        vec![],
+    )
+    .await;
+    assert_eq!(headers["content-type"], "application/octet-stream");
+    assert!(
+        headers["content-disposition"]
+            .to_str()
+            .unwrap()
+            .starts_with("attachment;")
+    );
+
+    // Taken off.
+    let page_id = page[0]["id"].as_str().unwrap();
+    let (status, _, _) = call(
+        &app,
+        "DELETE",
+        &format!("/v1/attachments/{page_id}"),
+        alice,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, all, _) = call(&app, "GET", &path, alice, None).await;
+    assert_eq!(all.as_array().unwrap().len(), 2);
+
+    // A change that waits shows what is attached to it and to the knowledge it changes.
+    let (_, current, _) = call(&app, "GET", &format!("/v1/assertions/{id}"), alice, None).await;
+    let change = commitment(
+        "Atlas demo moves to Monday",
+        "2026-09-07",
+        "2026-09-03T12:00:00Z",
+        &evidence,
+    );
+    let (_, waiting, _) = call(
+        &app,
+        "POST",
+        "/v1/proposals",
+        alice,
+        Some(json!({ "risk": "change",
+                     "base": [{ "assertion_id": id, "version": current["version"] }],
+                     "operations": [{ "op": "supersede", "assertion_id": id, "assertion": change }] })),
+    )
+    .await;
+    let pid = waiting["id"].as_str().unwrap();
+    let (status, _, _) = call(
+        &app,
+        "POST",
+        &format!("/v1/proposals/{pid}/attachments"),
+        alice,
+        Some(json!({ "uri": "https://chat.example/thread/42", "title": "Thread: demo moves" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let (_, inbox, _) = call(&app, "GET", "/v1/inbox", alice, None).await;
+    let item = inbox
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["item"]["data"]["proposal_id"] == pid)
+        .unwrap_or_else(|| panic!("{inbox}"));
+    let titles: Vec<&str> = item["content"]["attachments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|a| a["title"].as_str())
+        .collect();
+    assert!(
+        titles.contains(&"Thread: demo moves") && titles.contains(&"Demo plan"),
+        "{titles:?}"
+    );
+}

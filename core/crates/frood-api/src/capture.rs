@@ -28,26 +28,26 @@ pub fn routes() -> Router<AppState> {
 }
 
 #[derive(Debug, Default, Deserialize)]
-struct Fields {
+pub(crate) struct Fields {
     #[serde(default)]
-    text: Option<String>,
+    pub(crate) text: Option<String>,
     #[serde(default)]
-    kind: Option<String>,
+    pub(crate) kind: Option<String>,
     #[serde(default)]
-    title: Option<String>,
+    pub(crate) title: Option<String>,
     #[serde(default)]
-    said_at: Option<DateTime<Utc>>,
+    pub(crate) said_at: Option<DateTime<Utc>>,
     /// What it is about: a project or a person (a hint for extraction).
     #[serde(default)]
-    about: Option<String>,
+    pub(crate) about: Option<String>,
     /// Language hint, e.g. `ru`.
     #[serde(default)]
-    language: Option<String>,
+    pub(crate) language: Option<String>,
     #[serde(default)]
-    uri: Option<String>,
+    pub(crate) uri: Option<String>,
     /// Channel modules: the sender's account in the channel.
     #[serde(default)]
-    external_id: Option<String>,
+    pub(crate) external_id: Option<String>,
 }
 
 async fn capture(
@@ -76,6 +76,8 @@ async fn capture(
     let text = fields.text.unwrap_or_default();
     let kind = fields.kind.unwrap_or_else(|| {
         match &blob {
+            Some(blob) if blob.content_type.starts_with("image/") => "photo",
+            Some(blob) if blob.content_type.starts_with("video/") => "video",
             Some(blob) if blob.is_media() => "audio",
             Some(_) => "file",
             None => "note",
@@ -119,7 +121,7 @@ async fn capture(
 
 /// Who the capture belongs to: the person holding the token, or, for a channel module, the
 /// person whose channel account sent it.
-async fn capture_actor(
+pub(crate) async fn capture_actor(
     state: &AppState,
     caller: &Caller<Capture>,
     external_id: Option<&str>,
@@ -156,7 +158,9 @@ async fn capture_actor(
     }
 }
 
-async fn read_multipart(mut multipart: Multipart) -> Result<(Fields, Option<NewBlob>), ApiError> {
+pub(crate) async fn read_multipart(
+    mut multipart: Multipart,
+) -> Result<(Fields, Option<NewBlob>), ApiError> {
     let mut fields = Fields::default();
     let mut blob = None;
     while let Some(field) = multipart
@@ -223,6 +227,12 @@ fn guess_type(filename: Option<&str>) -> String {
         "wav" => "audio/wav",
         "webm" => "audio/webm",
         "mp4" => "video/mp4",
+        "mov" => "video/quicktime",
+        "jpg" | "jpeg" => "image/jpeg",
+        "png" => "image/png",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "heic" => "image/heic",
         "pdf" => "application/pdf",
         "txt" | "md" => "text/plain",
         _ => "application/octet-stream",

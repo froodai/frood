@@ -20,6 +20,8 @@ export type ProposalContent = {
   quote: string | null;
   /** Where a person opens the original, when the source has an address. */
   origin?: { uri: string; title: string | null } | null;
+  /** What is attached to the change and to the knowledge it changes. */
+  attachments?: Attachment[];
 };
 
 export type QuestionContent = {
@@ -75,6 +77,23 @@ export type Assertion = {
 };
 
 export type SearchHit = Assertion & { score: number; matched: string };
+
+export type FileInfo = { id: string; content_type: string; filename: string | null; size_bytes: number };
+
+/** A photo, video, document or link kept with knowledge or with a change that waits. */
+export type Attachment = {
+  id: string;
+  assertion_id: string | null;
+  proposal_id: string | null;
+  source_id: string;
+  kind: "photo" | "video" | "audio" | "file" | "link" | string;
+  uri: string | null;
+  title: string | null;
+  text: string | null;
+  file: FileInfo | null;
+  added_by: string;
+  added_at: string;
+};
 
 export type Run = {
   id: string;

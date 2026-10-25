@@ -1,8 +1,9 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, Check, ChevronDown, ExternalLink, Search, X } from "lucide-react";
+import { ArrowRight, Check, ChevronDown, ExternalLink, Paperclip, Search, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
+import { Attachments } from "@/components/attachments";
 import { KindBadge, SphereBadge, SphereFilter, SpherePicker, TypeBadge } from "@/components/badges";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -281,6 +282,12 @@ export function Inbox() {
                       <SphereBadge sphere={sphereOf(entry)} />
                       {(!k || ty !== "new") && <TypeBadge type={ty} />}
                       <span className="ms-0.5">{originLabel(entry)}</span>
+                      {(proposal(entry)?.attachments?.length ?? 0) > 0 && (
+                        <span className="inline-flex items-center gap-0.5" aria-label={t("attach.title")}>
+                          <Paperclip className="size-3" aria-hidden />
+                          {proposal(entry)!.attachments!.length}
+                        </span>
+                      )}
                     </span>
                   </button>
                   <span className="shrink-0 pt-0.5 text-xs text-muted-foreground">{ago(entry.item.created_at)}</span>
@@ -464,6 +471,7 @@ function Detail({ entry, busy, onAct }: { entry: InboxEntry; busy: boolean; onAc
             )}
           </div>
         )}
+        {p && <Attachments target={`proposals/${p.proposal_id}`} also={p.attachments} />}
         {p?.rationale && (
           <div className="flex flex-col gap-1.5">
             <span className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">{t("inbox.why")}</span>

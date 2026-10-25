@@ -281,6 +281,39 @@ pub struct Withdrawn {
     pub kept: usize,
 }
 
+/// What an attachment hangs on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AttachTo {
+    Assertion(Uuid),
+    Proposal(Uuid),
+}
+
+impl AttachTo {
+    pub fn id(self) -> Uuid {
+        match self {
+            Self::Assertion(id) | Self::Proposal(id) => id,
+        }
+    }
+}
+
+/// A photo, video, document or link kept with knowledge (docs/26 §2): a source of its own.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Attachment {
+    pub id: Uuid,
+    pub assertion_id: Option<Uuid>,
+    pub proposal_id: Option<Uuid>,
+    pub source_id: Uuid,
+    /// photo, video, audio, file or link.
+    pub kind: String,
+    pub uri: Option<String>,
+    pub title: Option<String>,
+    /// The words that came with it, or the transcript of its sound.
+    pub text: Option<String>,
+    pub file: Option<BlobInfo>,
+    pub added_by: String,
+    pub added_at: Timestamp,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CaptureResult {
     pub source: Source,

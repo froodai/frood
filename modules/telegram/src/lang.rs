@@ -76,6 +76,8 @@ impl Lang {
 
 /// Replies to what a person sends, and the commands.
 pub(crate) struct Texts {
+    /// A file or a link sent in reply to a card was attached; `{title}` is the card's.
+    pub(crate) attached: &'static str,
     pub(crate) help: &'static str,
     pub(crate) not_linked: &'static str,
     pub(crate) linked: &'static str,
@@ -209,6 +211,7 @@ pub(crate) struct Words {
 }
 
 const EN_TEXTS: Texts = Texts {
+    attached: "📎 Attached to «{title}»",
     help: "Send me notes, voice messages or files and I will put them into Frood. I also bring you what waits for your decision, with buttons.\n/now — what is due and what waits\n/inbox — decide what waits for you\n? when is the release — ask your memory\n/digest — what is new\nFirst link your account: open the link from the console, or send /link CODE (`frood link telegram --email you@example.com` gives a code).",
     not_linked: "This Telegram account is not linked to Frood yet. Send /link CODE (get a code with `frood link telegram --email …`).",
     linked: "Linked to",
@@ -255,6 +258,7 @@ const EN_TEXTS: Texts = Texts {
 };
 
 const ZH_TEXTS: Texts = Texts {
+    attached: "📎 已附加到“{title}”",
     help: "把笔记、语音或文件发给我，我会存进 Frood。我也会把等你决定的事项带按钮发给你。\n/now — 即将到期和等你决定的事项\n/inbox — 处理等你决定的事项\n? 发布是什么时候 — 向记忆提问\n/digest — 有什么新内容\n先关联账号：打开控制台里的链接，或发送 /link 代码（`frood link telegram --email you@example.com` 会给出代码）。",
     not_linked: "这个 Telegram 账号还没有关联 Frood。请发送 /link 代码（用 `frood link telegram --email …` 获取代码）。",
     linked: "已关联到",
@@ -301,6 +305,7 @@ const ZH_TEXTS: Texts = Texts {
 };
 
 const ES_TEXTS: Texts = Texts {
+    attached: "📎 Adjuntado a «{title}»",
     help: "Envíame notas, mensajes de voz o archivos y los guardaré en Frood. También te traigo lo que espera tu decisión, con botones.\n/now — qué vence y qué espera\n/inbox — decidir lo que te espera\n? cuándo es el lanzamiento — pregunta a tu memoria\n/digest — qué hay de nuevo\nPrimero vincula tu cuenta: abre el enlace de la consola o envía /link CÓDIGO (`frood link telegram --email you@example.com` da un código).",
     not_linked: "Esta cuenta de Telegram aún no está vinculada a Frood. Envía /link CÓDIGO (lo da `frood link telegram --email …`).",
     linked: "Vinculada a",
@@ -347,6 +352,7 @@ const ES_TEXTS: Texts = Texts {
 };
 
 const HI_TEXTS: Texts = Texts {
+    attached: "📎 «{title}» में जोड़ा गया",
     help: "मुझे नोट, वॉइस मैसेज या फ़ाइलें भेजें — मैं उन्हें Frood में सहेज दूँगा। आपके फ़ैसले का इंतज़ार करती चीज़ें भी बटनों के साथ लाता हूँ।\n/now — क्या बाकी है और क्या इंतज़ार में है\n/inbox — इंतज़ार करती चीज़ों पर फ़ैसला\n? रिलीज़ कब है — अपनी मेमोरी से पूछें\n/digest — क्या नया है\nपहले अपना खाता जोड़ें: कंसोल का लिंक खोलें, या /link कोड भेजें (`frood link telegram --email you@example.com` कोड देता है)।",
     not_linked: "यह Telegram खाता अभी Frood से नहीं जुड़ा है। /link कोड भेजें (कोड `frood link telegram --email …` से मिलता है)।",
     linked: "जोड़ा गया:",
@@ -404,6 +410,7 @@ const HI_TEXTS: Texts = Texts {
 };
 
 const AR_TEXTS: Texts = Texts {
+    attached: "📎 أُرفق بـ «{title}»",
     help: "أرسل إليّ ملاحظات أو رسائل صوتية أو ملفات وسأحفظها في Frood. وأرسل إليك ما ينتظر قرارك مع أزرار.\n/now — ما يحين موعده وما ينتظر\n/inbox — البتّ فيما ينتظرك\n? متى الإصدار — اسأل ذاكرتك\n/digest — ما الجديد\nاربط حسابك أولًا: افتح الرابط من وحدة التحكم، أو أرسل ‎/link الرمز (يعطيك ‎`frood link telegram --email you@example.com` رمزًا).",
     not_linked: "حساب Telegram هذا غير مرتبط بـ Frood بعد. أرسل ‎/link الرمز (احصل عليه عبر ‎`frood link telegram --email …`).",
     linked: "تم الربط بـ",
@@ -461,6 +468,7 @@ const AR_TEXTS: Texts = Texts {
 };
 
 const FR_TEXTS: Texts = Texts {
+    attached: "📎 Joint à « {title} »",
     help: "Envoyez-moi des notes, des messages vocaux ou des fichiers, je les range dans Frood. Je vous apporte aussi ce qui attend votre décision, avec des boutons.\n/now — échéances et ce qui attend\n/inbox — décider de ce qui vous attend\n? quand est la sortie — interroger votre mémoire\n/digest — les nouveautés\nReliez d’abord votre compte : ouvrez le lien de la console, ou envoyez /link CODE (`frood link telegram --email you@example.com` donne un code).",
     not_linked: "Ce compte Telegram n’est pas encore relié à Frood. Envoyez /link CODE (obtenez un code avec `frood link telegram --email …`).",
     linked: "Relié à",
@@ -508,6 +516,7 @@ const FR_TEXTS: Texts = Texts {
 };
 
 const PT_TEXTS: Texts = Texts {
+    attached: "📎 Anexado a “{title}”",
     help: "Envie notas, mensagens de voz ou arquivos e eu guardo no Frood. Também trago o que espera sua decisão, com botões.\n/now — o que vence e o que espera\n/inbox — decidir o que espera por você\n? quando é o lançamento — pergunte à sua memória\n/digest — o que há de novo\nPrimeiro vincule sua conta: abra o link do console ou envie /link CÓDIGO (`frood link telegram --email you@example.com` gera um código).",
     not_linked: "Esta conta do Telegram ainda não está vinculada ao Frood. Envie /link CÓDIGO (gere com `frood link telegram --email …`).",
     linked: "Vinculada a",
@@ -555,6 +564,7 @@ const PT_TEXTS: Texts = Texts {
 };
 
 const RU_TEXTS: Texts = Texts {
+    attached: "📎 Прикрепил к «{title}»",
     help: "Присылайте заметки, голосовые и файлы — я сохраню их во Frood. А ещё приношу то, что ждёт вашего решения, с кнопками.\n/now — сроки и что ждёт решения\n/inbox — разобрать то, что ждёт вас\n? когда релиз — спросить память\n/digest — что нового\nСначала свяжите аккаунт: откройте ссылку из консоли или пришлите /link КОД (код даёт `frood link telegram --email you@example.com`).",
     not_linked: "Этот аккаунт Telegram ещё не связан с Frood. Пришлите /link КОД (код даёт `frood link telegram --email …`).",
     linked: "Связано с",

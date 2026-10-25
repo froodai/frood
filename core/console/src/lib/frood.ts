@@ -113,13 +113,14 @@ export function hasScope(scope: string): boolean {
   return !!t && (DEV_TOKEN !== undefined || (t.scope ?? "").split(" ").includes(scope));
 }
 
-type Init = Omit<RequestInit, "body"> & { json?: unknown };
+/** `json` or `form` (a file upload) as the body; `blob` reads the answer as bytes. */
+type Init = Omit<RequestInit, "body"> & { json?: unknown; form?: FormData; blob?: boolean };
 
 /** Calls the API; signs in again when the token is gone, refreshes it when it expired. */
 export async function api<T>(path: string, init: Init = {}): Promise<T> {
   let t = tokens();
   if (!t) return signIn();
-  const { json, ...rest } = init;
+  const { json, form, blob, ...rest } = init;
   const call = (access: string) =>
     fetch(BASE + path, {
       ...rest,
@@ -128,7 +129,7 @@ export async function api<T>(path: string, init: Init = {}): Promise<T> {
         Authorization: `Bearer ${access}`,
         ...(json !== undefined ? { "Content-Type": "application/json" } : {}),
       },
-      body: json !== undefined ? JSON.stringify(json) : undefined,
+      body: json !== undefined ? JSON.stringify(json) : form,
     });
   let r = await call(t.access);
   if (r.status === 401 && t.refresh) {
@@ -144,6 +145,7 @@ export async function api<T>(path: string, init: Init = {}): Promise<T> {
     store.removeItem("tokens");
     return signIn();
   }
+  if (blob && r.ok) return (await r.blob()) as T;
   const body = r.status === 204 ? null : await r.json().catch(() => null);
   if (!r.ok) {
     const problem = (body ?? {}) as { detail?: string; title?: string; type?: string };

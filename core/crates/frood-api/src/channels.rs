@@ -21,6 +21,32 @@ pub fn routes() -> Router<AppState> {
             "/v1/channels/{channel}/links/{external_id}",
             get(check).delete(unlink),
         )
+        .route(
+            "/v1/channels/{channel}/messages/{message_ref}",
+            get(delivered),
+        )
+}
+
+/// Which Inbox item a channel's message showed: a reply to it is about that item.
+async fn delivered(
+    State(state): State<AppState>,
+    caller: Caller<ChannelsAct>,
+    Path((channel, message_ref)): Path<(String, String)>,
+) -> Result<Json<Value>, ApiError> {
+    own_channel(&caller, &channel)?;
+    let item = state
+        .dispatch
+        .delivered_in(&channel, &message_ref)
+        .await
+        .map_err(|e| ApiError::from(frood_ledger::LedgerError::from(e)))?
+        .ok_or_else(|| {
+            ApiError::new(
+                StatusCode::NOT_FOUND,
+                "not-found",
+                "no Inbox item was shown in that message",
+            )
+        })?;
+    Ok(Json(json!({ "item": item })))
 }
 
 /// A module may only manage the links of its own channel (the module's name in `frood.yaml`).

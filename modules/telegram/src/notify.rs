@@ -127,6 +127,28 @@ pub(crate) fn text(shown: &Value, w: &Words, spheres: &Spheres) -> String {
                     esc(&short(rationale, 200))
                 ));
             }
+            // What is attached: «📎 2 — Demo plan, board.jpg».
+            let attached: Vec<String> = content["attachments"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|a| {
+                    let name = a["title"]
+                        .as_str()
+                        .or_else(|| a["file"]["filename"].as_str())
+                        .or_else(|| a["uri"].as_str())
+                        .unwrap_or("?");
+                    short(name, 40)
+                })
+                .collect();
+            if !attached.is_empty() {
+                let names: Vec<&str> = attached.iter().take(3).map(String::as_str).collect();
+                lines.push(format!(
+                    "📎 {} — {}",
+                    attached.len(),
+                    esc(&names.join(", "))
+                ));
+            }
             if let Some(job) = content["author"].as_str().and_then(agent_job) {
                 lines.push(format!("<i>{}: {}</i>", esc(w.from_agent), esc(job)));
             }
@@ -774,6 +796,12 @@ mod tests {
             "{}",
             text(&new, w, &spheres)
         );
+        let mut with_files = new.clone();
+        with_files["content"]["attachments"] = json!([
+            { "kind": "link", "title": "ADR-12", "uri": "https://git.example/adr/12" },
+            { "kind": "photo", "title": null, "file": { "filename": "board.jpg" } }
+        ]);
+        assert!(text(&with_files, w, &spheres).contains("📎 2 — ADR-12, board.jpg"));
         let moved = card(
             json!({ "kind": "decision", "title": "Поиск на OpenSearch", "sphere": "business",
                                  "sphere_before": "tech", "before": null, "after": "Поиск на OpenSearch" }),
