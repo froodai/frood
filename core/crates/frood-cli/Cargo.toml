@@ -27,6 +27,7 @@ frood-ledger.workspace = true
 frood-store.workspace = true
 reqwest.workspace = true
 serde_json.workspace = true
+serde_yaml_ng.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
@@ -34,7 +35,6 @@ url.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
-serde_yaml_ng.workspace = true
 tempfile.workspace = true
 
 [lints]

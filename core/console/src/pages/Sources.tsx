@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FileAudio, FileText, MessagesSquare, Paperclip, Plus } from "lucide-react";
+import { FileAudio, FileText, MessagesSquare, Paperclip } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { SourceFile } from "@/components/attachments";
@@ -11,10 +11,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { useI18n } from "@/i18n";
 import type { Key } from "@/i18n/en";
 import { api } from "@/lib/frood";
-import { useHealth, useMe } from "@/lib/queries";
-import type { FileInfo, Health } from "@/lib/types";
+import { useMe } from "@/lib/queries";
+import type { FileInfo } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { Dot } from "./System";
+import { Connected } from "./Connections";
 
 type SourceSummary = {
   id: string;
@@ -279,102 +279,3 @@ function SourceDetail({ id, onDone }: { id: string; onDone: () => void }) {
   );
 }
 
-function Connected() {
-  const { t, lang } = useI18n();
-  const health = useHealth();
-  const [open, setOpen] = useState<null | { kind: "source"; item: Health["sources"][number] } | { kind: "module"; item: Health["modules"][number] } | { kind: "add" }>(null);
-  const relative = new Intl.RelativeTimeFormat(lang, { numeric: "auto" });
-  if (health.isError) return <p className="text-sm text-destructive">{health.error.message}</p>;
-  if (!health.data) return <Skeleton className="h-48" />;
-  const { sources, modules } = health.data;
-  const since = (seconds: number) =>
-    seconds < 3600
-      ? relative.format(-Math.round(seconds / 60), "minute")
-      : seconds < 86400
-        ? relative.format(-Math.round(seconds / 3600), "hour")
-        : relative.format(-Math.round(seconds / 86400), "day");
-  const card = "flex flex-col gap-1.5 rounded-xl border bg-card p-4 text-start transition-colors hover:border-foreground/20";
-
-  return (
-    <div className="flex max-w-6xl flex-col gap-5">
-      <h2 className="text-sm font-medium">{t("sources.title")}</h2>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        {sources.map((s) => (
-          <button key={`${s.job}/${s.source}`} type="button" className={card} onClick={() => setOpen({ kind: "source", item: s })}>
-            <span className="flex items-center gap-2">
-              <Dot ok={s.seconds_since_read === null ? null : s.seconds_since_read < 2 * 86400} />
-              <span className="font-medium">{s.source}</span>
-            </span>
-            <span className="text-sm text-muted-foreground">
-              {s.seconds_since_read === null ? t("sources.never") : t("sources.read", { when: since(s.seconds_since_read) })}
-            </span>
-          </button>
-        ))}
-        <button type="button" className={cn(card, "items-start border-dashed")} onClick={() => setOpen({ kind: "add" })}>
-          <span className="flex items-center gap-2 font-medium">
-            <Plus className="size-4" /> {t("sources.add")}
-          </span>
-          <span className="text-sm text-muted-foreground">{t("sources.addHint")}</span>
-        </button>
-      </div>
-      <h2 className="text-sm font-medium">{t("sources.modules")}</h2>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        {modules.map((m) => (
-          <button key={m.name} type="button" className={card} onClick={() => setOpen({ kind: "module", item: m })}>
-            <span className="flex items-center gap-2">
-              <Dot ok={m.up} />
-              <span className="flex-1 font-medium">{m.name}</span>
-              <span className="text-xs text-muted-foreground">{m.up ? t("sources.up") : t("sources.down")}</span>
-            </span>
-            <span className="font-mono text-xs text-muted-foreground" dir="ltr">
-              {m.provides.join(" · ")}
-            </span>
-          </button>
-        ))}
-      </div>
-
-      <Sheet open={!!open} onOpenChange={(o) => !o && setOpen(null)}>
-        <SheetContent className="w-full overflow-y-auto sm:max-w-lg">
-          <SheetTitle className="sr-only">{t("sources.connected")}</SheetTitle>
-          <div className="flex flex-col gap-4 p-5 text-sm">
-            {open?.kind === "source" && (
-              <>
-                <h2 className="text-lg font-semibold">{open.item.source}</h2>
-                <p className="text-muted-foreground">{t("sources.by", { job: open.item.job })}</p>
-                <p>{open.item.seconds_since_read === null ? t("sources.never") : t("sources.read", { when: since(open.item.seconds_since_read) })}</p>
-                <p className="text-muted-foreground">{t("sources.howChange")}</p>
-              </>
-            )}
-            {open?.kind === "module" && (
-              <>
-                <h2 className="text-lg font-semibold">{open.item.name}</h2>
-                <p className="flex items-center gap-2">
-                  <Dot ok={open.item.up} /> {open.item.up ? t("sources.up") : t("sources.down")}
-                </p>
-                <ul className="list-disc ps-5 font-mono text-xs" dir="ltr">
-                  {open.item.provides.map((p) => (
-                    <li key={p}>{p}</li>
-                  ))}
-                </ul>
-              </>
-            )}
-            {open?.kind === "add" && (
-              <>
-                <h2 className="text-lg font-semibold">{t("sources.add")}</h2>
-                <p className="text-muted-foreground">{t("sources.addSteps")}</p>
-                <pre dir="ltr" className="overflow-auto rounded-md bg-muted p-3 font-mono text-xs">{`sources:
-  github:
-    uses: mcp
-    server: https://api.githubcopilot.com/mcp/
-    headers: { Authorization: "Bearer \${secret:GITHUB_TOKEN}" }
-    scope: "Issues and pull requests changed in the last day"
-    tools: [list_issues, get_issue, list_pull_requests]`}</pre>
-                <pre dir="ltr" className="overflow-auto rounded-md bg-muted p-3 font-mono text-xs">frood apply</pre>
-              </>
-            )}
-          </div>
-        </SheetContent>
-      </Sheet>
-    </div>
-  );
-}

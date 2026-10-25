@@ -23,6 +23,32 @@ pub fn containers(loaded: &Loaded) -> impl Iterator<Item = (&String, &frood_conf
         .filter(|(_, m)| m.url.is_none())
 }
 
+/// The secret that seals tokens the console stores (docs/26 §4): an age identity.
+pub const VAULT_KEY: &str = "FROOD_VAULT_KEY";
+
+pub fn new_vault_key() -> String {
+    use age::secrecy::ExposeSecret;
+    age::x25519::Identity::generate()
+        .to_string()
+        .expose_secret()
+        .to_owned()
+}
+
+/// Adds the vault key to a secrets file that has none (installations made before 0.1.7).
+/// True when it added one.
+pub fn ensure_vault_key(secrets_path: &Path) -> anyhow::Result<bool> {
+    let secrets = Secrets::from_file(secrets_path)?;
+    if secrets.get(VAULT_KEY).is_some() {
+        return Ok(false);
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(secrets_path)
+        .with_context(|| format!("cannot open {}", secrets_path.display()))?;
+    writeln!(file, "{VAULT_KEY}={}", new_vault_key())?;
+    Ok(true)
+}
+
 /// Adds a service token for every module that has none yet. Returns the modules it added.
 pub fn ensure_tokens(loaded: &Loaded, secrets_path: &Path) -> anyhow::Result<Vec<String>> {
     let secrets = Secrets::from_file(secrets_path)?;

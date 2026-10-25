@@ -151,6 +151,12 @@ pub(crate) fn write_deploy(paths: &Paths, loaded: &Loaded) -> anyhow::Result<Pat
     let deploy_dir = absolute(&loaded.base_dir.join(".frood").join("deploy"))?;
     std::fs::create_dir_all(&deploy_dir)
         .with_context(|| format!("cannot create {}", deploy_dir.display()))?;
+    if modules::ensure_vault_key(&secrets_abs)? {
+        println!(
+            "added {} to the secrets file: it seals tokens the console stores; keep it with the other secrets",
+            modules::VAULT_KEY
+        );
+    }
     for module in modules::ensure_tokens(loaded, &secrets_abs)? {
         println!("added a service token for module {module} to the secrets file");
     }
@@ -546,4 +552,83 @@ async fn http_status(url: &str) -> anyhow::Result<u16> {
 
 pub(crate) fn absolute(path: &Path) -> anyhow::Result<PathBuf> {
     std::path::absolute(path).with_context(|| format!("cannot resolve {}", path.display()))
+}
+
+/// The console's sources as `frood.yaml` lines (docs/26 §4). A sealed token becomes a
+/// `${secret:SOURCE_<NAME>_TOKEN}` reference; its value is not printed.
+pub async fn config_export(paths: &Paths) -> anyhow::Result<()> {
+    let loaded = paths.load()?;
+    let pool = frood_store::connect(&loaded.config.storage.url, Duration::from_secs(5))
+        .await
+        .context("the database is not reachable; run `frood apply` first")?;
+    let data: Option<serde_json::Value> = frood_store::sqlx::query_scalar(
+        "SELECT data FROM config_overlay ORDER BY revision DESC LIMIT 1",
+    )
+    .fetch_optional(&pool)
+    .await?;
+    let sources: std::collections::BTreeMap<String, frood_config::Source> = data
+        .and_then(|d| serde_json::from_value(d["sources"].clone()).ok())
+        .unwrap_or_default();
+    if sources.is_empty() {
+        println!("# No sources were connected from the console.");
+        return Ok(());
+    }
+    let (sources, secrets) = exported_sources(sources);
+    println!("# Sources connected from the console; add them to frood.yaml.");
+    if !secrets.is_empty() {
+        println!(
+            "# Their tokens stay in the database: put them in the secrets file as {}.",
+            secrets.join(", ")
+        );
+    }
+    print!(
+        "{}",
+        serde_yaml_ng::to_string(&serde_json::json!({ "sources": sources }))?
+    );
+    Ok(())
+}
+
+/// Sources with each sealed token replaced by a secret reference, and the secrets named.
+fn exported_sources(
+    mut sources: std::collections::BTreeMap<String, frood_config::Source>,
+) -> (
+    std::collections::BTreeMap<String, frood_config::Source>,
+    Vec<String>,
+) {
+    let mut secrets = Vec::new();
+    for (name, source) in &mut sources {
+        for value in source.headers.values_mut() {
+            if let Some(start) = value.find("${vault:")
+                && let Some(end) = value[start..].find('}')
+            {
+                let secret = format!(
+                    "SOURCE_{}_TOKEN",
+                    name.to_ascii_uppercase().replace('-', "_")
+                );
+                value.replace_range(start..=start + end, &format!("${{secret:{secret}}}"));
+                secrets.push(secret);
+            }
+        }
+    }
+    (sources, secrets)
+}
+
+#[cfg(test)]
+mod export_tests {
+    use super::*;
+
+    #[test]
+    fn sealed_tokens_become_secret_references() {
+        let source: frood_config::Source = serde_json::from_value(serde_json::json!({
+            "uses": "mcp", "server": "https://mcp.linear.app/mcp",
+            "headers": { "Authorization": "Bearer ${vault:source.team-tracker}" }
+        }))
+        .unwrap();
+        let (sources, secrets) = exported_sources([("team-tracker".to_owned(), source)].into());
+        assert_eq!(
+            sources["team-tracker"].headers["Authorization"],
+            "Bearer ${secret:SOURCE_TEAM_TRACKER_TOKEN}"
+        );
+        assert_eq!(secrets, ["SOURCE_TEAM_TRACKER_TOKEN"]);
+    }
 }

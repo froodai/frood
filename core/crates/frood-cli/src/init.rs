@@ -69,7 +69,9 @@ fn write_secrets_if_missing(path: &Path) -> anyhow::Result<bool> {
         uuid::Uuid::new_v4().simple()
     );
     let text = format!(
-        "# Secrets for this installation. Never commit this file.\nPOSTGRES_PASSWORD={password}\n"
+        "# Secrets for this installation. Never commit this file.\nPOSTGRES_PASSWORD={password}\n{}={}\n",
+        crate::modules::VAULT_KEY,
+        crate::modules::new_vault_key()
     );
     std::fs::write(path, text).with_context(|| format!("cannot write {}", path.display()))?;
     restrict_permissions(path)?;

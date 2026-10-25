@@ -86,6 +86,11 @@ const TABLES: &[Table] = &[
         file: "attachments.jsonl",
         query: rows_of!("attachments", "added_at, id"),
     },
+    // Sources connected from the console; their tokens stay sealed in the database.
+    Table {
+        file: "config_overlay.jsonl",
+        query: rows_of!("config_overlay", "revision"),
+    },
 ];
 
 /// What an export holds, by file.

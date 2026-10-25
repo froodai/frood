@@ -7,6 +7,7 @@ mod attachments;
 mod auth;
 mod capture;
 mod channels;
+mod connections;
 mod console;
 mod error;
 mod inbox;
@@ -70,6 +71,7 @@ pub fn assemble(
     let auth = Auth::new(pool, frood_auth::AuthSettings::from_config(config));
     let gateway = frood_llm::Gateway::new(&config.accounts);
     let searcher = frood_search::Searcher::new(ledger.clone(), gateway.clone(), &config.search);
+    let vault_key = token_of("FROOD_VAULT_KEY");
     let modules = frood_modhost::Modules::new(config, token_of);
     let api_accounts = gateway.api_accounts();
     let caps = frood_dispatch::Capabilities {
@@ -89,6 +91,7 @@ pub fn assemble(
         jobs,
     )
     .with_sources(config.sources.clone())
+    .with_vault(vault_key)
     .with_attention(config.attention.clone())
     .with_spheres(config.spheres.clone());
     if let Some(backup) = &config.backup {
@@ -247,6 +250,7 @@ pub fn router(state: AppState) -> Router {
         .merge(capture::routes(state.ledger.max_file_bytes()))
         .merge(attachments::routes(state.ledger.max_file_bytes()))
         .merge(channels::routes())
+        .merge(connections::routes())
         .merge(work::routes())
         .merge(inbox::routes())
         .merge(admin::routes())

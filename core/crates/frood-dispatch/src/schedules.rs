@@ -86,13 +86,13 @@ impl Dispatch {
     pub async fn tick_schedules(&self, now: DateTime<Utc>) -> sqlx::Result<usize> {
         let mut fired = 0;
         for schedule in schedules(&self.jobs) {
-            let items: Vec<Option<&str>> = if schedule.for_each_source {
-                self.ctx.sources.keys().map(|s| Some(s.as_str())).collect()
+            let items: Vec<Option<String>> = if schedule.for_each_source {
+                self.ctx.sources.now().keys().cloned().map(Some).collect()
             } else {
                 vec![None]
             };
             for item in items {
-                if self.tick_one(&schedule, item, now).await? {
+                if self.tick_one(&schedule, item.as_deref(), now).await? {
                     fired += 1;
                 }
             }
