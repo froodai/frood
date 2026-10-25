@@ -481,6 +481,16 @@ async fn apply(
     similar: &[String],
     entity_ids: &[String],
 ) -> Result<Made, JobError> {
+    // Imported memory is an assistant's retelling (docs/27 §5): taken, marked not verified,
+    // and where it disagrees with what is known, a person decides.
+    let context = frood_ledger::ProposalContext {
+        mark_unverified: source
+            .metadata
+            .get("imported_from")
+            .and_then(Value::as_str)
+            .map(|from| format!("from {from} memory; not verified")),
+        ..Default::default()
+    };
     let known: HashSet<Uuid> = entity_ids.iter().filter_map(|i| i.parse().ok()).collect();
     let versions: HashMap<Uuid, i32> = similar
         .iter()
@@ -612,7 +622,7 @@ async fn apply(
                     alternatives,
                     evidence: vec![evidence],
                 };
-                open(ctx, actor, proposal, &mut made, index).await?;
+                open(ctx, actor, proposal, &context, &mut made, index).await?;
             }
             ("close", Some((assertion_id, version))) => {
                 let status = match change.close_status.as_deref() {
@@ -637,7 +647,7 @@ async fn apply(
                     alternatives: None,
                     evidence: vec![evidence],
                 };
-                open(ctx, actor, proposal, &mut made, index).await?;
+                open(ctx, actor, proposal, &context, &mut made, index).await?;
             }
             (action, _) => made.dropped.push(format!(
                 "change {index}: {action} needs a target among the known assertions"
@@ -668,7 +678,7 @@ async fn apply(
             alternatives: None,
             evidence,
         };
-        open(ctx, actor, proposal, &mut made, usize::MAX).await?;
+        open(ctx, actor, proposal, &context, &mut made, usize::MAX).await?;
     }
     Ok(made)
 }
@@ -677,10 +687,11 @@ async fn open(
     ctx: &Ctx,
     actor: &Actor,
     proposal: NewProposal,
+    context: &frood_ledger::ProposalContext,
     made: &mut Made,
     index: usize,
 ) -> Result<(), JobError> {
-    match ctx.ledger.open_proposal(actor, proposal).await {
+    match ctx.ledger.open_proposal_in(actor, proposal, context).await {
         Ok(opened) => made.proposals.push(opened.id),
         Err(frood_ledger::LedgerError::Database(db)) => {
             return Err(JobError::transient(format!("database: {db}")));

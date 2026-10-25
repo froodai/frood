@@ -4,6 +4,7 @@ mod compose;
 mod export;
 mod init;
 mod lifecycle;
+mod memory_import;
 mod modules;
 mod recovery;
 mod serve;
@@ -98,6 +99,25 @@ enum Command {
     Token {
         #[command(subcommand)]
         command: TokenCommand,
+    },
+    /// Send the memory your assistants keep on this computer (Claude Code, Codex, OpenClaw,
+    /// Hermes, a folder of Markdown) to Frood. It shows what it found and asks once.
+    Import {
+        /// A Frood elsewhere, e.g. https://mem.example.com; this installation by default.
+        #[arg(long)]
+        server: Option<String>,
+        /// A token with knowledge:capture for that server.
+        #[arg(long, env = "FROOD_TOKEN", hide_env_values = true)]
+        token: Option<String>,
+        /// Whose memory it is, when the installation lets several people in.
+        #[arg(long)]
+        email: Option<String>,
+        /// A folder of Markdown to send too; may be given several times.
+        #[arg(long)]
+        folder: Vec<PathBuf>,
+        /// Send without asking.
+        #[arg(long)]
+        yes: bool,
     },
     /// Link your account in a channel (Telegram, …): prints a one-time code for the bot.
     Link {
@@ -285,6 +305,25 @@ async fn main() -> ExitCode {
             .await
         }
         Command::Link { channel, email } => token::link(&paths, &channel, &email).await,
+        Command::Import {
+            server,
+            token,
+            email,
+            folder,
+            yes,
+        } => {
+            memory_import::run(
+                &paths,
+                &memory_import::Options {
+                    server,
+                    token,
+                    email,
+                    folders: folder,
+                    yes,
+                },
+            )
+            .await
+        }
         Command::Token { command } => match command {
             TokenCommand::Create {
                 email,

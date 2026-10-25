@@ -17,8 +17,9 @@ use rmcp::handler::server::tool::{Extension, ToolCallContext};
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
     CacheScope, CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock,
-    Implementation, ListToolsResult, PaginatedRequestParams, ProtocolVersion, ResultType,
-    ServerCapabilities, ServerConfig, Tool,
+    GetPromptRequestParams, GetPromptResponse, GetPromptResult, Implementation, ListPromptsResult,
+    ListToolsResult, PaginatedRequestParams, Prompt, PromptMessage, ProtocolVersion, ResultType,
+    Role, ServerCapabilities, ServerConfig, Tool,
 };
 use rmcp::service::RequestContext;
 use rmcp::transport::streamable_http_server::session::never::NeverSessionManager;
@@ -36,6 +37,18 @@ source in Frood. To remember something new, call capture_note; to change knowled
 structured way, call propose_change. Proposals wait for a person's verdict unless a policy \
 accepts them. Knowledge with `unverified: true` was taken without a person's check (an agent's \
 finding or an assistant's memory): when you rely on it, say it is not verified.";
+
+/// The prompt that moves what an assistant remembers about its person into Frood (docs/27 §5).
+const IMPORT_MEMORY: &str = "import_memory";
+const IMPORT_MEMORY_TEXT: &str = "Move what you remember about me into Frood, my memory. \
+List everything you know about me and my work from your memory and our past conversations: \
+who I am, my projects, decisions, commitments with their dates, rules, who is responsible for \
+what, my preferences. Then record it in Frood with capture_note: one note per topic or project, \
+plain sentences, each fact with its date or \"since when\" if you know it, nothing invented. \
+Frood marks these notes as coming from your memory and not yet verified, and shows me where \
+they disagree with what it already knows. When you are done, tell me how many notes you \
+recorded and on which topics. In every capture_note call set from_memory to your own name \
+(for example Claude or ChatGPT).";
 
 /// Tools only an agent's run token gets.
 const RUN: &str = "an agent's run";
@@ -222,6 +235,10 @@ pub struct CaptureParams {
     pub uri: Option<String>,
     /// Name of the original, e.g. "AIRC-1808: Task view keeps loading".
     pub title: Option<String>,
+    /// Only when moving what you remember about the person into Frood (the import_memory
+    /// prompt): your own name, e.g. "Claude". What Frood reads from it is marked as coming from
+    /// your memory and not verified.
+    pub from_memory: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -665,10 +682,18 @@ impl FroodMcp {
         Parameters(p): Parameters<CaptureParams>,
     ) -> ToolResult {
         let principal = principal(&parts)?;
-        let metadata = match &p.about {
+        let mut metadata = match &p.about {
             Some(about) => json!({ "about": about, "via": "mcp" }),
             None => json!({ "via": "mcp" }),
         };
+        if let Some(from) = p
+            .from_memory
+            .as_deref()
+            .map(str::trim)
+            .filter(|f| !f.is_empty())
+        {
+            metadata["imported_from"] = json!(from);
+        }
         let input = NewSource {
             kind: "note".into(),
             origin: "capture".into(),
@@ -914,6 +939,15 @@ impl FroodMcp {
 }
 
 impl FroodMcp {
+    /// A person's own connection, not an agent's run.
+    fn is_person(context: &RequestContext<RoleServer>) -> bool {
+        context
+            .extensions
+            .get::<http::request::Parts>()
+            .and_then(|parts| parts.extensions.get::<Principal>())
+            .is_some_and(|p| p.run.is_none() && p.user_id().is_some())
+    }
+
     fn allowed(context: &RequestContext<RoleServer>, tool: &str) -> bool {
         let Some(principal) = context
             .extensions
@@ -935,9 +969,14 @@ impl FroodMcp {
 
 impl ServerHandler for FroodMcp {
     fn get_info(&self) -> ServerConfig {
-        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
-            .with_server_info(Implementation::new("frood", env!("CARGO_PKG_VERSION")))
-            .with_instructions(INSTRUCTIONS)
+        ServerConfig::new(
+            ServerCapabilities::builder()
+                .enable_tools()
+                .enable_prompts()
+                .build(),
+        )
+        .with_server_info(Implementation::new("frood", env!("CARGO_PKG_VERSION")))
+        .with_instructions(INSTRUCTIONS)
     }
 
     async fn list_tools(
@@ -997,5 +1036,45 @@ impl ServerHandler for FroodMcp {
 
     fn get_tool(&self, name: &str) -> Option<Tool> {
         self.tool_router.get(name).cloned()
+    }
+
+    async fn list_prompts(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<ListPromptsResult, ErrorData> {
+        // A person who may record notes; an agent's run has nothing of its own to move.
+        let prompts = if Self::allowed(&context, "capture_note") && Self::is_person(&context) {
+            vec![
+                Prompt::new(
+                    IMPORT_MEMORY,
+                    Some("Move what this assistant remembers about you into Frood"),
+                    None,
+                )
+                .with_title("Move my memory into Frood"),
+            ]
+        } else {
+            Vec::new()
+        };
+        Ok(ListPromptsResult {
+            prompts,
+            ..Default::default()
+        })
+    }
+
+    async fn get_prompt(
+        &self,
+        request: GetPromptRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<GetPromptResponse, ErrorData> {
+        if request.name != IMPORT_MEMORY || !Self::is_person(&context) {
+            return Err(ErrorData::invalid_params("prompt not found", None));
+        }
+        Ok(GetPromptResult::new(vec![PromptMessage::new_text(
+            Role::User,
+            IMPORT_MEMORY_TEXT,
+        )])
+        .with_description("Move what this assistant remembers about you into Frood")
+        .into())
     }
 }
