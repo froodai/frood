@@ -1,14 +1,16 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Search } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
-import { KindBadge } from "@/components/badges";
+import { toast } from "sonner";
+import { KindBadge, SphereBadge, SphereFilter, SpherePicker } from "@/components/badges";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useI18n } from "@/i18n";
 import { api } from "@/lib/frood";
 import { useMediaQuery } from "@/lib/hooks";
 import { titled } from "@/lib/situations";
+import { useSphereName } from "@/lib/spheres";
 import type { Assertion, SearchHit } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -20,17 +22,26 @@ export function Knowledge() {
   const [params, setParams] = useSearchParams();
   const [text, setText] = useState(params.get("q") ?? "");
   const q = params.get("q") ?? "";
+  const sphere = params.get("sphere") ?? "all";
+  const filter = (next: { q?: string; sphere?: string }) => {
+    const merged = { q, sphere, ...next };
+    setParams({ ...(merged.q ? { q: merged.q } : {}), ...(merged.sphere !== "all" ? { sphere: merged.sphere } : {}) }, { replace: true });
+  };
 
   useEffect(() => {
-    const timer = setTimeout(() => setParams(text.trim() ? { q: text.trim() } : {}, { replace: true }), 300);
+    const timer = setTimeout(() => text.trim() !== q && filter({ q: text.trim() }), 300);
     return () => clearTimeout(timer);
-  }, [text, setParams]);
+  }, [text]);
 
   const list = useQuery({
-    queryKey: ["knowledge", q],
+    queryKey: ["knowledge", q, sphere],
     queryFn: async (): Promise<Assertion[]> => {
-      if (q) return api<SearchHit[]>(`/v1/search?limit=50&q=${encodeURIComponent(q)}`);
-      const all = await api<Assertion[]>("/v1/assertions?limit=200");
+      if (q) {
+        // Search ranks by meaning; the sphere narrows what it found.
+        const hits = await api<SearchHit[]>(`/v1/search?limit=50&q=${encodeURIComponent(q)}`);
+        return sphere === "all" ? hits : hits.filter((h) => (h.sphere ?? "none") === sphere);
+      }
+      const all = await api<Assertion[]>(`/v1/assertions?limit=200${sphere !== "all" ? `&sphere=${sphere}` : ""}`);
       return all.sort((a, b) => b.recorded_from.localeCompare(a.recorded_from));
     },
   });
@@ -42,17 +53,20 @@ export function Knowledge() {
   return (
     <div className="flex min-h-0 flex-1">
       <section className="flex min-w-0 flex-1 flex-col gap-3.5 px-4 py-5 md:px-6">
-        <label className="flex min-h-10 items-center gap-2.5 rounded-lg border bg-card px-3 focus-within:ring-2 focus-within:ring-ring/40">
-          <Search className="size-4 text-muted-foreground" aria-hidden />
-          <input
-            type="search"
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder={t("knowledge.search")}
-            aria-label={t("knowledge.search")}
-            className="min-w-0 flex-1 bg-transparent text-sm outline-none"
-          />
-        </label>
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="flex min-h-10 min-w-48 flex-1 items-center gap-2.5 rounded-lg border bg-card px-3 focus-within:ring-2 focus-within:ring-ring/40">
+            <Search className="size-4 text-muted-foreground" aria-hidden />
+            <input
+              type="search"
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder={t("knowledge.search")}
+              aria-label={t("knowledge.search")}
+              className="min-w-0 flex-1 bg-transparent text-sm outline-none"
+            />
+          </label>
+          <SphereFilter value={sphere} onChange={(s) => filter({ sphere: s })} />
+        </div>
         <span className="text-xs text-muted-foreground">
           {q ? t("knowledge.results", { n: list.data?.length ?? 0 }) : t("knowledge.recent")}
         </span>
@@ -87,8 +101,9 @@ export function Knowledge() {
                   <span className="line-clamp-1">{title}</span>
                   {description && <span className="line-clamp-1 text-[13px] text-muted-foreground">{description}</span>}
                 </span>
-                <span>
+                <span className="flex flex-wrap items-center gap-1 sm:flex-col sm:items-start">
                   <KindBadge kind={a.kind} />
+                  <SphereBadge sphere={a.sphere} />
                 </span>
                 <span className="font-mono text-xs text-muted-foreground">{date(a.valid_from)}</span>
               </button>
@@ -117,6 +132,7 @@ export function Knowledge() {
 function History({ id }: { id: string }) {
   const { t, date, ago } = useI18n();
   const history = useQuery({ queryKey: ["history", id], queryFn: () => api<Assertion[]>(`/v1/assertions/${id}/history`) });
+  const move = useMove(id);
   if (history.isPending) return <Skeleton className="h-40" />;
   if (history.isError) return <p className="text-sm text-destructive">{history.error.message}</p>;
   const held = history.data.filter((v) => !v.recorded_to).sort((a, b) => b.valid_from.localeCompare(a.valid_from));
@@ -134,7 +150,14 @@ function History({ id }: { id: string }) {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-1.5">
-        <KindBadge kind={head.kind} className="self-start" />
+        <div className="flex flex-wrap items-center gap-1.5">
+          <KindBadge kind={head.kind} />
+          {head.recorded_to ? (
+            <SphereBadge sphere={head.sphere} />
+          ) : (
+            <SpherePicker value={move.isPending ? (move.variables ?? null) : (head.sphere ?? null)} onChange={(s) => move.mutate(s)} disabled={move.isPending} />
+          )}
+        </div>
         <h2 className="text-[15px] leading-snug font-semibold">{title}</h2>
         {full !== title && <p className="text-sm leading-relaxed text-foreground/85">{full}</p>}
       </div>
@@ -159,4 +182,19 @@ function History({ id }: { id: string }) {
       </ol>
     </div>
   );
+}
+
+/** Moves knowledge to another sphere: a person's own move is accepted at once. */
+function useMove(id: string) {
+  const { t } = useI18n();
+  const name = useSphereName();
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (sphere: string | null) => api(`/v1/assertions/${id}/sphere`, { method: "PUT", json: { sphere } }),
+    onSuccess: (_proposal, sphere) => {
+      toast(t("sphere.moved", { sphere: sphere ? name(sphere) : t("sphere.none") }));
+      for (const key of [["history", id], ["knowledge"], ["now"]]) client.invalidateQueries({ queryKey: key });
+    },
+    onError: (err: Error) => toast.error(t("inbox.failed", { error: err.message })),
+  });
 }

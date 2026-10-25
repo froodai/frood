@@ -353,6 +353,10 @@ pub struct AssertionContent {
     /// A short headline a person reads first; `text` is the full wording under it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// The sphere of life it belongs to (docs/26 §3), one of the installation's. When none,
+    /// `create` takes its subjects' usual sphere and `supersede` keeps the current one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sphere: Option<String>,
     pub text: String,
     /// Entity ids, or `ref:<key>` of an entity created earlier in the same proposal.
     #[serde(default)]
@@ -404,6 +408,11 @@ pub enum Operation {
         assertion_id: Uuid,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         review_after: Option<Timestamp>,
+    },
+    /// Moves an assertion to another sphere, or out of any; the content stays.
+    SetSphere {
+        assertion_id: Uuid,
+        sphere: Option<String>,
     },
     Link {
         /// Assertion id or `ref:<key>`.
@@ -520,6 +529,7 @@ pub struct AssertionVersion {
     pub version: i32,
     pub kind: String,
     pub title: Option<String>,
+    pub sphere: Option<String>,
     pub text: String,
     pub subjects: Vec<Uuid>,
     pub slots: serde_json::Value,
@@ -596,6 +606,8 @@ pub struct SlotFilter {
 #[derive(Debug, Clone, Default)]
 pub struct AssertionFilter {
     pub kind: Option<String>,
+    /// A sphere id, or `none` for assertions without one.
+    pub sphere: Option<String>,
     pub entity: Option<Uuid>,
     pub status: Option<Status>,
     pub text: Option<String>,

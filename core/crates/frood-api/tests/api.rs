@@ -317,3 +317,146 @@ async fn ledger_routes_end_to_end() {
         );
     }
 }
+
+/// Spheres over HTTP (docs/26 §3): the list, a filter, and a person's move accepted at once.
+#[tokio::test]
+async fn spheres_list_filter_and_move() {
+    let Some((app, tokens)) = app("api_spheres").await else {
+        eprintln!("FROOD_TEST_DATABASE_URL is not set; skipping");
+        return;
+    };
+    let alice = Some(tokens.alice.as_str());
+
+    let (status, spheres, _) = call(&app, "GET", "/v1/spheres", alice, None).await;
+    assert_eq!(status, StatusCode::OK);
+    let ids: Vec<&str> = spheres
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, ["tech", "business", "personal"]);
+    assert_eq!(spheres[0]["built_in"], true);
+    assert!(spheres[0]["name"].is_null(), "clients name built-in ones");
+
+    let note = json!({ "kind": "note", "content": "Atlas moves to Postgres 18" });
+    let (_, captured, _) = call(&app, "POST", "/v1/sources", alice, Some(note)).await;
+    let evidence = captured["source"]["evidence"][0]["id"].clone();
+    let mut fact = commitment(
+        "Atlas moves to Postgres 18",
+        "2026-11-14",
+        "2026-09-02T12:00:00Z",
+        &evidence,
+    );
+    fact["sphere"] = json!("family");
+    let (status, problem, _) = call(
+        &app,
+        "POST",
+        "/v1/proposals",
+        alice,
+        Some(json!({ "risk": "new", "operations": [{ "op": "create", "assertion": fact }] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{problem}");
+
+    fact["sphere"] = json!("tech");
+    let (status, own, _) = call(
+        &app,
+        "POST",
+        "/v1/proposals",
+        alice,
+        Some(json!({ "risk": "new", "operations": [{ "op": "create", "assertion": fact }] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(own["state"], "accepted");
+
+    let (_, tech, _) = call(&app, "GET", "/v1/assertions?sphere=tech", alice, None).await;
+    assert_eq!(tech.as_array().unwrap().len(), 1);
+    assert_eq!(tech[0]["sphere"], "tech");
+    let id = tech[0]["assertion_id"].as_str().unwrap().to_owned();
+
+    let path = format!("/v1/assertions/{id}/sphere");
+    let (status, moved, _) = call(
+        &app,
+        "PUT",
+        &path,
+        alice,
+        Some(json!({ "sphere": "business" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{moved}");
+    assert_eq!(moved["state"], "accepted");
+    assert_eq!(moved["verdicts"][0]["decided_by"], "policy:own-sphere");
+    let (_, business, _) = call(&app, "GET", "/v1/assertions?sphere=business", alice, None).await;
+    assert_eq!(business.as_array().unwrap().len(), 1);
+    let (_, now, _) = call(&app, "GET", "/v1/now?sphere=business", alice, None).await;
+    assert!(
+        now["changes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|c| c["assertion"]["assertion_id"] == id.as_str()),
+        "{now}"
+    );
+    assert_eq!(
+        now["changes"].as_array().unwrap().len(),
+        1,
+        "the move itself is not news: {now}"
+    );
+
+    let (status, _, _) = call(
+        &app,
+        "PUT",
+        &path,
+        Some(tokens.reader.as_str()),
+        Some(json!({ "sphere": "tech" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // A change waiting in the Inbox is accepted into the sphere the person picked.
+    let (_, current, _) = call(&app, "GET", &format!("/v1/assertions/{id}"), alice, None).await;
+    let change = commitment(
+        "Atlas moves to Postgres 18 in December",
+        "2026-12-01",
+        "2026-09-03T12:00:00Z",
+        &evidence,
+    );
+    let (status, waiting, _) = call(
+        &app,
+        "POST",
+        "/v1/proposals",
+        alice,
+        Some(json!({ "risk": "change",
+                     "base": [{ "assertion_id": id, "version": current["version"] }],
+                     "operations": [{ "op": "supersede", "assertion_id": id, "assertion": change }] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(waiting["state"], "open");
+    let (_, inbox, _) = call(&app, "GET", "/v1/inbox", alice, None).await;
+    let item = inbox
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["item"]["data"]["proposal_id"] == waiting["id"])
+        .unwrap_or_else(|| panic!("{inbox}"));
+    assert_eq!(
+        item["content"]["alternatives"][0]["changes"][0]["sphere"],
+        "business"
+    );
+    let item_id = item["item"]["id"].as_str().unwrap();
+    let (status, acted, _) = call(
+        &app,
+        "POST",
+        &format!("/v1/inbox/{item_id}/act"),
+        alice,
+        Some(json!({ "action": "accept", "sphere": "personal" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{acted}");
+    let (_, after, _) = call(&app, "GET", &format!("/v1/assertions/{id}"), alice, None).await;
+    assert_eq!(after["sphere"], "personal");
+    assert_eq!(after["text"], "Atlas moves to Postgres 18 in December");
+}

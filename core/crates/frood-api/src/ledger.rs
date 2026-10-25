@@ -3,7 +3,7 @@
 
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use chrono::{DateTime, NaiveDate, Utc};
 use frood_ledger::model::*;
@@ -24,6 +24,8 @@ pub fn routes() -> Router<AppState> {
         .route("/v1/assertions", get(list_assertions))
         .route("/v1/assertions/{id}", get(assertion))
         .route("/v1/assertions/{id}/history", get(history))
+        .route("/v1/assertions/{id}/sphere", put(set_sphere))
+        .route("/v1/spheres", get(spheres))
         .route("/v1/entities", get(list_entities))
         .route("/v1/entities/{id}", get(entity))
         .route("/v1/proposals", post(open_proposal).get(list_proposals))
@@ -39,6 +41,8 @@ type ApiResult<T> = Result<Json<T>, ApiError>;
 struct NowQuery {
     /// An entity, usually a project.
     project: Option<Uuid>,
+    /// A sphere id, or `none`.
+    sphere: Option<String>,
 }
 
 /// What holds, what is due and what changed (docs/25 §3.1).
@@ -47,7 +51,47 @@ async fn now(
     _caller: Caller<Read>,
     Query(q): Query<NowQuery>,
 ) -> ApiResult<frood_ledger::NowView> {
-    Ok(Json(state.ledger.now(q.project).await?))
+    Ok(Json(
+        state.ledger.now(q.project, q.sphere.as_deref()).await?,
+    ))
+}
+
+/// The installation's spheres. Built-in ones carry no name: clients name them in their language.
+async fn spheres(
+    State(state): State<AppState>,
+    _caller: Caller<Read>,
+) -> Json<Vec<serde_json::Value>> {
+    Json(
+        state
+            .spheres
+            .iter()
+            .map(|s| {
+                serde_json::json!({ "id": s.id, "name": s.name, "about": s.about(),
+                                    "built_in": s.is_built_in() })
+            })
+            .collect(),
+    )
+}
+
+#[derive(Deserialize)]
+struct SphereBody {
+    sphere: Option<String>,
+}
+
+/// Moves an assertion to another sphere (`null`: out of any). A person's own move is accepted
+/// at once; the answer is the proposal.
+async fn set_sphere(
+    State(state): State<AppState>,
+    caller: Caller<Propose>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<SphereBody>,
+) -> ApiResult<Proposal> {
+    Ok(Json(
+        state
+            .ledger
+            .set_sphere(&caller.actor(), id, body.sphere)
+            .await?,
+    ))
 }
 
 async fn capture(
@@ -170,7 +214,7 @@ async fn history(
     Ok(Json(state.ledger.history(id).await?))
 }
 
-/// `GET /v1/assertions?kind=&entity=&status=&text=&valid_at=&as_of=&limit=&after=&slot.<name>.<op>=`
+/// `GET /v1/assertions?kind=&sphere=&entity=&status=&text=&valid_at=&as_of=&limit=&after=&slot.<name>.<op>=`
 async fn list_assertions(
     State(state): State<AppState>,
     _caller: Caller<Read>,
@@ -180,6 +224,7 @@ async fn list_assertions(
     for (key, value) in params {
         match key.as_str() {
             "kind" => filter.kind = Some(value),
+            "sphere" => filter.sphere = Some(value),
             "entity" => filter.entity = Some(parse_uuid(&value)?),
             "status" => filter.status = Some(value.parse().map_err(ApiError::bad_request)?),
             "text" => filter.text = Some(value),

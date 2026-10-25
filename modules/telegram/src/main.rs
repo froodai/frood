@@ -14,6 +14,7 @@
 mod commands;
 mod lang;
 mod notify;
+mod spheres;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -49,6 +50,8 @@ struct Bot {
     console: Arc<tokio::sync::OnceCell<Option<String>>>,
     /// Cards `/inbox` sent together, for "Accept all".
     batches: Arc<std::sync::Mutex<std::collections::HashMap<String, Vec<Card>>>>,
+    /// The installation's spheres and when they were asked (`/v1/spheres`).
+    spheres: Arc<tokio::sync::Mutex<Option<(std::time::Instant, spheres::Spheres)>>>,
 }
 
 #[derive(Deserialize)]
@@ -240,7 +243,7 @@ impl Bot {
                 let answer = match response {
                     Ok(r) if r.status().is_success() => {
                         let digest: Value = r.json().await.unwrap_or(Value::Null);
-                        notify::digest_text(&digest, self.lang.words())
+                        notify::digest_text(&digest, self.lang.words(), &self.spheres().await)
                     }
                     Ok(r) if r.status() == StatusCode::FORBIDDEN => notify::esc(t.not_linked),
                     Ok(r) => {
@@ -672,6 +675,7 @@ fn bot_from_env() -> Result<Bot, String> {
         poll_for: Duration::from_secs(180),
         console: Arc::default(),
         batches: Arc::default(),
+        spheres: Arc::default(),
     })
 }
 
@@ -830,6 +834,7 @@ mod tests {
             poll_for: Duration::from_secs(2),
             console: Arc::default(),
             batches: Arc::default(),
+            spheres: Arc::default(),
         }
     }
 

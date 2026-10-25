@@ -11,11 +11,12 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
 
 pub use interpolate::Secrets;
+pub use model::BUILT_IN_SPHERES;
 pub use model::{
     Account, AccountBudget, AskUser, Attention, AttentionPerson, AttentionRoute, Auth, AutoAccept,
     Backup, BackupKeep, BackupTarget, BeforeNotify, Budget, Config, Deploy, Detectors, Embeddings,
     Installation, Job, ModelProvider, Module, OnExpire, Policies, Provider, Proxy, Reminder,
-    Search, Server, ServerPlacement, SituationMatch, Source, Storage, Trigger,
+    Search, Server, ServerPlacement, SituationMatch, Source, Sphere, Storage, Trigger,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -159,6 +160,7 @@ fn validate(config: &Config) -> Result<(), ConfigError> {
             "policies.entity_merge_threshold {threshold} must be between 0 and 1"
         ));
     }
+    validate_spheres(config, &mut problems);
     validate_auth(config, &mut problems);
     validate_work(config, &mut problems);
     validate_backup(config, &mut problems);
@@ -181,6 +183,26 @@ fn validate(config: &Config) -> Result<(), ConfigError> {
         Ok(())
     } else {
         Err(ConfigError::Invalid(problems))
+    }
+}
+
+fn validate_spheres(config: &Config, problems: &mut Vec<String>) {
+    let mut seen = BTreeSet::new();
+    for sphere in &config.spheres {
+        let id = &sphere.id;
+        if !is_valid_name(id) || id.len() > 32 || id == "none" {
+            problems.push(format!(
+                "spheres: {id:?} must be up to 32 lowercase letters, digits and dashes, starting with a letter, and not `none`"
+            ));
+        }
+        if !seen.insert(id.as_str()) {
+            problems.push(format!("spheres: {id:?} is listed twice"));
+        }
+        if !sphere.is_built_in() && (sphere.name.is_none() || sphere.about.is_none()) {
+            problems.push(format!(
+                "spheres: {id:?} needs `name` (what people see) and `about` (what belongs there, for the model)"
+            ));
+        }
     }
 }
 
@@ -1269,6 +1291,44 @@ jobs:
             parse(&raw, &secrets()),
             Err(ConfigError::Invalid(_))
         ));
+    }
+
+    #[test]
+    fn spheres_default_to_three_and_can_change() {
+        let loaded = parse(&template_for(ServerPlacement::Host), &secrets()).unwrap();
+        let ids: Vec<&str> = loaded
+            .config
+            .spheres
+            .iter()
+            .map(|s| s.id.as_str())
+            .collect();
+        assert_eq!(ids, ["tech", "business", "personal"]);
+        assert_eq!(loaded.config.spheres[2].name(), "Personal");
+        assert!(loaded.config.spheres[0].about().is_some());
+
+        let raw = format!(
+            "{}\nspheres:\n  - id: personal\n  - id: family\n    name: Семья\n    about: home and relatives\n",
+            template_for(ServerPlacement::Host)
+        );
+        let spheres = parse(&raw, &secrets()).unwrap().config.spheres;
+        assert_eq!(spheres.len(), 2);
+        assert_eq!(spheres[1].name(), "Семья");
+
+        let off = format!("{}\nspheres: []\n", template_for(ServerPlacement::Host));
+        assert!(parse(&off, &secrets()).unwrap().config.spheres.is_empty());
+
+        for bad in [
+            "spheres:\n  - id: family\n",
+            "spheres:\n  - id: Work\n",
+            "spheres:\n  - id: none\n    name: x\n    about: y\n",
+            "spheres:\n  - id: tech\n  - id: tech\n",
+        ] {
+            let raw = format!("{}\n{bad}", template_for(ServerPlacement::Host));
+            assert!(
+                matches!(parse(&raw, &secrets()), Err(ConfigError::Invalid(_))),
+                "{bad}"
+            );
+        }
     }
 
     #[test]

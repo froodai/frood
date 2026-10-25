@@ -57,6 +57,8 @@ struct ChangeOut {
     valid_from: Option<String>,
     target_assertion_id: Option<String>,
     close_status: Option<String>,
+    #[serde(default)]
+    sphere: Option<String>,
     conflict: bool,
     confidence: f32,
     quote: String,
@@ -69,10 +71,11 @@ struct SlotOut {
     value: String,
 }
 
-/// JSON Schema of the answer: closed objects, every property required (strict modes).
-pub(crate) fn schema() -> Value {
+/// JSON Schema of the answer: closed objects, every property required (strict modes). Each
+/// change names one of the spheres, when there are any.
+pub(crate) fn schema(spheres: &[&str]) -> Value {
     let nullable = |t: Value| json!({ "anyOf": [t, { "type": "null" }] });
-    json!({
+    let mut schema = json!({
         "type": "object",
         "additionalProperties": false,
         "required": ["entities", "changes"],
@@ -113,7 +116,15 @@ pub(crate) fn schema() -> Value {
                 }
             } }
         }
-    })
+    });
+    if !spheres.is_empty() {
+        let change = &mut schema["properties"]["changes"]["items"];
+        change["properties"]["sphere"] = json!({ "type": "string", "enum": spheres });
+        if let Some(required) = change["required"].as_array_mut() {
+            required.push(json!("sphere"));
+        }
+    }
+    schema
 }
 
 /// Who proposes: a person's own capture stays theirs (R1′); anything else is the job's.
@@ -134,7 +145,14 @@ fn quoted(text: &str) -> String {
     text.replace("</source", "&lt;/source")
 }
 
-fn prompt(source: &Source, text: &str, similar: &[Value], entities: &[Entity]) -> String {
+fn prompt(
+    source: &Source,
+    text: &str,
+    similar: &[Value],
+    entities: &[Entity],
+    usual: &HashMap<Uuid, String>,
+    spheres: &[frood_config::Sphere],
+) -> String {
     let said_at = source.said_at.unwrap_or(source.captured_at);
     let who = if source.captured_by.starts_with("user:") {
         "the person who uses this memory"
@@ -149,13 +167,29 @@ fn prompt(source: &Source, text: &str, similar: &[Value], entities: &[Entity]) -
         .unwrap_or_default();
     let entities: Vec<Value> = entities
         .iter()
-        .map(|e| json!({ "id": e.id, "type": e.entity_type, "name": e.name, "aliases": e.aliases }))
+        .map(|e| {
+            let mut entity =
+                json!({ "id": e.id, "type": e.entity_type, "name": e.name, "aliases": e.aliases });
+            if let Some(sphere) = usual.get(&e.id) {
+                entity["sphere"] = json!(sphere);
+            }
+            entity
+        })
         .collect();
+    let spheres = if spheres.is_empty() {
+        String::new()
+    } else {
+        let lines: Vec<String> = spheres
+            .iter()
+            .map(|s| format!("- {}: {}", s.id, s.about().unwrap_or(s.name())))
+            .collect();
+        format!("<spheres>\n{}\n</spheres>\n\n", lines.join("\n"))
+    };
     format!(
         "<source kind=\"{kind}\" said_at=\"{said_at}\" sent_by=\"{who}\"{about}>\n{text}\n</source>\n\n\
          <known_assertions>\n{similar}\n</known_assertions>\n\n\
          <known_entities>\n{entities}\n</known_entities>\n\n\
-         {language}Today is {today}.",
+         {spheres}{language}Today is {today}.",
         kind = source.kind,
         said_at = said_at.to_rfc3339(),
         text = quoted(text),
@@ -343,10 +377,18 @@ pub(crate) async fn run(ctx: &Ctx, spec: &JobSpec, run: &Run) -> Result<Value, J
                 .map(|h| {
                     let v = &h.version;
                     json!({ "id": v.assertion_id, "version": v.version, "kind": v.kind, "text": v.text,
-                            "slots": v.slots, "modality": v.modality, "valid_from": v.valid_from })
+                            "sphere": v.sphere, "slots": v.slots, "modality": v.modality,
+                            "valid_from": v.valid_from })
                 })
                 .collect();
             let entities = ctx.ledger.entities_in(&text, ENTITIES).await?;
+            let usual = if ctx.spheres.is_empty() {
+                HashMap::new()
+            } else {
+                let ids: Vec<Uuid> = entities.iter().map(|e| e.id).collect();
+                ctx.ledger.usual_spheres(&ids).await?
+            };
+            let sphere_ids: Vec<&str> = ctx.spheres.iter().map(|s| s.id.as_str()).collect();
             let model = spec
                 .with_str("model")
                 .ok_or_else(|| JobError::permanent("no model named in the job"))?;
@@ -356,8 +398,8 @@ pub(crate) async fn run(ctx: &Ctx, spec: &JobSpec, run: &Run) -> Result<Value, J
                     .with_str("instructions")
                     .unwrap_or(INSTRUCTIONS)
                     .to_owned(),
-                user: prompt(&source, &text, &similar, &entities),
-                schema: schema(),
+                user: prompt(&source, &text, &similar, &entities, &usual, &ctx.spheres),
+                schema: schema(&sphere_ids),
                 max_tokens: 16_000,
                 effort: spec.with_str("effort").map(str::to_owned),
             };
@@ -487,9 +529,15 @@ async fn apply(
                 .unwrap_or_else(|| slot.value.clone());
             slots.insert(slot.key.clone(), json!(value));
         }
+        let sphere = change
+            .sphere
+            .as_deref()
+            .filter(|s| ctx.spheres.iter().any(|known| known.id == *s))
+            .map(str::to_owned);
         let content = AssertionContent {
             kind: change.kind.clone(),
             title: change.title.as_deref().and_then(headline),
+            sphere,
             text: change.text.trim().to_owned(),
             subjects,
             slots: Value::Object(slots),
@@ -715,7 +763,20 @@ mod tests {
                 _ => {}
             }
         }
-        check(&schema());
+        check(&schema(&[]));
+        let with_spheres = schema(&["tech", "personal"]);
+        check(&with_spheres);
+        let change = &with_spheres["properties"]["changes"]["items"];
+        assert_eq!(
+            change["properties"]["sphere"]["enum"],
+            json!(["tech", "personal"])
+        );
+        assert!(
+            change["required"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("sphere"))
+        );
     }
 
     #[test]

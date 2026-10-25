@@ -62,6 +62,7 @@ fn commitment(text: &str, due: &str, said_at: DateTime<Utc>, evidence: Uuid) -> 
     AssertionContent {
         kind: "commitment".into(),
         title: None,
+        sphere: None,
         text: text.into(),
         subjects: vec![],
         slots: json!({ "due": due }),
@@ -195,6 +196,7 @@ async fn own_fact_is_accepted_by_policy_but_agent_fact_waits() {
                     key: None,
                     assertion: AssertionContent {
                         title: Some("  Docs freeze  ".into()),
+                        sphere: None,
                         ..commitment(
                             "Docs freeze on Nov 10",
                             "2026-11-10",
@@ -359,6 +361,7 @@ async fn stale_base_blocks_the_second_change() {
                     assertion: AssertionContent {
                         kind: "responsibility".into(),
                         title: None,
+                        sphere: None,
                         text: "Petr owns billing".into(),
                         subjects: vec![],
                         slots: json!({ "person": "Petr", "area": "billing" }),
@@ -388,6 +391,7 @@ async fn stale_base_blocks_the_second_change() {
                 assertion: AssertionContent {
                     kind: "responsibility".into(),
                     title: None,
+                    sphere: None,
                     text: format!("{who} owns billing"),
                     subjects: vec![],
                     slots: json!({ "person": who, "area": "billing" }),
@@ -633,6 +637,7 @@ async fn entities_refs_and_merges() {
                         assertion: AssertionContent {
                             kind: "responsibility".into(),
                             title: None,
+                            sphere: None,
                             text: "Olya owns the Orion release".into(),
                             subjects: vec!["ref:orion".into()],
                             slots: json!({ "person": "Olya" }),
@@ -749,6 +754,7 @@ async fn validation_and_journal_order() {
                 key: None,
                 assertion: AssertionContent {
                     title: Some("t".repeat(frood_ledger::MAX_TITLE_CHARS + 1)),
+                    sphere: None,
                     ..commitment("x", "2026-10-30", day(2026, 10, 1), evidence)
                 },
             }],
@@ -1089,4 +1095,173 @@ async fn a_note_taken_back_takes_what_came_from_it() {
     assert!(back.created);
     assert_eq!(back.source.id, source);
     assert!(back.source.withdrawn_at.is_none());
+}
+
+/// Spheres (docs/26 §3): only the installation's; new knowledge takes its subjects' usual
+/// sphere, a change keeps it, a person moves it at once; lists narrow to one.
+#[tokio::test]
+async fn spheres_label_knowledge() {
+    let ledger = ledger_or_skip!("ledger_spheres").with_spheres(vec![
+        "tech".into(),
+        "business".into(),
+        "personal".into(),
+    ]);
+    let evidence = capture(&ledger, "Atlas moves to Postgres 18. Atlas demo on Friday.").await;
+    let in_sphere = |sphere: &str| AssertionFilter {
+        sphere: Some(sphere.to_owned()),
+        ..Default::default()
+    };
+
+    let refused = ledger
+        .open_proposal(
+            &user(),
+            proposal(
+                Risk::New,
+                vec![],
+                vec![Operation::Create {
+                    key: None,
+                    assertion: AssertionContent {
+                        sphere: Some("family".into()),
+                        ..commitment("Dinner on Sunday", "2026-09-06", day(2026, 9, 2), evidence)
+                    },
+                }],
+            ),
+        )
+        .await;
+    assert!(
+        matches!(&refused, Err(LedgerError::Invalid(m)) if m.contains("family") && m.contains("tech")),
+        "{refused:?}"
+    );
+
+    ledger
+        .open_proposal(
+            &user(),
+            proposal(
+                Risk::New,
+                vec![],
+                vec![
+                    Operation::CreateEntity {
+                        key: Some("atlas".into()),
+                        entity_type: "project".into(),
+                        name: "Atlas".into(),
+                        aliases: vec![],
+                    },
+                    Operation::Create {
+                        key: None,
+                        assertion: AssertionContent {
+                            kind: "decision".into(),
+                            sphere: Some("tech".into()),
+                            subjects: vec!["ref:atlas".into()],
+                            ..commitment(
+                                "Atlas moves to Postgres 18",
+                                "2026-11-01",
+                                day(2026, 9, 2),
+                                evidence,
+                            )
+                        },
+                    },
+                ],
+            ),
+        )
+        .await
+        .unwrap();
+    let atlas = ledger.entities(Some("Atlas"), None, 5).await.unwrap()[0].id;
+    assert_eq!(
+        ledger.usual_spheres(&[atlas]).await.unwrap().get(&atlas),
+        Some(&"tech".to_owned())
+    );
+
+    // No sphere given: the project's usual one.
+    let demo = ledger
+        .open_proposal(
+            &user(),
+            proposal(
+                Risk::New,
+                vec![],
+                vec![Operation::Create {
+                    key: None,
+                    assertion: AssertionContent {
+                        subjects: vec![atlas.to_string()],
+                        ..commitment(
+                            "Atlas demo on Friday",
+                            "2026-09-04",
+                            day(2026, 9, 2),
+                            evidence,
+                        )
+                    },
+                }],
+            ),
+        )
+        .await
+        .unwrap();
+    let demo = created_id(&demo, &ledger.journal(0, 1000).await.unwrap());
+    assert_eq!(
+        ledger.assertions(&in_sphere("tech")).await.unwrap().len(),
+        2
+    );
+
+    // A person moves it: accepted at once, as a new version with the same content.
+    let moved = ledger
+        .set_sphere(&user(), demo, Some("business".into()))
+        .await
+        .unwrap();
+    assert_eq!(moved.verdicts[0].decided_by, "policy:own-sphere");
+    let history = ledger.history(demo).await.unwrap();
+    let current: Vec<_> = history.iter().filter(|v| v.recorded_to.is_none()).collect();
+    assert_eq!(current.len(), 1);
+    assert_eq!(current[0].sphere.as_deref(), Some("business"));
+    assert_eq!(current[0].text, "Atlas demo on Friday");
+    assert!(history.iter().any(|v| v.sphere.as_deref() == Some("tech")));
+
+    // An agent's move waits for a person.
+    let from_agent = ledger
+        .set_sphere(&agent(), demo, Some("personal".into()))
+        .await
+        .unwrap();
+    assert_eq!(from_agent.state, ProposalState::Open);
+
+    // A change that names no sphere keeps the current one.
+    let version = current[0].version;
+    let changed = ledger
+        .open_proposal(
+            &user(),
+            proposal(
+                Risk::Change,
+                vec![BaseRef {
+                    assertion_id: demo,
+                    version,
+                }],
+                vec![Operation::Supersede {
+                    assertion_id: demo,
+                    assertion: commitment(
+                        "Atlas demo moves to Monday",
+                        "2026-09-07",
+                        day(2026, 9, 3),
+                        evidence,
+                    ),
+                }],
+            ),
+        )
+        .await
+        .unwrap();
+    ledger
+        .submit_verdict(&user(), changed.id, accept(None))
+        .await
+        .unwrap();
+    let business = ledger.assertions(&in_sphere("business")).await.unwrap();
+    assert_eq!(business.len(), 1);
+    assert_eq!(business[0].text, "Atlas demo moves to Monday");
+
+    // Out of any sphere.
+    ledger.set_sphere(&user(), demo, None).await.unwrap();
+    let none = ledger.assertions(&in_sphere("none")).await.unwrap();
+    assert_eq!(none.len(), 1);
+    assert_eq!(none[0].assertion_id, demo);
+    assert!(
+        ledger
+            .assertions(&in_sphere("business"))
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }

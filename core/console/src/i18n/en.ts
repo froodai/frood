@@ -48,6 +48,13 @@ export const en = {
   "kind.status": "Status",
   "kind.event": "Event",
   "kind.open_question": "Open question",
+  "sphere.label": "Sphere",
+  "sphere.all": "All spheres",
+  "sphere.none": "No sphere",
+  "sphere.tech": "Work · tech",
+  "sphere.business": "Work · business",
+  "sphere.personal": "Personal",
+  "sphere.moved": "Moved to “{sphere}”",
 
   "inbox.filter.all": "All",
   "inbox.keys": "j k — move · a o s — decide · x — select",

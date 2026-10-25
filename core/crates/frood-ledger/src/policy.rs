@@ -51,6 +51,18 @@ pub(crate) fn evaluate(
         return Some(("own-facts", only.key.clone()));
     }
 
+    // A person moving knowledge to another sphere changes a label, not what is known
+    // (docs/26 §3): accepted at once.
+    if author_is_user
+        && !only.operations.is_empty()
+        && only
+            .operations
+            .iter()
+            .all(|op| matches!(op, Operation::SetSphere { .. }))
+    {
+        return Some(("own-sphere", only.key.clone()));
+    }
+
     // W4′: an agent reading an authoritative source may record new knowledge and changes;
     // contradictions always wait for a person.
     if context.authoritative_source.is_some()
@@ -120,6 +132,7 @@ mod tests {
             assertion: AssertionContent {
                 kind: "fact".to_owned(),
                 title: None,
+                sphere: None,
                 text: "x".to_owned(),
                 subjects: Vec::new(),
                 slots: serde_json::json!({}),

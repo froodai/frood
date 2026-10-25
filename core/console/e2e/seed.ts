@@ -1,5 +1,6 @@
 // Demo knowledge for the console: two projects, deadlines around today, decisions, owners,
-// an accepted change with history, and changes that wait in the Inbox.
+// an accepted change with history, changes that wait in the Inbox, and work and personal
+// knowledge in their spheres.
 // FROOD_URL and FROOD_TOKEN (a personal token with every permission) come from serve.sh.
 
 const SERVER = process.env.FROOD_URL ?? "http://127.0.0.1:18080";
@@ -30,7 +31,7 @@ async function note(text: string, daysAgo = 1): Promise<string> {
   return r.source.evidence[0].id;
 }
 
-type Content = { kind: string; title?: string; text: string; subjects?: string[]; slots?: Record<string, unknown>; modality?: string };
+type Content = { kind: string; title?: string; sphere?: string; text: string; subjects?: string[]; slots?: Record<string, unknown>; modality?: string };
 
 function assertion(c: Content, evidence: string, daysAgo: number) {
   return { modality: "agreed", subjects: [], slots: {}, ...c, said_at: ago(daysAgo), evidence: [evidence] };
@@ -74,20 +75,22 @@ async function entity(type: string, name: string): Promise<string> {
 const atlas = await entity("project", "Atlas");
 const website = await entity("project", "Website");
 
-await fact({ kind: "commitment", text: "Payments demo for the team", subjects: [atlas], slots: { due: day(1), owner: "Igor" } }, "Igor will demo payments to the team on " + day(1));
-await fact({ kind: "commitment", text: "Copy for the landing page", subjects: [website], slots: { due: day(5) } }, "I write the landing copy by " + day(5));
-await fact({ kind: "commitment", text: "Security review of Atlas", subjects: [atlas], slots: { due: day(12), owner: "Oleg" } }, "Oleg finishes the security review by " + day(12));
-await fact({ kind: "commitment", text: "Expense report for October", slots: { due: day(-1) } }, "Expense report due " + day(-1));
-await fact({ kind: "decision", text: "Payments go through one provider; no billing of our own", subjects: [atlas], modality: "decided" }, "Decided: one payment provider, we do not build billing", 20);
-await fact({ kind: "decision", text: "The landing page lives on the main domain under /launch", subjects: [website], modality: "decided" }, "Landing goes to /launch on the main domain", 9);
-await fact({ kind: "responsibility", text: "Oleg is responsible for security", subjects: [atlas] }, "Oleg owns security for Atlas", 30);
-await fact({ kind: "open_question", text: "Does the first release of Atlas support single sign-on?", subjects: [atlas] }, "Open: SSO in the first release?", 4);
+await fact({ kind: "commitment", sphere: "tech", text: "Payments demo for the team", subjects: [atlas], slots: { due: day(1), owner: "Igor" } }, "Igor will demo payments to the team on " + day(1));
+await fact({ kind: "commitment", sphere: "business", text: "Copy for the landing page", subjects: [website], slots: { due: day(5) } }, "I write the landing copy by " + day(5));
+await fact({ kind: "commitment", sphere: "tech", text: "Security review of Atlas", subjects: [atlas], slots: { due: day(12), owner: "Oleg" } }, "Oleg finishes the security review by " + day(12));
+await fact({ kind: "commitment", sphere: "business", text: "Expense report for October", slots: { due: day(-1) } }, "Expense report due " + day(-1));
+await fact({ kind: "decision", sphere: "business", text: "Payments go through one provider; no billing of our own", subjects: [atlas], modality: "decided" }, "Decided: one payment provider, we do not build billing", 20);
+await fact({ kind: "decision", sphere: "tech", text: "The landing page lives on the main domain under /launch", subjects: [website], modality: "decided" }, "Landing goes to /launch on the main domain", 9);
+await fact({ kind: "responsibility", sphere: "tech", text: "Oleg is responsible for security", subjects: [atlas] }, "Oleg owns security for Atlas", 30);
+await fact({ kind: "open_question", sphere: "tech", text: "Does the first release of Atlas support single sign-on?", subjects: [atlas] }, "Open: SSO in the first release?", 4);
+await fact({ kind: "commitment", sphere: "personal", text: "Book flights for the holidays", slots: { due: day(6) } }, "Book the holiday flights by " + day(6));
+await fact({ kind: "event", sphere: "personal", text: "Dinner with parents on Sunday", slots: { date: day(3) } }, "Dinner with my parents on " + day(3), 2);
 
-const release = await fact({ kind: "commitment", text: "Atlas release on " + day(20), subjects: [atlas], slots: { due: day(20) } }, "Atlas ships on " + day(20), 15);
-const owner = await fact({ kind: "responsibility", text: "Igor is responsible for the payments module", subjects: [atlas] }, "Igor takes the payments module", 40);
-const migration = await fact({ kind: "status", text: "Migration to PostgreSQL 17: in progress", subjects: [atlas], slots: { state: "in progress" } }, "Started the PostgreSQL 17 migration", 8);
-const cadence = await fact({ kind: "decision", text: "Atlas releases every Tuesday, weekly", subjects: [atlas], modality: "decided" }, "We release every Tuesday", 50);
-const staging = await fact({ kind: "fact", text: "Staging of Atlas is at stage.atlas.example", subjects: [atlas] }, "staging: stage.atlas.example", 60);
+const release = await fact({ kind: "commitment", sphere: "business", text: "Atlas release on " + day(20), subjects: [atlas], slots: { due: day(20) } }, "Atlas ships on " + day(20), 15);
+const owner = await fact({ kind: "responsibility", sphere: "tech", text: "Igor is responsible for the payments module", subjects: [atlas] }, "Igor takes the payments module", 40);
+const migration = await fact({ kind: "status", sphere: "tech", text: "Migration to PostgreSQL 17: in progress", subjects: [atlas], slots: { state: "in progress" } }, "Started the PostgreSQL 17 migration", 8);
+const cadence = await fact({ kind: "decision", sphere: "tech", text: "Atlas releases every Tuesday, weekly", subjects: [atlas], modality: "decided" }, "We release every Tuesday", 50);
+const staging = await fact({ kind: "fact", sphere: "tech", text: "Staging of Atlas is at stage.atlas.example", subjects: [atlas] }, "staging: stage.atlas.example", 60);
 
 // An accepted change: history with two versions.
 const moved = await change(staging, { kind: "fact", text: "Staging of Atlas is at staging.atlas.example", subjects: [atlas] }, "Staging moved to staging.atlas.example", "The address changed in the deploy notes");
@@ -123,6 +126,7 @@ async function found(c: Content, quote: string, uri: string, title: string, rati
 await found(
   {
     kind: "fact",
+    sphere: "tech",
     title: "ATL-142: a finished session loads for 22 minutes",
     text: "ATL-142 (Bug, Chat): a finished session with a long history (1987 records) shows only the last part and keeps loading for about 22 minutes; the proposed fix is to attach with session/resume instead of session/load. Assigned to Maria.",
     subjects: [atlas],
@@ -133,7 +137,7 @@ await found(
   "Tracker (ATL): ATL-142 was created today by Oleg, state Submitted, priority Normal, assignee Maria.",
 );
 await found(
-  { kind: "decision", title: "Search moves to OpenSearch", text: "Atlas search moves from PostgreSQL full-text to OpenSearch in the next quarter.", subjects: [atlas], modality: "decided" },
+  { kind: "decision", sphere: "tech", title: "Search moves to OpenSearch", text: "Atlas search moves from PostgreSQL full-text to OpenSearch in the next quarter.", subjects: [atlas], modality: "decided" },
   "ADR-12: Status accepted. Search moves to OpenSearch next quarter.",
   "https://git.example/atlas/adr/012-search.md",
   "ADR-12: Search engine",

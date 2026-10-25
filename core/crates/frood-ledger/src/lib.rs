@@ -37,11 +37,48 @@ pub const MAX_BLOB_BYTES: usize = 25 * 1024 * 1024;
 pub struct Ledger {
     pool: PgPool,
     policy: PolicyConfig,
+    /// The installation's sphere ids; `None` takes any well-formed id.
+    spheres: Option<std::sync::Arc<[String]>>,
 }
 
 impl Ledger {
     pub fn new(pool: PgPool, policy: PolicyConfig) -> Self {
-        Self { pool, policy }
+        Self {
+            pool,
+            policy,
+            spheres: None,
+        }
+    }
+
+    /// Only these spheres may be named (docs/26 §3); an empty list turns spheres off.
+    pub fn with_spheres(mut self, ids: Vec<String>) -> Self {
+        self.spheres = Some(ids.into());
+        self
+    }
+
+    /// The installation's sphere ids, when the Ledger was given them.
+    pub fn spheres(&self) -> Option<&[String]> {
+        self.spheres.as_deref()
+    }
+
+    fn check_spheres(&self, operations: &[Operation]) -> Result<()> {
+        let Some(allowed) = &self.spheres else {
+            return Ok(());
+        };
+        for sphere in apply::spheres_in(operations) {
+            if allowed.is_empty() {
+                return Err(invalid(format!(
+                    "sphere {sphere:?}: this installation has no spheres"
+                )));
+            }
+            if !allowed.iter().any(|a| a == sphere) {
+                return Err(invalid(format!(
+                    "sphere {sphere:?} is not one of this installation's: {}",
+                    allowed.join(", ")
+                )));
+            }
+        }
+        Ok(())
     }
 
     pub fn pool(&self) -> &PgPool {
@@ -374,6 +411,7 @@ impl Ledger {
         }
         for alternative in &alternatives {
             apply::validate(&alternative.operations, &input.base)
+                .and_then(|()| self.check_spheres(&alternative.operations))
                 .map_err(|e| invalid(format!("alternative {:?}: {e}", alternative.key)))?;
         }
         if input.confidence.is_some_and(|c| !(0.0..=1.0).contains(&c)) {
@@ -533,6 +571,7 @@ impl Ledger {
                     .clone()
                     .ok_or_else(|| invalid("accept_with_edits needs operations"))?;
                 apply::validate(&operations, &proposal.base)?;
+                self.check_spheres(&operations)?;
                 let key = input
                     .alternative
                     .clone()
@@ -602,6 +641,7 @@ impl Ledger {
             .await?;
             let mut applier =
                 apply::Applier::new(&mut tx, at, proposal_id, verdict_id, actor.as_str());
+            applier.spheres = self.spheres.as_deref();
             applier.apply(&operations).await?;
             events.append(&mut applier.events);
         } else {
@@ -774,9 +814,66 @@ impl Ledger {
         query::assertions(&self.pool, filter).await
     }
 
-    /// What holds, what is due and what changed (docs/25 §3.1), for one project or all.
-    pub async fn now(&self, project: Option<Uuid>) -> Result<NowView> {
-        now::now(&self.pool, project, chrono::Utc::now()).await
+    /// What holds, what is due and what changed (docs/25 §3.1), for one project or all, in
+    /// one sphere or all.
+    pub async fn now(&self, project: Option<Uuid>, sphere: Option<&str>) -> Result<NowView> {
+        now::now(&self.pool, project, sphere, chrono::Utc::now()).await
+    }
+
+    /// Moves an assertion to another sphere. A person's own move is accepted at once.
+    pub async fn set_sphere(
+        &self,
+        actor: &Actor,
+        assertion_id: Uuid,
+        sphere: Option<String>,
+    ) -> Result<Proposal> {
+        let current = {
+            let mut conn = self.pool.acquire().await?;
+            apply::current_version(&mut conn, assertion_id)
+                .await?
+                .ok_or_else(|| LedgerError::NotFound(format!("assertion {assertion_id}")))?
+        };
+        self.open_proposal(
+            actor,
+            NewProposal {
+                idempotency_key: None,
+                rationale: None,
+                risk: Risk::Change,
+                confidence: None,
+                base: vec![BaseRef {
+                    assertion_id,
+                    version: current.version,
+                }],
+                operations: Some(vec![Operation::SetSphere {
+                    assertion_id,
+                    sphere,
+                }]),
+                alternatives: None,
+                evidence: Vec::new(),
+            },
+        )
+        .await
+    }
+
+    /// The sphere most current assertions about each entity have: a hint for new ones.
+    pub async fn usual_spheres(
+        &self,
+        entities: &[Uuid],
+    ) -> Result<std::collections::HashMap<Uuid, String>> {
+        Ok(sqlx::query_as::<_, (Uuid, String)>(
+            "SELECT DISTINCT ON (entity) entity, sphere FROM ( \
+               SELECT unnest(subjects) AS entity, sphere, count(*) AS n FROM assertion_versions \
+               WHERE recorded_to IS NULL AND status = 'active' AND sphere IS NOT NULL AND subjects && $1 \
+                 AND ($2::text[] IS NULL OR sphere = ANY($2)) \
+               GROUP BY 1, 2) counted \
+             WHERE entity = ANY($1) ORDER BY entity, n DESC, sphere",
+        )
+        .bind(entities)
+        .bind(self.spheres.as_deref())
+        .fetch_all(&self.pool)
+        .await?
+        .into_iter()
+        .collect())
     }
 
     pub async fn entity(&self, id: Uuid) -> Result<EntityView> {

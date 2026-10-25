@@ -30,6 +30,8 @@ pub struct AppState {
     pub searcher: frood_search::Searcher,
     pub dispatch: frood_dispatch::Dispatch,
     pub installation: String,
+    /// The installation's spheres (docs/26 §3); empty when they are off.
+    pub spheres: std::sync::Arc<Vec<frood_config::Sphere>>,
     /// SHA-256 of the config file the server started with; `frood apply` restarts the server
     /// when the file differs.
     pub config_sha256: Option<String>,
@@ -59,7 +61,8 @@ pub fn assemble(
             auto_accept_own_facts: policies.auto_accept_own_facts,
             entity_merge_threshold: policies.entity_merge_threshold,
         },
-    );
+    )
+    .with_spheres(config.spheres.iter().map(|s| s.id.clone()).collect());
     let auth = Auth::new(pool, frood_auth::AuthSettings::from_config(config));
     let gateway = frood_llm::Gateway::new(&config.accounts);
     let searcher = frood_search::Searcher::new(ledger.clone(), gateway.clone(), &config.search);
@@ -81,7 +84,8 @@ pub fn assemble(
         jobs,
     )
     .with_sources(config.sources.clone())
-    .with_attention(config.attention.clone());
+    .with_attention(config.attention.clone())
+    .with_spheres(config.spheres.clone());
     if let Some(backup) = &config.backup {
         dispatch = dispatch.with_backup(frood_dispatch::BackupSetup {
             settings: backup.clone(),
@@ -98,6 +102,7 @@ pub fn assemble(
             searcher,
             dispatch,
             installation: config.installation.name.clone(),
+            spheres: std::sync::Arc::new(config.spheres.clone()),
             config_sha256: None,
         },
         modules,

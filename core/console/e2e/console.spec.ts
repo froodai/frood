@@ -135,3 +135,46 @@ test("logs read as lines, filtered by level", async ({ page }) => {
   await page.getByRole("button", { name: "Errors" }).click();
   await expect(page.getByText(/dispatcher started/)).toHaveCount(0);
 });
+
+test("spheres: a sign on each item, a filter, and a move in one click", async ({ page }) => {
+  await signIn(page, "/admin/knowledge");
+  const filter = page.getByRole("main").locator("section").getByRole("combobox", { name: "Sphere" });
+  await filter.click();
+  await page.getByRole("option", { name: "Personal" }).click();
+  await expect(page).toHaveURL(/sphere=personal/);
+  await expect(page.getByRole("button", { name: /Book flights for the holidays/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Copy for the landing page/ })).toHaveCount(0);
+
+  // Moved by hand: accepted at once.
+  await filter.click();
+  await page.getByRole("option", { name: "All spheres" }).click();
+  await page.getByRole("button", { name: /Copy for the landing page/ }).click();
+  const picker = page.getByRole("complementary").getByRole("combobox", { name: "Sphere" });
+  await expect(picker).toHaveText("Work · business");
+  await picker.click();
+  await page.getByRole("option", { name: "Personal" }).click();
+  await expect(page.getByText("Moved to “Personal”")).toBeVisible();
+  await filter.click();
+  await page.getByRole("option", { name: "Personal" }).click();
+  await expect(page.getByRole("button", { name: /Copy for the landing page/ })).toBeVisible();
+
+  // Now narrows to a sphere.
+  await page.goto("/admin/now");
+  await page.getByRole("button", { name: "Personal" }).click();
+  const deadlines = page.getByRole("region", { name: "Deadlines" });
+  await expect(deadlines.getByText("Book flights for the holidays")).toBeVisible();
+  await expect(deadlines.getByText("Security review of Atlas")).toHaveCount(0);
+
+  // In the Inbox: the proposed sphere, changed as the change is accepted.
+  await page.goto("/admin/inbox");
+  const row = page.getByRole("button", { name: /^Search moves to OpenSearch/ });
+  await expect(row.getByText("Work · tech")).toBeVisible();
+  await row.click();
+  const proposed = page.getByRole("complementary").getByRole("combobox", { name: "Sphere" });
+  await proposed.click();
+  await page.getByRole("option", { name: "Work · business" }).click();
+  await page.getByRole("complementary").getByRole("button", { name: /^Accept/ }).click();
+  await expect(row).toHaveCount(0);
+  await page.goto("/admin/knowledge?sphere=business");
+  await expect(page.getByRole("button", { name: /Search moves to OpenSearch/ })).toBeVisible();
+});
