@@ -416,8 +416,9 @@ async fn agent_asks_waits_resumes_and_proposes() {
     assert_eq!(now["status"], "running", "{now}");
     assert_eq!(now["pending_messages"], json!([]), "delivered");
 
-    // It proposes; an agent's proposal waits for a person, and the agent cannot decide it.
-    let proposal = text(
+    // It proposes. New knowledge from an ordinary source is taken at once, marked not verified
+    // (QF3); a change waits for a person, and the agent cannot decide it.
+    let found = text(
         &tool(
             &app,
             &fresh,
@@ -430,8 +431,28 @@ async fn agent_asks_waits_resumes_and_proposes() {
         )
         .await,
     );
+    assert_eq!(found["state"], "accepted", "{found}");
+    assert_eq!(found["author"], format!("agent:sweep/for/{alice}"));
+    let (_, decisions) = call(&app, get_json("/v1/assertions?kind=decision", &pat)).await;
+    let decision = &decisions[0];
+    assert_eq!(decision["unverified"], true, "{decisions}");
+    let proposal = text(
+        &tool(
+            &app,
+            &fresh,
+            "propose_change",
+            json!({
+                "risk": "change",
+                "base": [{ "assertion_id": decision["assertion_id"], "version": 1 }],
+                "operations": [{ "op": "supersede", "assertion_id": decision["assertion_id"],
+                    "assertion": { "kind": "decision", "text": "Релизы по пятницам", "modality": "agreed" } }],
+                "rationale": "Changed in #release at 18:30",
+                "source_text": "нет, давайте по пятницам",
+            }),
+        )
+        .await,
+    );
     assert_eq!(proposal["state"], "open", "{proposal}");
-    assert_eq!(proposal["author"], format!("agent:sweep/for/{alice}"));
     let decided = tool(
         &app,
         &fresh,

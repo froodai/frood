@@ -189,7 +189,10 @@ impl Bot {
                         day(d["due"].as_str().unwrap_or_default(), t)
                     };
                     let what = d["title"].as_str().or(d["text"].as_str()).unwrap_or("?");
-                    let line = format!("<b>{}</b> — {}", esc(&when), esc(&short(what, 110)));
+                    let mut line = format!("<b>{}</b> — {}", esc(&when), esc(&short(what, 110)));
+                    if d["unverified"] == true {
+                        line.push_str(&format!(" · <i>{}</i>", esc(t.unverified)));
+                    }
                     (d["sphere"].as_str().map(str::to_owned), line)
                 })
                 .collect();
@@ -209,7 +212,7 @@ impl Bot {
     }
 
     /// Answers from memory without a model: what holds about it, since when.
-    async fn ask(&self, question: &str) -> Result<String, String> {
+    pub(crate) async fn ask(&self, question: &str) -> Result<String, String> {
         let t = self.lang.texts();
         let path = format!("/v1/search?limit=3&q={}", url_escape(question));
         let hits = self.get(&path).await?;
@@ -220,10 +223,13 @@ impl Bot {
         Ok(hits
             .iter()
             .map(|h| {
-                let since = t.since.replace(
+                let mut since = t.since.replace(
                     "{date}",
                     &day(h["valid_from"].as_str().unwrap_or_default(), t),
                 );
+                if h["unverified"] == true {
+                    since = format!("{since} · {}", t.unverified);
+                }
                 format!(
                     "• {} <i>({})</i>",
                     esc(h["text"].as_str().unwrap_or("?")),

@@ -28,7 +28,9 @@ async fn app_in(name: &str, objects: &str, base: &std::path::Path) -> Option<(Ro
         .await
         .expect("test database");
     let config = frood_config::parse(
-        &format!("version: 1\ninstallation: {{name: test}}\nstorage: {{uses: postgres, url: 'postgres://unused', objects: {objects}}}\ndeploy: {{server: host}}\n"),
+        // The policies these tests were written against; docs/27's own tests are elsewhere.
+        &format!("version: 1\ninstallation: {{name: test}}\nstorage: {{uses: postgres, url: 'postgres://unused', objects: {objects}}}\ndeploy: {{server: host}}\n\
+                  policies: {{auto_accept_own_changes: false, accept_agent_findings: false}}\n"),
         &frood_config::Secrets::from_pairs(Vec::<(String, String)>::new()),
     )
     .unwrap()

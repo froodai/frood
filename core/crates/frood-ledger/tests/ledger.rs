@@ -7,12 +7,26 @@ use frood_ledger::{Ledger, LedgerError, PolicyConfig};
 use serde_json::json;
 use uuid::Uuid;
 
+/// A ledger with the policies these tests were written against: a person's new facts are
+/// theirs, anything else waits. The newer rules (docs/27) have their own tests.
 async fn ledger(name: &str) -> Option<Ledger> {
+    ledger_with(
+        name,
+        PolicyConfig {
+            auto_accept_own_changes: false,
+            accept_agent_findings: false,
+            ..PolicyConfig::default()
+        },
+    )
+    .await
+}
+
+async fn ledger_with(name: &str, policy: PolicyConfig) -> Option<Ledger> {
     let url = frood_store::testing::database_url()?;
     let pool = frood_store::testing::fresh_database(&url, name)
         .await
         .expect("test database");
-    Some(Ledger::new(pool, PolicyConfig::default()))
+    Some(Ledger::new(pool, policy))
 }
 
 macro_rules! ledger_or_skip {
@@ -1491,4 +1505,128 @@ async fn files_move_from_the_database_to_a_folder() {
         .capture(&user(), note, Some(voice(&vec![0; 1_048_577])))
         .await;
     assert!(matches!(too_big, Err(LedgerError::Invalid(_))));
+}
+
+#[tokio::test]
+async fn own_changes_are_taken_and_agents_findings_marked_not_verified() {
+    let Some(ledger) = ledger_with("ledger_first_hour", PolicyConfig::default()).await else {
+        eprintln!("FROOD_TEST_DATABASE_URL is not set; skipping");
+        return;
+    };
+    // Alice's own note: her fact, then her change of it — both taken at once.
+    let note = capture(&ledger, "we run Postgres 16").await;
+    let mine = ledger
+        .open_proposal(
+            &user(),
+            proposal(
+                Risk::New,
+                vec![],
+                vec![Operation::Create {
+                    key: None,
+                    assertion: commitment("Postgres 16", "2026-12-01", day(2026, 10, 1), note),
+                }],
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(mine.state, ProposalState::Accepted);
+    let journal = ledger.journal(0, 100).await.unwrap();
+    let id = created_id(&mine, &journal);
+    let later = capture(&ledger, "we moved to Postgres 17").await;
+    let change = |text: &str, evidence: Uuid, version: i32| {
+        proposal(
+            Risk::Change,
+            vec![BaseRef {
+                assertion_id: id,
+                version,
+            }],
+            vec![Operation::Supersede {
+                assertion_id: id,
+                assertion: commitment(text, "2026-12-01", day(2026, 10, 2), evidence),
+            }],
+        )
+    };
+    let changed = ledger
+        .open_proposal(
+            &Actor::parse("user:alice/via/extract").unwrap(),
+            change("Postgres 17", later, 1),
+        )
+        .await
+        .unwrap();
+    assert_eq!(changed.state, ProposalState::Accepted);
+    assert_eq!(changed.verdicts[0].decided_by, "policy:own-change");
+
+    // An agent's new finding: taken, but marked not verified.
+    let found = ledger
+        .open_proposal(
+            &agent(),
+            proposal(
+                Risk::New,
+                vec![],
+                vec![Operation::Create {
+                    key: None,
+                    assertion: commitment("Docs freeze", "2026-11-10", day(2026, 10, 3), note),
+                }],
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(found.state, ProposalState::Accepted);
+    assert_eq!(found.verdicts[0].decided_by, "policy:agent-finding");
+    let journal = ledger.journal(0, 100).await.unwrap();
+    let freeze = created_id(&found, &journal);
+    let view = ledger.assertion(freeze, None, None).await.unwrap();
+    assert!(view.version.unverified);
+    assert_eq!(view.flags, vec![Flag::NeedsVerification]);
+
+    // Alice's change of what the agent found waits for her verdict: it is not only hers.
+    let not_mine = ledger
+        .open_proposal(
+            &user(),
+            proposal(
+                Risk::Change,
+                vec![BaseRef {
+                    assertion_id: freeze,
+                    version: 1,
+                }],
+                vec![Operation::Supersede {
+                    assertion_id: freeze,
+                    assertion: commitment("Docs freeze", "2026-11-12", day(2026, 10, 4), later),
+                }],
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(not_mine.state, ProposalState::Open);
+    ledger
+        .submit_verdict(
+            &user(),
+            not_mine.id,
+            VerdictInput {
+                decision: Decision::Reject,
+                ..accept(None)
+            },
+        )
+        .await
+        .unwrap();
+
+    // Her check takes the mark off at once.
+    let checked = ledger.verify(&user(), freeze).await.unwrap();
+    assert_eq!(checked.verdicts[0].decided_by, "policy:own-check");
+    let view = ledger.assertion(freeze, None, None).await.unwrap();
+    assert!(!view.version.unverified);
+    assert!(view.flags.is_empty());
+
+    // An agent's change waits.
+    let current = ledger
+        .assertion(id, None, None)
+        .await
+        .unwrap()
+        .version
+        .version;
+    let agents_change = ledger
+        .open_proposal(&agent(), change("Postgres 18", later, current))
+        .await
+        .unwrap();
+    assert_eq!(agents_change.state, ProposalState::Open);
 }

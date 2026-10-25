@@ -850,6 +850,10 @@ mod tests {
                 assert_eq!(message_ref, "77:901");
                 Json(json!({ "item": { "id": "item-1" } }))
             }))
+            .route("/v1/search", get(|| async { Json(json!([
+                { "text": "Docs freeze on Nov 10", "valid_from": "2026-10-03T12:00:00Z", "unverified": true },
+                { "text": "Release 2.4 on Nov 14", "valid_from": "2026-10-01T12:00:00Z" }
+            ])) }))
             .route("/botTOKEN/getMe", post(|| async { Json(json!({ "ok": true, "result": { "id": 7, "is_bot": true, "username": "frood_test_bot" } })) }))
             .route("/v1/channels/telegram/about", axum::routing::put(|State(w): State<Shared>, headers: HeaderMap, Json(b): Json<Value>| async move {
                 assert_eq!(headers["authorization"], "Bearer module-token");
@@ -942,6 +946,16 @@ mod tests {
             base[k] = v.clone();
         }
         serde_json::from_value(base).unwrap()
+    }
+
+    #[tokio::test]
+    async fn answers_say_what_is_not_verified() {
+        let (url, _) = world().await;
+        let answer = bot(&url, Lang::Ru).ask("релиз").await.unwrap();
+        assert_eq!(
+            answer,
+            "• Docs freeze on Nov 10 <i>(с 3 окт · не проверено)</i>\n• Release 2.4 on Nov 14 <i>(с 1 окт)</i>"
+        );
     }
 
     #[tokio::test]

@@ -25,6 +25,7 @@ pub fn routes() -> Router<AppState> {
         .route("/v1/assertions/{id}", get(assertion))
         .route("/v1/assertions/{id}/history", get(history))
         .route("/v1/assertions/{id}/sphere", put(set_sphere))
+        .route("/v1/assertions/{id}/verify", post(verify))
         .route("/v1/spheres", get(spheres))
         .route("/v1/entities", get(list_entities))
         .route("/v1/entities/{id}", get(entity))
@@ -92,6 +93,16 @@ async fn set_sphere(
             .set_sphere(&caller.actor(), id, body.sphere)
             .await?,
     ))
+}
+
+/// A person confirms knowledge marked not verified is right: their own check, accepted at
+/// once; the mark comes off. The answer is the proposal.
+async fn verify(
+    State(state): State<AppState>,
+    caller: Caller<Propose>,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Proposal> {
+    Ok(Json(state.ledger.verify(&caller.actor(), id).await?))
 }
 
 async fn capture(

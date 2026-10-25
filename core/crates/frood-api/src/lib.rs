@@ -66,6 +66,8 @@ pub fn assemble(
         pool.clone(),
         frood_ledger::PolicyConfig {
             auto_accept_own_facts: policies.auto_accept_own_facts,
+            auto_accept_own_changes: policies.auto_accept_own_changes,
+            accept_agent_findings: policies.accept_agent_findings,
             entity_merge_threshold: policies.entity_merge_threshold,
         },
     )

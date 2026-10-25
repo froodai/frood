@@ -564,7 +564,8 @@ impl Ledger {
         tx.commit().await?;
 
         let proposal = self.proposal(id).await?;
-        if let Some((policy, alternative)) = policy::evaluate(&proposal, &self.policy, context) {
+        let context = self.with_own_assertions(&proposal, context).await?;
+        if let Some((policy, alternative)) = policy::evaluate(&proposal, &self.policy, &context) {
             let reason = match (&context.authoritative_source, policy) {
                 (Some(source), "authoritative-source") => {
                     format!("auto-accepted by policy {policy}: source {source}")
@@ -582,12 +583,113 @@ impl Ledger {
                 .submit_verdict(&Actor::policy(policy), id, verdict)
                 .await
             {
+                Ok(decided) if policy == "agent-finding" => {
+                    self.mark_unverified(&decided).await?;
+                    return Ok(decided);
+                }
                 Ok(decided) => return Ok(decided),
                 Err(LedgerError::Stale { .. }) => return self.proposal(id).await,
                 Err(err) => return Err(err),
             }
         }
         Ok(proposal)
+    }
+
+    /// The policies' context with the assertions the proposal changes that only its author ever
+    /// wrote (their notes, imports, edits) and that nothing contests (docs/27 §4).
+    async fn with_own_assertions(
+        &self,
+        proposal: &Proposal,
+        context: &ProposalContext,
+    ) -> Result<ProposalContext> {
+        let mut context = context.clone();
+        let person = proposal.author.split('/').next().unwrap_or_default();
+        let [only] = proposal.alternatives.as_slice() else {
+            return Ok(context);
+        };
+        let touched: Vec<Uuid> = only
+            .operations
+            .iter()
+            .filter_map(|op| match op {
+                Operation::Supersede { assertion_id, .. }
+                | Operation::Close { assertion_id, .. }
+                | Operation::Reverify { assertion_id, .. }
+                | Operation::SetSphere { assertion_id, .. } => Some(*assertion_id),
+                _ => None,
+            })
+            .collect();
+        if !person.starts_with("user:") || touched.is_empty() {
+            return Ok(context);
+        }
+        context.own_assertions = sqlx::query_scalar(
+            "SELECT a FROM unnest($1::uuid[]) AS a \
+             WHERE NOT EXISTS (SELECT 1 FROM assertion_versions v JOIN proposals p ON p.id = v.proposal_id \
+                               WHERE v.assertion_id = a AND split_part(p.author, '/', 1) <> $2) \
+               AND NOT EXISTS (SELECT 1 FROM assertion_versions v CROSS JOIN LATERAL unnest(v.evidence) AS e(id) \
+                               JOIN evidence ev ON ev.id = e.id JOIN sources s ON s.id = ev.source_id \
+                               WHERE v.assertion_id = a AND split_part(s.captured_by, '/', 1) <> $2) \
+               AND NOT EXISTS (SELECT 1 FROM assertion_flags f WHERE f.assertion_id = a AND f.flag = 'contested')",
+        )
+        .bind(&touched)
+        .bind(person)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(context)
+    }
+
+    /// What an agent found in an ordinary source and a policy took is marked not verified
+    /// (QF3): answers say so, and a person's check takes the mark off.
+    async fn mark_unverified(&self, proposal: &Proposal) -> Result<()> {
+        let created: Vec<Uuid> = sqlx::query_scalar(
+            "SELECT assertion_id FROM assertion_versions WHERE proposal_id = $1 AND version = 1",
+        )
+        .bind(proposal.id)
+        .fetch_all(&self.pool)
+        .await?;
+        let author = proposal
+            .author
+            .split("/for/")
+            .next()
+            .unwrap_or(&proposal.author);
+        for assertion_id in created {
+            self.flag_for_verification(
+                &Actor::policy("agent-finding"),
+                assertion_id,
+                &format!("found by {author}; not verified"),
+            )
+            .await?;
+        }
+        Ok(())
+    }
+
+    /// A person confirms knowledge marked not verified is right; the mark comes off.
+    pub async fn verify(&self, actor: &Actor, assertion_id: Uuid) -> Result<Proposal> {
+        let current = {
+            let mut conn = self.pool.acquire().await?;
+            apply::current_version(&mut conn, assertion_id)
+                .await?
+                .ok_or_else(|| LedgerError::NotFound(format!("assertion {assertion_id}")))?
+        };
+        self.open_proposal(
+            actor,
+            NewProposal {
+                idempotency_key: None,
+                rationale: None,
+                risk: Risk::Change,
+                confidence: None,
+                base: vec![BaseRef {
+                    assertion_id,
+                    version: current.version,
+                }],
+                operations: Some(vec![Operation::Reverify {
+                    assertion_id,
+                    review_after: None,
+                }]),
+                alternatives: None,
+                evidence: Vec::new(),
+            },
+        )
+        .await
     }
 
     /// Records a verdict. Accepting applies one alternative atomically; if a base version is no

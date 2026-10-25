@@ -10,7 +10,9 @@ macro_rules! version_columns {
     () => {
         "assertion_id, version, kind, title, sphere, text, subjects, slots, modality, authority, said_at, \
          valid_from, valid_to, recorded_from, recorded_to, status, review_after, evidence, \
-         proposal_id, verdict_id"
+         proposal_id, verdict_id, \
+         EXISTS (SELECT 1 FROM assertion_flags f WHERE f.assertion_id = assertion_versions.assertion_id \
+                 AND f.flag = 'needs_verification') AS unverified"
     };
 }
 pub(crate) use version_columns;
@@ -37,6 +39,7 @@ pub(crate) fn version(row: &PgRow) -> Result<AssertionVersion> {
         evidence: row.try_get("evidence")?,
         proposal_id: row.try_get("proposal_id")?,
         verdict_id: row.try_get("verdict_id")?,
+        unverified: row.try_get("unverified")?,
     })
 }
 

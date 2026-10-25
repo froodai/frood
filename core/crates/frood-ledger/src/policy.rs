@@ -6,6 +6,11 @@ use crate::model::{Actor, LinkKind, Operation, Proposal, Risk};
 pub struct PolicyConfig {
     /// A user's own new facts without conflicts are accepted automatically.
     pub auto_accept_own_facts: bool,
+    /// A user's change of knowledge only they wrote is accepted automatically (docs/27 §4).
+    pub auto_accept_own_changes: bool,
+    /// New knowledge agents find in ordinary sources is accepted, marked not verified
+    /// (docs/27 §6); changes and conflicts still wait for a person.
+    pub accept_agent_findings: bool,
     /// Entity merges at or above this confidence are accepted automatically.
     pub entity_merge_threshold: Option<f32>,
 }
@@ -14,6 +19,8 @@ impl Default for PolicyConfig {
     fn default() -> Self {
         Self {
             auto_accept_own_facts: true,
+            auto_accept_own_changes: true,
+            accept_agent_findings: true,
             entity_merge_threshold: Some(0.9),
         }
     }
@@ -25,6 +32,9 @@ pub struct ProposalContext {
     /// The proposal comes from an agent run of a job with `auto_accept`, which reads one
     /// source marked `authoritative` (W4′).
     pub authoritative_source: Option<String>,
+    /// Of the assertions the proposal changes, those only its author ever wrote — their notes,
+    /// imports and edits — and that nothing contests. The ledger fills it in.
+    pub own_assertions: Vec<uuid::Uuid>,
 }
 
 /// Which policy, if any, accepts the proposal, and which alternative it takes.
@@ -63,6 +73,40 @@ pub(crate) fn evaluate(
         return Some(("own-sphere", only.key.clone()));
     }
 
+    // A person confirming knowledge is right (it was marked not verified): their own check.
+    if author_is_user
+        && !only.operations.is_empty()
+        && only
+            .operations
+            .iter()
+            .all(|op| matches!(op, Operation::Reverify { .. }))
+    {
+        return Some(("own-check", only.key.clone()));
+    }
+
+    // A person changing what only they wrote (docs/27 §4): "moved to Postgres 17" over their own
+    // "Postgres 16". Knowledge from anyone or anything else still changes by a verdict.
+    let own = |id: &uuid::Uuid| context.own_assertions.contains(id);
+    if config.auto_accept_own_changes
+        && author_is_user
+        && matches!(proposal.risk, Risk::New | Risk::Change)
+        && only
+            .operations
+            .iter()
+            .any(|op| matches!(op, Operation::Supersede { .. } | Operation::Close { .. }))
+        && only.operations.iter().all(|op| match op {
+            Operation::Create { .. } | Operation::CreateEntity { .. } => true,
+            Operation::Link { kind, .. } => *kind != LinkKind::Contradicts,
+            Operation::Supersede { assertion_id, .. }
+            | Operation::Close { assertion_id, .. }
+            | Operation::Reverify { assertion_id, .. }
+            | Operation::SetSphere { assertion_id, .. } => own(assertion_id),
+            _ => false,
+        })
+    {
+        return Some(("own-change", only.key.clone()));
+    }
+
     // W4′: an agent reading an authoritative source may record new knowledge and changes;
     // contradictions always wait for a person.
     if context.authoritative_source.is_some()
@@ -75,6 +119,21 @@ pub(crate) fn evaluate(
         })
     {
         return Some(("authoritative-source", only.key.clone()));
+    }
+
+    // QF3: new knowledge an agent found in an ordinary source is taken at once and marked not
+    // verified; changes, conflicts and merges wait for a person.
+    if config.accept_agent_findings
+        && proposal.author.starts_with("agent:")
+        && proposal.risk == Risk::New
+        && proposal.base.is_empty()
+        && only.operations.iter().all(|op| match op {
+            Operation::Create { .. } | Operation::CreateEntity { .. } => true,
+            Operation::Link { kind, .. } => *kind != LinkKind::Contradicts,
+            _ => false,
+        })
+    {
+        return Some(("agent-finding", only.key.clone()));
     }
 
     if let Some(threshold) = config.entity_merge_threshold
@@ -161,16 +220,99 @@ mod tests {
     }
 
     #[test]
-    fn agents_conflicts_and_changes_go_to_review() {
+    fn agents_new_findings_are_taken_unverified_their_changes_wait() {
         let config = PolicyConfig::default();
-        assert!(
+        assert_eq!(
             evaluate(
                 &proposal("agent:daily-sweep", Risk::New, vec![create()]),
                 &config,
                 &none()
             )
+            .map(|p| p.0),
+            Some("agent-finding")
+        );
+        let id = Uuid::now_v7();
+        let mut change = proposal("agent:daily-sweep", Risk::Change, vec![supersede(id)]);
+        change.base.push(BaseRef {
+            assertion_id: id,
+            version: 1,
+        });
+        assert!(evaluate(&change, &config, &none()).is_none());
+        let off = PolicyConfig {
+            accept_agent_findings: false,
+            ..PolicyConfig::default()
+        };
+        assert!(
+            evaluate(
+                &proposal("agent:daily-sweep", Risk::New, vec![create()]),
+                &off,
+                &none()
+            )
             .is_none()
         );
+    }
+
+    fn supersede(assertion_id: Uuid) -> Operation {
+        let Operation::Create { assertion, .. } = create() else {
+            unreachable!()
+        };
+        Operation::Supersede {
+            assertion_id,
+            assertion,
+        }
+    }
+
+    #[test]
+    fn a_persons_change_of_their_own_knowledge_is_accepted() {
+        let config = PolicyConfig::default();
+        let (mine, theirs) = (Uuid::now_v7(), Uuid::now_v7());
+        let context = ProposalContext {
+            own_assertions: vec![mine],
+            ..ProposalContext::default()
+        };
+        let change = |id: Uuid, risk| {
+            let mut p = proposal("user:alice/via/extract", risk, vec![supersede(id)]);
+            p.base.push(BaseRef {
+                assertion_id: id,
+                version: 1,
+            });
+            p
+        };
+        assert_eq!(
+            evaluate(&change(mine, Risk::Change), &config, &context).map(|p| p.0),
+            Some("own-change")
+        );
+        assert!(evaluate(&change(theirs, Risk::Change), &config, &context).is_none());
+        assert!(evaluate(&change(mine, Risk::Conflict), &config, &context).is_none());
+        let off = PolicyConfig {
+            auto_accept_own_changes: false,
+            ..PolicyConfig::default()
+        };
+        assert!(evaluate(&change(mine, Risk::Change), &off, &context).is_none());
+        // Confirming knowledge marked not verified is a person's own check.
+        let mut check = proposal(
+            "user:alice",
+            Risk::Change,
+            vec![Operation::Reverify {
+                assertion_id: theirs,
+                review_after: None,
+            }],
+        );
+        check.base.push(BaseRef {
+            assertion_id: theirs,
+            version: 1,
+        });
+        assert_eq!(
+            evaluate(&check, &config, &none()).map(|p| p.0),
+            Some("own-check")
+        );
+        check.author = "agent:reverify".into();
+        assert!(evaluate(&check, &config, &none()).is_none());
+    }
+
+    #[test]
+    fn conflicts_and_bases_go_to_review() {
+        let config = PolicyConfig::default();
         assert!(
             evaluate(
                 &proposal("user:alice", Risk::Conflict, vec![create()]),
@@ -221,6 +363,7 @@ mod tests {
         let config = PolicyConfig::default();
         let adr = ProposalContext {
             authoritative_source: Some("adr-repo".into()),
+            ..ProposalContext::default()
         };
         let agent = |risk| proposal("agent:daily-sweep", risk, vec![create()]);
         assert_eq!(
@@ -232,7 +375,11 @@ mod tests {
             Some("authoritative-source")
         );
         assert!(evaluate(&agent(Risk::Conflict), &config, &adr).is_none());
-        assert!(evaluate(&agent(Risk::New), &config, &none()).is_none());
+        assert_eq!(
+            evaluate(&agent(Risk::New), &config, &none()).map(|p| p.0),
+            Some("agent-finding"),
+            "without the authoritative source: taken, but not verified"
+        );
         let human = proposal("user:alice", Risk::Change, vec![create()]);
         assert!(
             evaluate(&human, &config, &adr).is_none(),
