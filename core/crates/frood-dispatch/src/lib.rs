@@ -5,6 +5,7 @@
 //! agent jobs run in a runtime module and may wait for people's answers.
 
 mod agents;
+pub mod attention;
 pub mod connections;
 mod detectors;
 mod digest;
@@ -60,7 +61,10 @@ pub(crate) struct Ctx {
     pub config_sources: Arc<BTreeMap<String, frood_config::Source>>,
     /// Opens tokens the console stored.
     pub vault: Arc<connections::Vault>,
-    pub attention: Arc<frood_config::Attention>,
+    /// Who is told what, when and where: frood.yaml's attention and the console's changes.
+    pub attention: connections::Live<frood_config::Attention>,
+    /// Attention as frood.yaml sets it; it wins over the console's changes.
+    pub config_attention: Arc<frood_config::Attention>,
     pub backup: Arc<Option<jobs::backup::BackupSetup>>,
     /// The installation's spheres (docs/26 §3); empty when they are off.
     pub spheres: Arc<Vec<frood_config::Sphere>>,
@@ -107,7 +111,8 @@ impl Dispatch {
                 sources: connections::Sources::default(),
                 config_sources: Arc::new(BTreeMap::new()),
                 vault: Arc::new(connections::Vault::new(None)),
-                attention: Arc::new(frood_config::Attention::default()),
+                attention: connections::Live::default(),
+                config_attention: Arc::new(frood_config::Attention::default()),
                 backup: Arc::new(None),
                 spheres: Arc::new(Vec::new()),
             },
@@ -119,7 +124,8 @@ impl Dispatch {
 
     /// Who is told what, when and where.
     pub fn with_attention(mut self, attention: frood_config::Attention) -> Self {
-        self.ctx.attention = Arc::new(attention);
+        self.ctx.attention.set(attention.clone());
+        self.ctx.config_attention = Arc::new(attention);
         self
     }
 

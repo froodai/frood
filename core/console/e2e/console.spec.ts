@@ -279,3 +279,33 @@ test("jobs from the console: frood.yaml's stay there, others change and come bac
   await page.getByRole("dialog").getByRole("button", { name: "Back to the default" }).click();
   await expect(page.getByText("changed here")).toHaveCount(0);
 });
+
+test("notifications from the console: how urgent, the push fuse, reminders, and my quiet hours", async ({ page }) => {
+  await signIn(page, "/admin/automations");
+  await page.getByRole("tab", { name: "Notifications" }).click();
+  await page.getByRole("combobox", { name: "How urgent: New" }).click();
+  await page.getByRole("option", { name: "Now", exact: true }).click();
+  await page.getByLabel("Pushes a day, at most").fill("12");
+  await page.getByRole("button", { name: "Add a reminder" }).click();
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByText("Notification settings saved")).toBeVisible();
+  await page.reload();
+  await page.getByRole("tab", { name: "Notifications" }).click();
+  await expect(page.getByRole("combobox", { name: "How urgent: New" })).toHaveText(/Now/);
+  await expect(page.getByLabel("Pushes a day, at most")).toHaveValue("12");
+
+  // A person's own settings, from the account menu: the shared ones show as the default.
+  await page.getByRole("button", { name: "demo@example.com" }).click();
+  await page.getByRole("menuitem", { name: "My settings" }).click();
+  const sheet = page.getByRole("dialog");
+  await expect(sheet.getByPlaceholder("As for everyone: 12")).toBeVisible();
+  await expect(sheet.getByText("As for everyone: 1 day before, at 09:00")).toBeVisible();
+  await expect(sheet.getByText(/No channel is connected/)).toBeVisible();
+  await sheet.getByRole("switch", { name: "Quiet hours" }).click();
+  await expect(sheet.getByText("Set your time zone: quiet hours and reminders need it.")).toBeVisible();
+  await sheet.getByLabel("Time zone").fill("Europe/Belgrade");
+  await sheet.getByLabel("From").fill("22:30");
+  await sheet.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByText("Your settings are saved")).toBeVisible();
+  await expect(sheet.getByLabel("From")).toHaveValue("22:30");
+});

@@ -35,7 +35,7 @@ impl Dispatch {
         problems.extend(self.modules_down(now).await);
         problems.extend(self.backups(now).await?);
         let pool = &self.ctx.pool;
-        let urgency = inbox::urgency(&self.ctx.attention, "alert", None);
+        let urgency = inbox::urgency(&self.ctx.attention.now(), "alert", None);
         for problem in &problems {
             // One alert per occurrence: while the problem lasts — shown or hidden by a person —
             // no new one; after it cleared and came back, a new one.
@@ -87,7 +87,10 @@ impl Dispatch {
     }
 
     async fn dispatcher_lag(&self, now: DateTime<Utc>) -> sqlx::Result<Vec<Problem>> {
-        let limit = duration(self.ctx.attention.detectors.dispatcher_lag.as_deref(), 10);
+        let limit = duration(
+            self.ctx.attention.now().detectors.dispatcher_lag.as_deref(),
+            10,
+        );
         let oldest: Option<DateTime<Utc>> = sqlx::query_scalar(
             "SELECT min(j.occurred_at) FROM journal j \
              WHERE j.position > coalesce((SELECT position FROM journal_checkpoints WHERE reader = 'dispatcher'), 0)",
@@ -109,7 +112,8 @@ impl Dispatch {
     }
 
     async fn stuck_runs(&self, now: DateTime<Utc>) -> sqlx::Result<Vec<Problem>> {
-        let detectors = &self.ctx.attention.detectors;
+        let attention = self.ctx.attention.now();
+        let detectors = &attention.detectors;
         let queued = duration(detectors.queued.as_deref(), 30);
         let overrun = duration(detectors.overrun.as_deref(), 10);
         let mut out = Vec::new();
@@ -152,6 +156,7 @@ impl Dispatch {
         let in_a_row = i64::from(
             self.ctx
                 .attention
+                .now()
                 .detectors
                 .failures_in_a_row
                 .unwrap_or(3)
@@ -183,7 +188,7 @@ impl Dispatch {
 
     async fn stale_sources(&self, now: DateTime<Utc>) -> sqlx::Result<Vec<Problem>> {
         let limit = duration(
-            self.ctx.attention.detectors.source_stale.as_deref(),
+            self.ctx.attention.now().detectors.source_stale.as_deref(),
             48 * 60,
         );
         // Only jobs that read each source on a schedule are expected to keep up.
@@ -234,7 +239,13 @@ impl Dispatch {
     }
 
     async fn budgets_running_out(&self) -> sqlx::Result<Vec<Problem>> {
-        let share = self.ctx.attention.detectors.budget_share.unwrap_or(0.8);
+        let share = self
+            .ctx
+            .attention
+            .now()
+            .detectors
+            .budget_share
+            .unwrap_or(0.8);
         let mut out = Vec::new();
         let accounts: Vec<String> =
             sqlx::query_scalar("SELECT DISTINCT account FROM runs WHERE account IS NOT NULL")
@@ -274,6 +285,7 @@ impl Dispatch {
         let missed = i32::try_from(
             self.ctx
                 .attention
+                .now()
                 .detectors
                 .backups_missed
                 .unwrap_or(2)
@@ -329,7 +341,7 @@ impl Dispatch {
     }
 
     async fn modules_down(&self, now: DateTime<Utc>) -> Vec<Problem> {
-        let limit = duration(self.ctx.attention.detectors.module_down.as_deref(), 5);
+        let limit = duration(self.ctx.attention.now().detectors.module_down.as_deref(), 5);
         let names: Vec<String> = self.ctx.modules.names().map(str::to_owned).collect();
         let mut health = BTreeMap::new();
         for name in &names {

@@ -577,3 +577,171 @@ async fn jobs_change_from_the_console() {
     assert_eq!(status, StatusCode::OK);
     assert!(!running("digest"));
 }
+
+#[tokio::test]
+async fn attention_changes_from_the_console() {
+    let Some(url) = frood_store::testing::database_url() else {
+        eprintln!("FROOD_TEST_DATABASE_URL is not set; skipping");
+        return;
+    };
+    let pool = frood_store::testing::fresh_database(&url, "api_attention")
+        .await
+        .expect("test database");
+    let config = frood_config::parse(
+        "version: 1\ninstallation: {name: test}\nstorage: {uses: postgres, url: 'postgres://unused', objects: {uses: database}}\n\
+         deploy: {server: host}\nattention:\n  routes: [{kind: alert, urgency: digest}]\n  people:\n    alice@example.com: {timezone: Europe/Amsterdam}\n",
+        &frood_config::Secrets::from_pairs(Vec::<(String, String)>::new()),
+    )
+    .unwrap()
+    .config;
+    let auth = Auth::new(pool.clone(), AuthSettings::from_config(&config));
+    let alice = auth
+        .user_id_by_email("alice@example.com", true)
+        .await
+        .unwrap();
+    let all: Vec<String> = frood_auth::scope::ALL
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect();
+    let (_, admin) = auth
+        .create_personal_token(alice, "admin", &all, None)
+        .await
+        .unwrap();
+    let state =
+        frood_api::assemble(&config, std::path::Path::new("."), pool.clone(), |_| None).state;
+    let app = router(state);
+    let situation = |listed: &Value, kind: &str, risk: Option<&str>| {
+        listed["situations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["kind"] == kind && s["risk"].as_str() == risk)
+            .unwrap()
+            .clone()
+    };
+
+    let (status, listed) = call(&app, "GET", "/v1/attention", &admin, None).await;
+    assert_eq!(status, StatusCode::OK, "{listed}");
+    let alert = situation(&listed, "alert", None);
+    assert_eq!(alert["urgency"], "digest");
+    assert_eq!(alert["urgency_from"], "config");
+    let new = situation(&listed, "proposal", Some("new"));
+    assert_eq!(new["urgency"], "digest");
+    assert_eq!(new["urgency_from"], "default");
+    assert_eq!(listed["max_push_per_day"]["default"], 30);
+    assert_eq!(listed["investigators"], json!(["investigate"]));
+
+    // The console's settings, whole; frood.yaml's alert route is sent back as it is.
+    let (status, changed) = call(
+        &app,
+        "PUT",
+        "/v1/attention",
+        &admin,
+        Some(json!({
+            "situations": [
+                { "kind": "proposal", "risk": "new", "urgency": "now" },
+                { "kind": "proposal", "risk": "conflict", "urgency": "now",
+                  "before": { "run": "investigate", "max_wait": "20m" } },
+                { "kind": "alert", "urgency": "digest" }
+            ],
+            "max_push_per_day": 12,
+            "reminders": [{ "days": -1, "at": "09:00" }],
+            "detectors": { "queued": "1h", "failures_in_a_row": "5", "module_down": null }
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{changed}");
+    let (_, listed) = call(&app, "GET", "/v1/attention", &admin, None).await;
+    let new = situation(&listed, "proposal", Some("new"));
+    assert_eq!(new["urgency"], "now");
+    assert_eq!(new["urgency_from"], "console");
+    let conflict = situation(&listed, "proposal", Some("conflict"));
+    assert_eq!(conflict["urgency_from"], "default");
+    assert_eq!(conflict["before"]["max_wait"], "20m");
+    assert_eq!(conflict["before_from"], "console");
+    assert_eq!(listed["max_push_per_day"]["value"], 12);
+    assert_eq!(listed["reminders"]["from"], "console");
+    let detector = |name: &str| {
+        listed["detectors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|d| d["name"] == name)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(detector("queued")["value"], "1h");
+    assert_eq!(detector("failures_in_a_row")["value"], 5);
+    assert_eq!(detector("module_down")["from"], "default");
+
+    // frood.yaml's route is changed only there; values are checked as frood.yaml's are.
+    for (body, expected) in [
+        (
+            json!({ "situations": [{ "kind": "alert", "urgency": "now" }] }),
+            StatusCode::CONFLICT,
+        ),
+        (
+            json!({ "detectors": { "queued": "soon" } }),
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+        (
+            json!({ "situations": [{ "kind": "question", "urgency": "later" }] }),
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+        (
+            json!({ "situations": [{ "kind": "question", "urgency": "now",
+                    "before": { "run": "nobody", "max_wait": "30m" } }] }),
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+    ] {
+        let (status, bad) = call(&app, "PUT", "/v1/attention", &admin, Some(body)).await;
+        assert_eq!(status, expected, "{bad}");
+    }
+
+    // A person's own settings: frood.yaml's timezone stays, quiet hours come from the console.
+    let (status, mine) = call(&app, "GET", "/v1/me/settings", &admin, None).await;
+    assert_eq!(status, StatusCode::OK, "{mine}");
+    assert_eq!(mine["timezone"]["value"], "Europe/Amsterdam");
+    assert_eq!(mine["timezone"]["from"], "config");
+    assert_eq!(mine["max_push_per_day"]["default"], 12);
+    assert_eq!(mine["reminders"]["default"][0]["at"], "09:00");
+    assert_eq!(mine["channels"], json!([]));
+    let (status, bad) = call(
+        &app,
+        "PUT",
+        "/v1/me/settings",
+        &admin,
+        Some(json!({ "timezone": "Europe/Moscow" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{bad}");
+    let (status, bad) = call(
+        &app,
+        "PUT",
+        "/v1/me/settings",
+        &admin,
+        Some(json!({ "quiet_hours": "late" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{bad}");
+    let (status, changed) = call(
+        &app,
+        "PUT",
+        "/v1/me/settings",
+        &admin,
+        Some(json!({ "timezone": "Europe/Amsterdam", "quiet_hours": "23:00-07:30", "reminders": [] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{changed}");
+    let (_, mine) = call(&app, "GET", "/v1/me/settings", &admin, None).await;
+    assert_eq!(mine["quiet_hours"]["value"], "23:00-07:30");
+    assert_eq!(mine["quiet_hours"]["from"], "console");
+    assert_eq!(mine["reminders"]["value"], json!([]));
+    // The shared settings keep what the person set.
+    let (_, listed) = call(&app, "GET", "/v1/attention", &admin, None).await;
+    assert_eq!(listed["max_push_per_day"]["value"], 12);
+
+    // Unlinking a channel account that is not theirs.
+    let (status, _) = call(&app, "DELETE", "/v1/me/links/telegram/42", &admin, None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}

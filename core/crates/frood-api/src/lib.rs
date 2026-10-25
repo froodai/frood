@@ -4,6 +4,7 @@
 mod account;
 mod admin;
 mod attachments;
+mod attention;
 mod auth;
 mod capture;
 mod channels;
@@ -258,6 +259,7 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/version", get(version))
         .merge(ledger::routes())
         .merge(account::routes())
+        .merge(attention::routes())
         .merge(capture::routes(state.ledger.max_file_bytes()))
         .merge(attachments::routes(state.ledger.max_file_bytes()))
         .merge(channels::routes())

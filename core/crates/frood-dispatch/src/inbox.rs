@@ -21,7 +21,7 @@ use crate::{Dispatch, questions, runs};
 const READER: &str = "inbox";
 const EVENTS_PER_PASS: i64 = 200;
 /// A fuse against floods: most push messages a person gets in 24 hours (B2).
-const DEFAULT_MAX_PUSH_PER_DAY: u32 = 30;
+pub(crate) const DEFAULT_MAX_PUSH_PER_DAY: u32 = 30;
 const MAX_ATTEMPTS: i32 = 5;
 
 #[derive(Debug, Clone, Serialize)]
@@ -412,7 +412,7 @@ impl Dispatch {
                     return Ok(()); // a policy accepted it already: the digest tells
                 }
                 let risk = risk_name(proposal.risk);
-                let urgency = urgency(&self.ctx.attention, "proposal", Some(&risk));
+                let urgency = urgency(&self.ctx.attention.now(), "proposal", Some(&risk));
                 let (notify_after, investigation) = self
                     .investigate_first("proposal", Some(&risk), json!({ "proposal_id": pid }))
                     .await;
@@ -481,7 +481,7 @@ impl Dispatch {
                     NewItem {
                         kind: "question",
                         subject: format!("question/{qid}"),
-                        urgency: urgency(&self.ctx.attention, "question", None),
+                        urgency: urgency(&self.ctx.attention.now(), "question", None),
                         data: json!({ "question_id": qid, "run_id": question.run_id, "job": question.job, "options": question.options }),
                         for_users: question.asked_for.into_iter().collect(),
                         notify_after: Utc::now(),
@@ -512,7 +512,7 @@ impl Dispatch {
                     NewItem {
                         kind: "alert",
                         subject: format!("run/{rid}"),
-                        urgency: urgency(&self.ctx.attention, "alert", None),
+                        urgency: urgency(&self.ctx.attention.now(), "alert", None),
                         data: json!({ "run_id": rid, "job": run.job, "error": run.error }),
                         for_users: run.on_behalf_of.into_iter().collect(),
                         notify_after: Utc::now(),
@@ -576,7 +576,8 @@ impl Dispatch {
         input: Value,
     ) -> (DateTime<Utc>, Option<Value>) {
         let now = Utc::now();
-        let Some(rule) = before_notify(&self.ctx.attention, kind, risk) else {
+        let attention = self.ctx.attention.now();
+        let Some(rule) = before_notify(&attention, kind, risk) else {
             return (now, None);
         };
         let wait = humantime::parse_duration(&rule.max_wait)
@@ -622,7 +623,7 @@ impl Dispatch {
     /// of the same due date. Returns how many it made.
     pub async fn remind_once(&self, now: DateTime<Utc>) -> sqlx::Result<usize> {
         use frood_ledger::model::{AssertionFilter, SlotFilter, SlotOp, Status};
-        let attention = &self.ctx.attention;
+        let attention = &*self.ctx.attention.now();
         let mut days: Vec<i32> = attention.reminders.iter().map(|r| r.days).collect();
         for person in attention.people.values() {
             for rule in person.reminders.iter().flatten() {
@@ -744,7 +745,7 @@ impl Dispatch {
         user: Uuid,
     ) -> Option<(chrono_tz::Tz, Vec<frood_config::Reminder>)> {
         let email = self.ctx.auth.user_email(user).await.ok()?;
-        let attention = &self.ctx.attention;
+        let attention = &*self.ctx.attention.now();
         let person = attention.people.get(&email)?;
         let zone = person.timezone.as_deref()?.parse().ok()?;
         let rules = person
@@ -1438,7 +1439,7 @@ impl Dispatch {
 
     /// Whether a person may get a push now: quiet hours and the daily fuse (B2).
     async fn may_push(&self, user: Uuid) -> sqlx::Result<bool> {
-        let attention = &self.ctx.attention;
+        let attention = &*self.ctx.attention.now();
         let email = self.ctx.auth.user_email(user).await.ok();
         let person = email.as_deref().and_then(|e| attention.people.get(e));
         if let Some(person) = person

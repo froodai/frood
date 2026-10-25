@@ -1,6 +1,6 @@
-import { Check, Languages, LogOut, Menu, Monitor, Moon, Search, Sun } from "lucide-react";
+import { BellRing, Check, Languages, LogOut, Menu, Monitor, Moon, Search, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router";
 import {
   DropdownMenu,
@@ -19,6 +19,7 @@ import { signOut } from "@/lib/frood";
 import { useHealth, useInbox, useMe, waiting } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 import { CommandPalette } from "./CommandPalette";
+import { MySettings } from "./MySettings";
 import { SECTIONS } from "./sections";
 
 function useOpenCount() {
@@ -59,54 +60,81 @@ function Account() {
   const { theme, setTheme } = useTheme();
   const me = useMe();
   const email = me.data?.email ?? "";
+  const [settings, setSettings] = useState(false);
+  // The menu gives focus back to its button as it closes; the settings sheet opened from it
+  // would take that for a click outside and close at once.
+  const opening = useRef(false);
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger className="flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-start hover:bg-accent/60">
-        <span className="grid size-7 place-items-center rounded-full bg-secondary text-xs font-semibold uppercase">{email.slice(0, 1) || "·"}</span>
-        <span className="min-w-0 flex-1 truncate text-sm">{email}</span>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-60">
-        <DropdownMenuLabel className="truncate font-normal text-muted-foreground">{email}</DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        <DropdownMenuSub>
-          <DropdownMenuSubTrigger>
-            <Languages className="size-4" /> {t("app.language")}
-          </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent>
-            {LANGUAGES.map((l) => (
-              <DropdownMenuItem key={l.code} onSelect={() => setLang(l.code)} lang={l.code}>
-                <span className="flex-1">{l.name}</span>
-                {l.code === lang && <Check className="size-4" />}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuSubContent>
-        </DropdownMenuSub>
-        <DropdownMenuSub>
-          <DropdownMenuSubTrigger>
-            <Sun className="size-4" /> {t("app.theme")}
-          </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent>
-            {(
-              [
-                ["light", Sun, "app.theme.light"],
-                ["dark", Moon, "app.theme.dark"],
-                ["system", Monitor, "app.theme.system"],
-              ] as const
-            ).map(([value, Icon, label]) => (
-              <DropdownMenuItem key={value} onSelect={() => setTheme(value)}>
-                <Icon className="size-4" />
-                <span className="flex-1">{t(label)}</span>
-                {theme === value && <Check className="size-4" />}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuSubContent>
-        </DropdownMenuSub>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={signOut}>
-          <LogOut className="size-4" /> {t("app.signOut")}
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger className="flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-start hover:bg-accent/60">
+          <span className="grid size-7 place-items-center rounded-full bg-secondary text-xs font-semibold uppercase">{email.slice(0, 1) || "·"}</span>
+          <span className="min-w-0 flex-1 truncate text-sm">{email}</span>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="start"
+          className="w-60"
+          onCloseAutoFocus={(e) => {
+            if (opening.current) e.preventDefault();
+            opening.current = false;
+          }}
+        >
+          <DropdownMenuLabel className="truncate font-normal text-muted-foreground">{email}</DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onSelect={() => {
+              opening.current = true;
+              setSettings(true);
+            }}
+          >
+            <BellRing className="size-4" /> {t("me.settings")}
+          </DropdownMenuItem>
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              <Languages className="size-4" /> {t("app.language")}
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent>
+              {LANGUAGES.map((l) => (
+                <DropdownMenuItem key={l.code} onSelect={() => setLang(l.code)} lang={l.code}>
+                  <span className="flex-1">{l.name}</span>
+                  {l.code === lang && <Check className="size-4" />}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              <Sun className="size-4" /> {t("app.theme")}
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent>
+              {(
+                [
+                  ["light", Sun, "app.theme.light"],
+                  ["dark", Moon, "app.theme.dark"],
+                  ["system", Monitor, "app.theme.system"],
+                ] as const
+              ).map(([value, Icon, label]) => (
+                <DropdownMenuItem key={value} onSelect={() => setTheme(value)}>
+                  <Icon className="size-4" />
+                  <span className="flex-1">{t(label)}</span>
+                  {theme === value && <Check className="size-4" />}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onSelect={signOut}>
+            <LogOut className="size-4" /> {t("app.signOut")}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <Sheet open={settings} onOpenChange={setSettings}>
+        <SheetContent className="w-full overflow-y-auto sm:max-w-lg">
+          <SheetTitle className="sr-only">{t("me.settings")}</SheetTitle>
+          <div className="p-5 text-sm">{settings && <MySettings />}</div>
+        </SheetContent>
+      </Sheet>
+    </>
   );
 }
 

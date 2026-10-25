@@ -34,7 +34,7 @@ fn return_address(state: &AppState) -> String {
     format!("{}/v1/connections/signed-in", state.auth.settings().issuer)
 }
 
-fn connect_error(err: ConnectError) -> ApiError {
+pub(crate) fn connect_error(err: ConnectError) -> ApiError {
     match err {
         ConnectError::Database(db) => ApiError::from(frood_ledger::LedgerError::from(db)),
         ConnectError::NotFound(_) => {

@@ -12,19 +12,33 @@ use sqlx::Row;
 
 use crate::Dispatch;
 
-/// The sources agents read, as they are now; a change from the console replaces them whole.
-#[derive(Clone, Default)]
-pub struct Sources(Arc<RwLock<Arc<BTreeMap<String, Source>>>>);
+/// A setting as it is now: read whole, and replaced whole when the console changes it.
+pub struct Live<T>(Arc<RwLock<Arc<T>>>);
 
-impl Sources {
-    pub fn now(&self) -> Arc<BTreeMap<String, Source>> {
-        self.0.read().expect("sources lock").clone()
-    }
-
-    pub fn set(&self, sources: BTreeMap<String, Source>) {
-        *self.0.write().expect("sources lock") = Arc::new(sources);
+impl<T> Clone for Live<T> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
     }
 }
+
+impl<T: Default> Default for Live<T> {
+    fn default() -> Self {
+        Self(Arc::new(RwLock::new(Arc::new(T::default()))))
+    }
+}
+
+impl<T> Live<T> {
+    pub fn now(&self) -> Arc<T> {
+        self.0.read().expect("live setting lock").clone()
+    }
+
+    pub fn set(&self, value: T) {
+        *self.0.write().expect("live setting lock") = Arc::new(value);
+    }
+}
+
+/// The sources agents read: frood.yaml's and the console's.
+pub type Sources = Live<BTreeMap<String, Source>>;
 
 /// Seals and opens what the console stores: tokens, encrypted to the installation's key.
 pub struct Vault {
@@ -56,14 +70,16 @@ impl Vault {
     }
 }
 
-/// The console's layer of the config: sources, and changes to jobs as `frood.yaml`'s `jobs`
-/// section would make them.
+/// The console's layer of the config: sources, and changes to jobs and to attention as
+/// `frood.yaml`'s `jobs` and `attention` sections would make them.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Overlay {
     #[serde(default)]
     pub sources: BTreeMap<String, Source>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub jobs: BTreeMap<String, frood_config::Job>,
+    #[serde(default, skip_serializing_if = "crate::attention::is_unset")]
+    pub attention: frood_config::Attention,
 }
 
 /// What jobs are made from: the config as read, and what the installation can run.
@@ -76,9 +92,9 @@ pub struct JobBase {
 }
 
 impl JobBase {
-    /// The config with the console's layer: its sources and job changes; `frood.yaml`'s
-    /// source or job of the same name wins.
-    fn merged(&self, overlay: &Overlay) -> frood_config::Config {
+    /// The config with the console's layer: its sources, job and attention changes;
+    /// `frood.yaml`'s source, job or setting wins.
+    pub(crate) fn merged(&self, overlay: &Overlay) -> frood_config::Config {
         let mut config = self.config.clone();
         for (name, source) in &overlay.sources {
             config
@@ -92,10 +108,14 @@ impl JobBase {
                 .entry(name.clone())
                 .or_insert_with(|| job.clone());
         }
+        config.attention = crate::attention::merge(&config.attention, &overlay.attention);
         config
     }
 
-    fn resolve(&self, config: &frood_config::Config) -> (Vec<crate::JobSpec>, Vec<String>) {
+    pub(crate) fn resolve(
+        &self,
+        config: &frood_config::Config,
+    ) -> (Vec<crate::JobSpec>, Vec<String>) {
         crate::resolve(
             config,
             &crate::Capabilities {
@@ -183,7 +203,8 @@ pub struct NewConnection {
 pub enum ConnectError {
     #[error("{0}")]
     Invalid(String),
-    #[error("source {0} is in frood.yaml: change it there")]
+    /// What frood.yaml sets: "source youtrack", "job extract", …
+    #[error("{0} is in frood.yaml: change it there")]
     InConfig(String),
     #[error("no source {0} was connected from the console")]
     NotFound(String),
@@ -326,7 +347,7 @@ impl Dispatch {
             )));
         }
         if self.ctx.config_sources.contains_key(name) {
-            return Err(ConnectError::InConfig(name.to_owned()));
+            return Err(ConnectError::InConfig(format!("source {name}")));
         }
         let server = input.server.trim().to_owned();
         let parsed = url::Url::parse(&server)
@@ -398,7 +419,7 @@ impl Dispatch {
     /// Takes a source the console connected away, with its stored token.
     pub async fn disconnect(&self, actor: &str, name: &str) -> Result<i64, ConnectError> {
         if self.ctx.config_sources.contains_key(name) {
-            return Err(ConnectError::InConfig(name.to_owned()));
+            return Err(ConnectError::InConfig(format!("source {name}")));
         }
         let (_, mut overlay) = self.overlay().await?;
         if overlay.sources.remove(name).is_none() {
@@ -444,7 +465,7 @@ impl Dispatch {
             )));
         }
         if self.ctx.config_sources.contains_key(name) {
-            return Err(ConnectError::InConfig(name.to_owned()));
+            return Err(ConnectError::InConfig(format!("source {name}")));
         }
         if !self.ctx.vault.is_open() {
             return Err(ConnectError::NoVault);
@@ -659,7 +680,7 @@ impl Dispatch {
             .clone()
             .ok_or_else(|| ConnectError::Invalid("jobs cannot be changed here".to_owned()))?;
         if base.config.jobs.contains_key(name) {
-            return Err(ConnectError::InConfig(name.to_owned()));
+            return Err(ConnectError::InConfig(format!("job {name}")));
         }
         if !crate::standard_jobs().iter().any(|(n, _)| n == name) {
             return Err(ConnectError::NotFound(name.to_owned()));
@@ -699,13 +720,7 @@ impl Dispatch {
         }
         overlay.jobs.insert(name.to_owned(), job);
         let config = base.merged(&overlay);
-        frood_config::check(&config).map_err(|e| match e {
-            frood_config::ConfigError::Invalid(problems) => ConnectError::Invalid(format!(
-                "this change does not work: {}",
-                problems.join("; ")
-            )),
-            other => ConnectError::Invalid(other.to_string()),
-        })?;
+        checked(&config)?;
         let (_, warnings) = base.resolve(&config);
         let why = warnings.into_iter().find(|w| {
             w.starts_with(&format!("job {name} ")) || w.starts_with(&format!("job {name}:"))
@@ -782,7 +797,18 @@ impl crate::Ctx {
     }
 }
 
-async fn record(
+/// The config with the console's change checked as `frood.yaml` would be.
+pub(crate) fn checked(config: &frood_config::Config) -> Result<(), ConnectError> {
+    frood_config::check(config).map_err(|e| match e {
+        frood_config::ConfigError::Invalid(problems) => ConnectError::Invalid(format!(
+            "this change does not work: {}",
+            problems.join("; ")
+        )),
+        other => ConnectError::Invalid(other.to_string()),
+    })
+}
+
+pub(crate) async fn record(
     tx: &mut sqlx::PgConnection,
     actor: &str,
     overlay: &Overlay,

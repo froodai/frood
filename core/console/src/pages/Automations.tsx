@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useI18n } from "@/i18n";
 import type { Key } from "@/i18n/en";
 import { en } from "@/i18n/en";
@@ -13,6 +14,7 @@ import { useStartJob } from "@/lib/queries";
 import type { Run } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { JobForm, type JobSetting } from "./JobSettings";
+import { Notifications } from "./Notifications";
 
 type Trigger = { event?: string; schedule?: string; timezone?: string; for_each?: string };
 type Job = { name: string; uses: string; triggers: Trigger[] };
@@ -115,130 +117,139 @@ export function Automations() {
   const cost = (usd: number) => (usd > 0 ? new Intl.NumberFormat("en", { style: "currency", currency: "USD", maximumFractionDigits: 4 }).format(usd) : "");
 
   return (
-    <div className="flex flex-col gap-5 px-4 py-5 md:px-7">
-      {jobs.isPending ? (
-        <Skeleton className="h-32" />
-      ) : (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {(jobs.data ?? []).map((j) => {
-            const mine = all.filter((r) => r.job === j.name);
-            const last = mine[0];
-            const scheduled = j.triggers.some((tr) => tr.schedule) || j.triggers.length === 0;
-            const off = j.setting && !j.setting.running;
-            return (
-              <div
-                key={j.name}
-                className={cn(
-                  "flex flex-col gap-2 rounded-xl border bg-card p-4 transition-colors",
-                  job === j.name ? "border-primary" : "hover:border-foreground/20",
-                  off && "border-dashed",
-                )}
-              >
-                <div className="flex items-start gap-2">
-                  <button type="button" onClick={() => setJob(job === j.name ? null : j.name)} className="flex min-w-0 flex-1 flex-col gap-1 text-start">
-                    <span className={cn("font-medium", off && "text-muted-foreground")}>{title(j.name)}</span>
-                    <span className="text-xs text-muted-foreground">{off ? t("jobs.notRunning") : when(j)}</span>
-                  </button>
-                  {j.setting?.from === "config" && <span className="rounded-md border px-1.5 text-[11px] text-muted-foreground">{t("connect.fromConfig")}</span>}
-                  {j.setting?.from === "console" && <span className="rounded-md border px-1.5 text-[11px] text-muted-foreground">{t("jobs.fromConsole")}</span>}
-                  {j.setting && (
-                    <button type="button" onClick={() => setEditing(j.name)} aria-label={`${t("jobs.configure")}: ${title(j.name)}`} className="text-muted-foreground hover:text-foreground">
-                      <Settings2 className="size-4" />
+    <Tabs defaultValue={new URLSearchParams(location.search).get("tab") === "notifications" ? "notifications" : "jobs"} className="flex flex-col gap-4 px-4 py-5 md:px-7">
+      <TabsList>
+        <TabsTrigger value="jobs">{t("automations.jobs")}</TabsTrigger>
+        <TabsTrigger value="notifications">{t("automations.notifications")}</TabsTrigger>
+      </TabsList>
+      <TabsContent value="notifications">
+        <Notifications />
+      </TabsContent>
+      <TabsContent value="jobs" className="flex flex-col gap-5">
+        {jobs.isPending ? (
+          <Skeleton className="h-32" />
+        ) : (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {(jobs.data ?? []).map((j) => {
+              const mine = all.filter((r) => r.job === j.name);
+              const last = mine[0];
+              const scheduled = j.triggers.some((tr) => tr.schedule) || j.triggers.length === 0;
+              const off = j.setting && !j.setting.running;
+              return (
+                <div
+                  key={j.name}
+                  className={cn(
+                    "flex flex-col gap-2 rounded-xl border bg-card p-4 transition-colors",
+                    job === j.name ? "border-primary" : "hover:border-foreground/20",
+                    off && "border-dashed",
+                  )}
+                >
+                  <div className="flex items-start gap-2">
+                    <button type="button" onClick={() => setJob(job === j.name ? null : j.name)} className="flex min-w-0 flex-1 flex-col gap-1 text-start">
+                      <span className={cn("font-medium", off && "text-muted-foreground")}>{title(j.name)}</span>
+                      <span className="text-xs text-muted-foreground">{off ? t("jobs.notRunning") : when(j)}</span>
                     </button>
-                  )}
+                    {j.setting?.from === "config" && <span className="rounded-md border px-1.5 text-[11px] text-muted-foreground">{t("connect.fromConfig")}</span>}
+                    {j.setting?.from === "console" && <span className="rounded-md border px-1.5 text-[11px] text-muted-foreground">{t("jobs.fromConsole")}</span>}
+                    {j.setting && (
+                      <button type="button" onClick={() => setEditing(j.name)} aria-label={`${t("jobs.configure")}: ${title(j.name)}`} className="text-muted-foreground hover:text-foreground">
+                        <Settings2 className="size-4" />
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    {last ? (
+                      <>
+                        <span className={cn("size-2 rounded-full", TONE[last.status] ?? "bg-zinc-400")} />
+                        <span>{t(`run.${last.status}` as Key)}</span>
+                        <span aria-hidden>·</span>
+                        <span>{ago(last.started_at ?? last.created_at)}</span>
+                      </>
+                    ) : (
+                      <span>{t("automations.neverRan")}</span>
+                    )}
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    {/* The last runs, oldest first: a row of colours reads at a glance. */}
+                    <span className="flex gap-0.5" aria-hidden>
+                      {mine
+                        .slice(0, 16)
+                        .reverse()
+                        .map((r) => (
+                          <span key={r.id} className={cn("h-4 w-1.5 rounded-sm", TONE[r.status] ?? "bg-zinc-300")} />
+                        ))}
+                    </span>
+                    {scheduled && !off && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 px-2 text-xs"
+                        disabled={start.isPending}
+                        onClick={() =>
+                          start.mutate(j.name, {
+                            onSuccess: () => toast.success(t("system.started")),
+                            onError: (err) => toast.error(t("inbox.failed", { error: err.message })),
+                          })
+                        }
+                      >
+                        <Play className="size-3.5" /> {t("automations.runNow")}
+                      </Button>
+                    )}
+                  </div>
                 </div>
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  {last ? (
-                    <>
-                      <span className={cn("size-2 rounded-full", TONE[last.status] ?? "bg-zinc-400")} />
-                      <span>{t(`run.${last.status}` as Key)}</span>
-                      <span aria-hidden>·</span>
-                      <span>{ago(last.started_at ?? last.created_at)}</span>
-                    </>
-                  ) : (
-                    <span>{t("automations.neverRan")}</span>
-                  )}
-                </div>
-                <div className="flex items-center justify-between gap-2">
-                  {/* The last runs, oldest first: a row of colours reads at a glance. */}
-                  <span className="flex gap-0.5" aria-hidden>
-                    {mine
-                      .slice(0, 16)
-                      .reverse()
-                      .map((r) => (
-                        <span key={r.id} className={cn("h-4 w-1.5 rounded-sm", TONE[r.status] ?? "bg-zinc-300")} />
-                      ))}
-                  </span>
-                  {scheduled && !off && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-7 px-2 text-xs"
-                      disabled={start.isPending}
-                      onClick={() =>
-                        start.mutate(j.name, {
-                          onSuccess: () => toast.success(t("system.started")),
-                          onError: (err) => toast.error(t("inbox.failed", { error: err.message })),
-                        })
-                      }
-                    >
-                      <Play className="size-3.5" /> {t("automations.runNow")}
-                    </Button>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      <div className="flex items-center gap-2">
-        <h2 className="text-sm font-medium">{job ? t("automations.runsOf", { job: title(job) }) : t("automations.allRuns")}</h2>
-        {job && (
-          <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setJob(null)}>
-            {t("inbox.filter.reset")}
-          </Button>
-        )}
-      </div>
-      {runs.isPending ? (
-        <Skeleton className="h-64" />
-      ) : shown.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{t("automations.none")}</p>
-      ) : (
-        <div className="overflow-hidden rounded-xl border bg-card">
-          {shown.map((run) => (
-            <button
-              key={run.id}
-              type="button"
-              onClick={() => setOpen(run.id)}
-              className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 border-b px-4 py-2.5 text-start text-sm last:border-b-0 hover:bg-accent/40"
-            >
-              <span className={cn("rounded-md px-1.5 py-0.5 text-[11px] font-medium", PILL[run.status] ?? PILL.cancelled)}>{t(`run.${run.status}` as Key)}</span>
-              <span className="min-w-32 flex-1 font-medium">{title(run.job)}</span>
-              {run.error && <span className="line-clamp-1 w-full text-xs text-red-700 sm:order-last dark:text-red-300">{run.error}</span>}
-              <span className="text-xs text-muted-foreground">{ago(run.started_at ?? run.created_at)}</span>
-              <span className="w-14 text-end text-xs text-muted-foreground">{took(run)}</span>
-              <span className="w-16 text-end font-mono text-xs text-muted-foreground">{cost(run.cost_usd)}</span>
-            </button>
-          ))}
-        </div>
-      )}
-
-      <Sheet open={!!open} onOpenChange={(o) => !o && setOpen(null)}>
-        <SheetContent className="w-full overflow-y-auto sm:max-w-lg">
-          <SheetTitle className="sr-only">{t("automations.run")}</SheetTitle>
-          {open && <RunDetail id={open} title={title} onControl={(run, what) => control.mutate({ run, what })} />}
-        </SheetContent>
-      </Sheet>
-      <Sheet open={!!edited} onOpenChange={(o) => !o && setEditing(null)}>
-        <SheetContent className="w-full overflow-y-auto sm:max-w-lg">
-          <SheetTitle className="sr-only">{t("jobs.configure")}</SheetTitle>
-          <div className="p-5 text-sm">
-            {edited && <JobForm key={edited.name} job={edited} accounts={settings.data?.accounts ?? []} title={title(edited.name)} onDone={() => setEditing(null)} />}
+              );
+            })}
           </div>
-        </SheetContent>
-      </Sheet>
-    </div>
+        )}
+
+        <div className="flex items-center gap-2">
+          <h2 className="text-sm font-medium">{job ? t("automations.runsOf", { job: title(job) }) : t("automations.allRuns")}</h2>
+          {job && (
+            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setJob(null)}>
+              {t("inbox.filter.reset")}
+            </Button>
+          )}
+        </div>
+        {runs.isPending ? (
+          <Skeleton className="h-64" />
+        ) : shown.length === 0 ? (
+          <p className="text-sm text-muted-foreground">{t("automations.none")}</p>
+        ) : (
+          <div className="overflow-hidden rounded-xl border bg-card">
+            {shown.map((run) => (
+              <button
+                key={run.id}
+                type="button"
+                onClick={() => setOpen(run.id)}
+                className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 border-b px-4 py-2.5 text-start text-sm last:border-b-0 hover:bg-accent/40"
+              >
+                <span className={cn("rounded-md px-1.5 py-0.5 text-[11px] font-medium", PILL[run.status] ?? PILL.cancelled)}>{t(`run.${run.status}` as Key)}</span>
+                <span className="min-w-32 flex-1 font-medium">{title(run.job)}</span>
+                {run.error && <span className="line-clamp-1 w-full text-xs text-red-700 sm:order-last dark:text-red-300">{run.error}</span>}
+                <span className="text-xs text-muted-foreground">{ago(run.started_at ?? run.created_at)}</span>
+                <span className="w-14 text-end text-xs text-muted-foreground">{took(run)}</span>
+                <span className="w-16 text-end font-mono text-xs text-muted-foreground">{cost(run.cost_usd)}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        <Sheet open={!!open} onOpenChange={(o) => !o && setOpen(null)}>
+          <SheetContent className="w-full overflow-y-auto sm:max-w-lg">
+            <SheetTitle className="sr-only">{t("automations.run")}</SheetTitle>
+            {open && <RunDetail id={open} title={title} onControl={(run, what) => control.mutate({ run, what })} />}
+          </SheetContent>
+        </Sheet>
+        <Sheet open={!!edited} onOpenChange={(o) => !o && setEditing(null)}>
+          <SheetContent className="w-full overflow-y-auto sm:max-w-lg">
+            <SheetTitle className="sr-only">{t("jobs.configure")}</SheetTitle>
+            <div className="p-5 text-sm">
+              {edited && <JobForm key={edited.name} job={edited} accounts={settings.data?.accounts ?? []} title={title(edited.name)} onDone={() => setEditing(null)} />}
+            </div>
+          </SheetContent>
+        </Sheet>
+      </TabsContent>
+    </Tabs>
   );
 }
 
