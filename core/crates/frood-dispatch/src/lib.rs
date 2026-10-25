@@ -5,11 +5,13 @@
 //! agent jobs run in a runtime module and may wait for people's answers.
 
 mod agents;
+pub mod connections;
 mod detectors;
 mod digest;
 pub mod health;
 pub mod inbox;
 mod jobs;
+mod mcp;
 pub mod questions;
 pub mod runs;
 mod schedules;
@@ -48,7 +50,12 @@ pub(crate) struct Ctx {
     pub searcher: Searcher,
     pub gateway: Gateway,
     pub modules: Modules,
-    pub sources: Arc<BTreeMap<String, frood_config::Source>>,
+    /// The sources agents read: frood.yaml's and those connected from the console.
+    pub sources: connections::Sources,
+    /// Sources of frood.yaml alone; they win over the console's of the same name.
+    pub config_sources: Arc<BTreeMap<String, frood_config::Source>>,
+    /// Opens tokens the console stored.
+    pub vault: Arc<connections::Vault>,
     pub attention: Arc<frood_config::Attention>,
     pub backup: Arc<Option<jobs::backup::BackupSetup>>,
     /// The installation's spheres (docs/26 §3); empty when they are off.
@@ -90,7 +97,9 @@ impl Dispatch {
                 searcher,
                 gateway,
                 modules,
-                sources: Arc::new(BTreeMap::new()),
+                sources: connections::Sources::default(),
+                config_sources: Arc::new(BTreeMap::new()),
+                vault: Arc::new(connections::Vault::new(None)),
                 attention: Arc::new(frood_config::Attention::default()),
                 backup: Arc::new(None),
                 spheres: Arc::new(Vec::new()),
@@ -130,7 +139,14 @@ impl Dispatch {
 
     /// The sources agents read; schedules with `for_each: source` run once for each.
     pub fn with_sources(mut self, sources: BTreeMap<String, frood_config::Source>) -> Self {
-        self.ctx.sources = Arc::new(sources);
+        self.ctx.sources.set(sources.clone());
+        self.ctx.config_sources = Arc::new(sources);
+        self
+    }
+
+    /// The key that seals tokens the console stores (`FROOD_VAULT_KEY`, an age identity).
+    pub fn with_vault(mut self, key: Option<String>) -> Self {
+        self.ctx.vault = Arc::new(connections::Vault::new(key.as_deref()));
         self
     }
 

@@ -213,3 +213,30 @@ test("attachments: a photo and a link on knowledge, and on a change that waits",
   await expect(waiting.getByRole("link", { name: /tracker\.example/ })).toBeVisible();
   await expect(row.getByLabel("Attachments")).toHaveText("1");
 });
+
+test("a source connected from the console: check, tools, connect, disconnect", async ({ page }) => {
+  await signIn(page, "/admin/sources");
+  await page.getByRole("tab", { name: "Connected" }).click();
+  await page.getByRole("button", { name: /Connect a source/ }).click();
+  await page.getByRole("button", { name: /Any MCP server/ }).click();
+  const form = page.getByRole("dialog");
+  await form.getByLabel("Name").fill("tracker");
+  await form.getByLabel("Server address").fill("http://127.0.0.1:18099/mcp");
+  await form.getByLabel("Token").fill("wrong");
+  await form.getByRole("button", { name: "Check" }).click();
+  await expect(page.getByText(/refused the token/)).toBeVisible();
+  await form.getByLabel("Token").fill("e2e-token");
+  await form.getByRole("button", { name: "Check" }).click();
+  await expect(page.getByText("Connected: 2 tools")).toBeVisible();
+  // Reading tools are chosen; the changing one is not.
+  await expect(form.getByRole("checkbox", { name: /search_issues/ })).toBeChecked();
+  await expect(form.getByRole("checkbox", { name: /update_issue/ })).not.toBeChecked();
+  await form.getByRole("button", { name: "Connect", exact: true }).click();
+  await expect(page.getByText("Connected: tracker. The next pass reads it.")).toBeVisible();
+
+  const card = page.getByRole("button", { name: /^tracker/ });
+  await card.click();
+  await expect(page.getByRole("dialog").getByLabel("Token")).toHaveAttribute("placeholder", /A token is stored/);
+  await page.getByRole("dialog").getByRole("button", { name: "Disconnect" }).click();
+  await expect(card).toHaveCount(0);
+});

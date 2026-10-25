@@ -19,8 +19,15 @@ mkdir -p "$WORK/.frood" && : > "$WORK/.frood/secrets.env"
 
 # A server from an earlier run goes first.
 if [ -f "$HERE/.pid" ]; then kill "$(cat "$HERE/.pid")" 2>/dev/null || true; rm -f "$HERE/.pid"; fi
+if [ -f "$HERE/.mcp-pid" ]; then kill "$(cat "$HERE/.mcp-pid")" 2>/dev/null || true; rm -f "$HERE/.mcp-pid"; fi
 psql "$ADMIN_URL" -q -c "DROP DATABASE IF EXISTS $DB WITH (FORCE)" -c "CREATE DATABASE $DB"
 (cd "$CORE" && cargo build -q -p frood-cli)
+# The key that seals tokens connected from the console, as `frood init` makes it.
+"$FROOD" backup key --out "$WORK/vault.txt" > /dev/null
+echo "FROOD_VAULT_KEY=$(grep AGE-SECRET-KEY "$WORK/vault.txt")" >> "$WORK/.frood/secrets.env"
+# An MCP server to connect.
+node "$HERE/fake-mcp.mjs" > "$WORK/fake-mcp.log" 2>&1 &
+echo $! > "$HERE/.mcp-pid"
 "$FROOD" --config "$WORK/frood.yaml" serve > "$WORK/serve.log" 2>&1 &
 echo $! > "$HERE/.pid"
 for _ in $(seq 1 60); do curl -sf "http://127.0.0.1:$PORT/readyz" > /dev/null && break; sleep 0.5; done

@@ -193,7 +193,7 @@ impl Dispatch {
                 .iter()
                 .any(|t| t.schedule.is_some() && t.for_each.as_deref() == Some("source"))
         }) {
-            for source in self.ctx.sources.keys() {
+            for source in self.ctx.sources.now().keys() {
                 let read: Option<Value> = sqlx::query_scalar(
                     "SELECT checkpoint FROM source_checkpoints WHERE source = $1 AND reader = $2",
                 )

@@ -50,6 +50,10 @@ pub async fn run(paths: &Paths) -> anyhow::Result<()> {
     for warning in &warnings {
         tracing::warn!("{warning}");
     }
+    // Sources connected from the console join frood.yaml's.
+    if let Err(err) = state.dispatch.reload_sources().await {
+        tracing::error!(error = %err, "cannot read the sources connected from the console");
+    }
     // Files kept in the database before go to the files store, a few at a time.
     {
         let ledger = state.ledger.clone();

@@ -1229,12 +1229,14 @@ dependencies = [
  "frood-modhost",
  "frood-search",
  "humantime",
+ "reqwest",
  "serde",
  "serde_json",
  "sqlx",
  "thiserror 2.0.21",
  "tokio",
  "tracing",
+ "url",
  "uuid",
 ]
 

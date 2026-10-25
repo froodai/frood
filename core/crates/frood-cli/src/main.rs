@@ -183,6 +183,9 @@ enum BackupCommand {
 enum ConfigCommand {
     /// Print the JSON Schema of frood.yaml.
     Schema,
+    /// Print the sources connected from the console as frood.yaml lines, for git. Tokens stay
+    /// sealed in the database: the lines name secrets to put in the secrets file instead.
+    Export,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -274,6 +277,9 @@ async fn main() -> ExitCode {
             TokenCommand::List { email } => token::list(&paths, &email).await,
             TokenCommand::Revoke { email, id } => token::revoke(&paths, &email, id).await,
         },
+        Command::Config {
+            command: ConfigCommand::Export,
+        } => lifecycle::config_export(&paths).await,
         Command::Config {
             command: ConfigCommand::Schema,
         } => {

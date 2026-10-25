@@ -109,7 +109,8 @@ impl Ctx {
                 continue;
             }
             let name = tool.strip_prefix("source:").unwrap_or(tool);
-            let source = self.sources.get(name).ok_or_else(|| {
+            let known = self.sources.now();
+            let source = known.get(name).ok_or_else(|| {
                 JobError::permanent(format!(
                     "job {}: source {name} is not in sources",
                     spec.name
@@ -222,9 +223,10 @@ pub(crate) async fn start_or_resume(
             Some(name) => sources::checkpoint(&ctx.pool, name, &spec.name).await?,
             None => None,
         };
+        let known = ctx.sources.now();
         let brief = source.as_deref().map(|name| SourceBrief {
             name,
-            scope: ctx.sources.get(name).and_then(|s| s.scope.as_ref()),
+            scope: known.get(name).and_then(|s| s.scope.as_ref()),
             since,
         });
         body["op"] = json!("start");
@@ -690,6 +692,7 @@ impl Dispatch {
         };
         self.ctx
             .sources
+            .now()
             .get(*only)
             .filter(|s| s.authoritative)
             .map(|_| (*only).to_owned())
