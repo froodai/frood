@@ -290,6 +290,8 @@ export const ar: Catalog = {
   "me.notLinked": "حسابك غير مربوط بعد.",
   "me.link": "اربط حسابي",
   "me.linkAnother": "اربط حسابًا آخر",
+  "me.openChannel": "افتح {channel}",
+  "me.linkOr": "أو أرسل هذه الرسالة إلى البوت خلال 15 دقيقة:",
   "me.linkSteps": "أرسل هذه الرسالة إلى البوت خلال 15 دقيقة:",
   "me.linkThen": "عندما يرد البوت، يظهر الحساب هنا.",
   "me.copy": "نسخ",

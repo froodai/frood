@@ -497,6 +497,7 @@ impl Bot {
     /// Long polling until the process stops.
     async fn run(self) {
         self.set_menu().await;
+        self.announce().await;
         let mut offset: i64 = 0;
         loop {
             let updates = self
@@ -783,6 +784,7 @@ mod tests {
         answered: Vec<Value>,
         withdrawn: Vec<Value>,
         attached: Vec<Value>,
+        about: Vec<Value>,
     }
 
     /// A form or JSON body as one object; a file as its type and text.
@@ -847,6 +849,12 @@ mod tests {
             .route("/v1/channels/telegram/messages/{message_ref}", get(|Path(message_ref): Path<String>| async move {
                 assert_eq!(message_ref, "77:901");
                 Json(json!({ "item": { "id": "item-1" } }))
+            }))
+            .route("/botTOKEN/getMe", post(|| async { Json(json!({ "ok": true, "result": { "id": 7, "is_bot": true, "username": "frood_test_bot" } })) }))
+            .route("/v1/channels/telegram/about", axum::routing::put(|State(w): State<Shared>, headers: HeaderMap, Json(b): Json<Value>| async move {
+                assert_eq!(headers["authorization"], "Bearer module-token");
+                w.lock().unwrap().about.push(b);
+                axum::http::StatusCode::NO_CONTENT
             }))
             .route("/v1/channels/telegram/links", post(|State(w): State<Shared>, headers: HeaderMap, Json(b): Json<Value>| async move {
                 assert_eq!(headers["authorization"], "Bearer module-token");
@@ -934,6 +942,16 @@ mod tests {
             base[k] = v.clone();
         }
         serde_json::from_value(base).unwrap()
+    }
+
+    #[tokio::test]
+    async fn tells_frood_where_it_opens_with_a_code() {
+        let (url, world) = world().await;
+        bot(&url, Lang::En).announce().await;
+        assert_eq!(
+            world.lock().unwrap().about,
+            [json!({ "start_url": "https://t.me/frood_test_bot?start=" })]
+        );
     }
 
     #[tokio::test]

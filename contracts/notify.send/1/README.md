@@ -10,6 +10,12 @@ it looks in its channel and in which language. People's answers come back throug
 person's channel account in `external_id`: the action is that linked person's
 (`user:<id>/via/<channel>`).
 
+A person links a channel account with a one-time code from the console or `frood link`; the
+module redeems it (`POST /v1/channels/{channel}/links`). A module that can open its channel with
+the code already filled in says where, once at start: `PUT /v1/channels/{channel}/about` with
+`{"start_url": "https://t.me/<bot>?start="}` — the console then offers a one-tap link (the code
+is appended). Optional; without it the console shows the code to send.
+
 ## `notify.send@1`
 
 `POST /v1/capabilities/notify.send@1`

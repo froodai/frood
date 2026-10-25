@@ -290,6 +290,8 @@ export const zh: Catalog = {
   "me.notLinked": "你的账户尚未关联。",
   "me.link": "关联我的账户",
   "me.linkAnother": "关联另一个账户",
+  "me.openChannel": "打开 {channel}",
+  "me.linkOr": "或在 15 分钟内把这条消息发给机器人：",
   "me.linkSteps": "请在 15 分钟内把这条消息发给机器人：",
   "me.linkThen": "机器人回复后，账户会显示在这里。",
   "me.copy": "复制",
