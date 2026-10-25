@@ -9,7 +9,7 @@ use axum::response::Redirect;
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use frood_dispatch::connections::{
-    Checked, ConnectError, Connection, NewConnection, SignInSettings,
+    Checked, ConnectError, Connection, JobChange, JobSetting, NewConnection, SignInSettings,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -25,6 +25,8 @@ pub fn routes() -> Router<AppState> {
         .route("/v1/connections/signed-in", get(signed_in))
         .route("/v1/connections/{name}", put(connect).delete(disconnect))
         .route("/v1/connections/{name}/sign-in", post(sign_in))
+        .route("/v1/jobs/settings", get(job_settings))
+        .route("/v1/jobs/{name}", put(change_job).delete(reset_job))
 }
 
 /// Where the person comes back after signing in to a server.
@@ -209,4 +211,48 @@ async fn signed_in(State(state): State<AppState>, Query(back): Query<SignedIn>) 
 
 fn encode(value: &str) -> String {
     url::form_urlencoded::byte_serialize(value.as_bytes()).collect()
+}
+
+/// Every job as the console changes it, and the accounts that can pay for model calls.
+async fn job_settings(
+    State(state): State<AppState>,
+    _caller: Caller<Admin>,
+) -> Result<Json<Value>, ApiError> {
+    let jobs: Vec<JobSetting> = state
+        .dispatch
+        .job_settings()
+        .await
+        .map_err(|e| ApiError::from(frood_ledger::LedgerError::from(e)))?;
+    Ok(Json(json!({ "jobs": jobs, "accounts": state.accounts })))
+}
+
+/// Changes a job: on or off, schedules, model, account, budget. The answer says what keeps
+/// it from running, if anything.
+async fn change_job(
+    State(state): State<AppState>,
+    caller: Caller<Admin>,
+    Path(name): Path<String>,
+    Json(change): Json<JobChange>,
+) -> Result<Json<Value>, ApiError> {
+    let (revision, why) = state
+        .dispatch
+        .change_job(caller.actor().as_str(), &name, change)
+        .await
+        .map_err(connect_error)?;
+    Ok(Json(
+        json!({ "name": name, "revision": revision, "why": why }),
+    ))
+}
+
+async fn reset_job(
+    State(state): State<AppState>,
+    caller: Caller<Admin>,
+    Path(name): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let revision = state
+        .dispatch
+        .reset_job(caller.actor().as_str(), &name)
+        .await
+        .map_err(connect_error)?;
+    Ok(Json(json!({ "name": name, "revision": revision })))
 }

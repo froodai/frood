@@ -85,7 +85,7 @@ impl Dispatch {
     /// at once: each tick is claimed in the same transaction that records it.
     pub async fn tick_schedules(&self, now: DateTime<Utc>) -> sqlx::Result<usize> {
         let mut fired = 0;
-        for schedule in schedules(&self.jobs) {
+        for schedule in schedules(&self.jobs()) {
             let items: Vec<Option<String>> = if schedule.for_each_source {
                 self.ctx.sources.now().keys().cloned().map(Some).collect()
             } else {

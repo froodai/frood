@@ -35,6 +35,8 @@ pub struct AppState {
     pub installation: String,
     /// The installation's spheres (docs/26 §3); empty when they are off.
     pub spheres: std::sync::Arc<Vec<frood_config::Sphere>>,
+    /// Names of the accounts in the config, for the console's choice of who pays.
+    pub accounts: std::sync::Arc<Vec<String>>,
     /// SHA-256 of the config file the server started with; `frood apply` restarts the server
     /// when the file differs.
     pub config_sha256: Option<String>,
@@ -81,6 +83,13 @@ pub fn assemble(
         base_dir,
     };
     let (jobs, mut warnings) = frood_dispatch::resolve(config, &caps);
+    let job_base = frood_dispatch::connections::JobBase {
+        config: config.clone(),
+        api_accounts: api_accounts.clone(),
+        embeddings: caps.embeddings,
+        modules: caps.modules,
+        base_dir: base_dir.to_owned(),
+    };
     warnings.extend(objects_warning);
     let mut dispatch = frood_dispatch::Dispatch::new(
         ledger.clone(),
@@ -93,7 +102,8 @@ pub fn assemble(
     .with_sources(config.sources.clone())
     .with_vault(vault_key)
     .with_attention(config.attention.clone())
-    .with_spheres(config.spheres.clone());
+    .with_spheres(config.spheres.clone())
+    .with_job_base(job_base);
     if let Some(backup) = &config.backup {
         dispatch = dispatch.with_backup(frood_dispatch::BackupSetup {
             settings: backup.clone(),
@@ -113,6 +123,7 @@ pub fn assemble(
             dispatch,
             installation: config.installation.name.clone(),
             spheres: std::sync::Arc::new(config.spheres.clone()),
+            accounts: std::sync::Arc::new(config.accounts.keys().cloned().collect()),
             config_sha256: None,
         },
         modules,

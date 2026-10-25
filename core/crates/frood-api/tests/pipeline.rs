@@ -234,13 +234,8 @@ async fn voice_and_notes_become_knowledge() {
         },
     );
     assert!(assembly.warnings.is_empty(), "{:?}", assembly.warnings);
-    let names: Vec<&str> = assembly
-        .state
-        .dispatch
-        .jobs()
-        .iter()
-        .map(|j| j.name.as_str())
-        .collect();
+    let jobs = assembly.state.dispatch.jobs();
+    let names: Vec<&str> = jobs.iter().map(|j| j.name.as_str()).collect();
     assert_eq!(names, ["transcribe", "extract", "embed"]);
     assembly.modules.discover("stt").await.unwrap();
     let auth = assembly.state.auth.clone();

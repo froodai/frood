@@ -129,7 +129,7 @@ impl Dispatch {
                 continue;
             };
             let budget = self
-                .jobs
+                .jobs()
                 .iter()
                 .find(|j| j.name == run.job)
                 .and_then(|j| j.agent.as_ref())
@@ -158,7 +158,7 @@ impl Dispatch {
                 .max(1),
         );
         let mut out = Vec::new();
-        for job in self.jobs.iter() {
+        for job in self.jobs().iter() {
             let last: Vec<(String, Option<String>)> = sqlx::query_as(
                 "SELECT status, error FROM runs WHERE job = $1 AND status IN ('succeeded', 'failed') \
                  ORDER BY finished_at DESC NULLS LAST LIMIT $2",
@@ -188,7 +188,7 @@ impl Dispatch {
         );
         // Only jobs that read each source on a schedule are expected to keep up.
         let mut out = Vec::new();
-        for job in self.jobs.iter().filter(|j| {
+        for job in self.jobs().iter().filter(|j| {
             j.triggers
                 .iter()
                 .any(|t| t.schedule.is_some() && t.for_each.as_deref() == Some("source"))
@@ -280,7 +280,7 @@ impl Dispatch {
                 .max(1),
         )
         .unwrap_or(2);
-        if let Some(interval) = crate::schedules::interval(&self.jobs, "backup", now) {
+        if let Some(interval) = crate::schedules::interval(&self.jobs(), "backup", now) {
             let (last_ok, first): (Option<DateTime<Utc>>, Option<DateTime<Utc>>) = sqlx::query_as(
                 "SELECT max(finished_at) FILTER (WHERE status = 'succeeded'), min(created_at) \
                  FROM runs WHERE job = 'backup'",

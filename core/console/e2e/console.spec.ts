@@ -259,3 +259,23 @@ test("a source connected by signing in, then its tools chosen", async ({ page })
   await opened.getByRole("button", { name: "Save" }).click();
   await expect(page.getByText("Connected: wiki. The next pass reads it.")).toBeVisible();
 });
+
+test("jobs from the console: frood.yaml's stay there, others change and come back", async ({ page }) => {
+  await signIn(page, "/admin/automations");
+  await page.getByRole("button", { name: "Settings: Digest" }).click();
+  await expect(page.getByText("This job is set in frood.yaml and changes only there; run frood apply after.")).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  // The nightly pass needs an agent from frood.yaml: a time is kept, and the console says why it does not run.
+  await page.getByRole("button", { name: "Settings: Nightly pass" }).click();
+  const form = page.getByRole("dialog");
+  await form.getByRole("button", { name: "Add a time" }).click();
+  await form.getByLabel("Time", { exact: true }).fill("02:15");
+  await form.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByText(/Saved, but it does not run/)).toBeVisible();
+  await expect(page.getByText("changed here")).toBeVisible();
+
+  await page.getByRole("button", { name: "Settings: Nightly pass" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Back to the default" }).click();
+  await expect(page.getByText("changed here")).toHaveCount(0);
+});

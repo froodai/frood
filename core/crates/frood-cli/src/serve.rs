@@ -50,9 +50,18 @@ pub async fn run(paths: &Paths) -> anyhow::Result<()> {
     for warning in &warnings {
         tracing::warn!("{warning}");
     }
-    // Sources connected from the console join frood.yaml's.
+    // Sources connected and jobs changed from the console join frood.yaml's.
     if let Err(err) = state.dispatch.reload_sources().await {
         tracing::error!(error = %err, "cannot read the sources connected from the console");
+    }
+    match state.dispatch.reload_jobs().await {
+        // What the console's changes add to the warnings said above.
+        Ok(now) => {
+            for warning in now.iter().filter(|w| !warnings.contains(w)) {
+                tracing::warn!("{warning}");
+            }
+        }
+        Err(err) => tracing::error!(error = %err, "cannot read the jobs changed from the console"),
     }
     // Files kept in the database before go to the files store, a few at a time.
     {

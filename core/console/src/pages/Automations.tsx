@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Play } from "lucide-react";
+import { Play, Settings2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import { api } from "@/lib/frood";
 import { useStartJob } from "@/lib/queries";
 import type { Run } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { JobForm, type JobSetting } from "./JobSettings";
 
 type Trigger = { event?: string; schedule?: string; timezone?: string; for_each?: string };
 type Job = { name: string; uses: string; triggers: Trigger[] };
@@ -79,7 +80,21 @@ export function Automations() {
   const when = useWhen();
   const [job, setJob] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
-  const jobs = useQuery({ queryKey: ["jobs"], queryFn: () => api<Job[]>("/v1/jobs") });
+  const [editing, setEditing] = useState<string | null>(null);
+  const running = useQuery({ queryKey: ["jobs"], queryFn: () => api<Job[]>("/v1/jobs") });
+  // Every job, with what the console may change; without admin, only the running ones.
+  const settings = useQuery({
+    queryKey: ["job-settings"],
+    queryFn: () => api<{ jobs: JobSetting[]; accounts: string[] }>("/v1/jobs/settings"),
+    retry: false,
+  });
+  const jobs = {
+    isPending: running.isPending,
+    data: settings.data
+      ? settings.data.jobs.map((s) => ({ name: s.name, uses: s.uses, triggers: running.data?.find((r) => r.name === s.name)?.triggers ?? s.schedules, setting: s }))
+      : (running.data ?? []).map((r) => ({ ...r, setting: undefined as JobSetting | undefined })),
+  };
+  const edited = settings.data?.jobs.find((s) => s.name === editing);
   const runs = useQuery({ queryKey: ["runs", "all"], queryFn: () => api<Run[]>("/v1/runs?limit=200"), refetchInterval: 15_000 });
   const start = useStartJob();
   const client = useQueryClient();
@@ -109,15 +124,29 @@ export function Automations() {
             const mine = all.filter((r) => r.job === j.name);
             const last = mine[0];
             const scheduled = j.triggers.some((tr) => tr.schedule) || j.triggers.length === 0;
+            const off = j.setting && !j.setting.running;
             return (
               <div
                 key={j.name}
-                className={cn("flex flex-col gap-2 rounded-xl border bg-card p-4 transition-colors", job === j.name ? "border-primary" : "hover:border-foreground/20")}
+                className={cn(
+                  "flex flex-col gap-2 rounded-xl border bg-card p-4 transition-colors",
+                  job === j.name ? "border-primary" : "hover:border-foreground/20",
+                  off && "border-dashed",
+                )}
               >
-                <button type="button" onClick={() => setJob(job === j.name ? null : j.name)} className="flex flex-col gap-1 text-start">
-                  <span className="font-medium">{title(j.name)}</span>
-                  <span className="text-xs text-muted-foreground">{when(j)}</span>
-                </button>
+                <div className="flex items-start gap-2">
+                  <button type="button" onClick={() => setJob(job === j.name ? null : j.name)} className="flex min-w-0 flex-1 flex-col gap-1 text-start">
+                    <span className={cn("font-medium", off && "text-muted-foreground")}>{title(j.name)}</span>
+                    <span className="text-xs text-muted-foreground">{off ? t("jobs.notRunning") : when(j)}</span>
+                  </button>
+                  {j.setting?.from === "config" && <span className="rounded-md border px-1.5 text-[11px] text-muted-foreground">{t("connect.fromConfig")}</span>}
+                  {j.setting?.from === "console" && <span className="rounded-md border px-1.5 text-[11px] text-muted-foreground">{t("jobs.fromConsole")}</span>}
+                  {j.setting && (
+                    <button type="button" onClick={() => setEditing(j.name)} aria-label={`${t("jobs.configure")}: ${title(j.name)}`} className="text-muted-foreground hover:text-foreground">
+                      <Settings2 className="size-4" />
+                    </button>
+                  )}
+                </div>
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   {last ? (
                     <>
@@ -140,7 +169,7 @@ export function Automations() {
                         <span key={r.id} className={cn("h-4 w-1.5 rounded-sm", TONE[r.status] ?? "bg-zinc-300")} />
                       ))}
                   </span>
-                  {scheduled && (
+                  {scheduled && !off && (
                     <Button
                       size="sm"
                       variant="ghost"
@@ -199,6 +228,14 @@ export function Automations() {
         <SheetContent className="w-full overflow-y-auto sm:max-w-lg">
           <SheetTitle className="sr-only">{t("automations.run")}</SheetTitle>
           {open && <RunDetail id={open} title={title} onControl={(run, what) => control.mutate({ run, what })} />}
+        </SheetContent>
+      </Sheet>
+      <Sheet open={!!edited} onOpenChange={(o) => !o && setEditing(null)}>
+        <SheetContent className="w-full overflow-y-auto sm:max-w-lg">
+          <SheetTitle className="sr-only">{t("jobs.configure")}</SheetTitle>
+          <div className="p-5 text-sm">
+            {edited && <JobForm key={edited.name} job={edited} accounts={settings.data?.accounts ?? []} title={title(edited.name)} onDone={() => setEditing(null)} />}
+          </div>
         </SheetContent>
       </Sheet>
     </div>
