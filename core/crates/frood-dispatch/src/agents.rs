@@ -264,9 +264,10 @@ pub(crate) async fn start_or_resume(
 }
 
 impl Dispatch {
-    fn agent_settings(&self, job: &str) -> Option<(&JobSpec, &AgentSettings)> {
-        let spec = self.jobs.iter().find(|j| j.name == job)?;
-        spec.agent.as_ref().map(|a| (spec, a))
+    fn agent_settings(&self, job: &str) -> Option<(JobSpec, AgentSettings)> {
+        let spec = self.jobs().iter().find(|j| j.name == job)?.clone();
+        let settings = spec.agent.clone()?;
+        Some((spec, settings))
     }
 
     /// Ends a run: the runtime stops the agent and frees what it holds (its session too), the
@@ -651,7 +652,7 @@ impl Dispatch {
 
     /// `POST /v1/runs`: a run of a job by hand.
     pub async fn start_manual(&self, job: &str, input: &Value) -> Result<Run, String> {
-        if !self.jobs.iter().any(|j| j.name == job) {
+        if !self.jobs().iter().any(|j| j.name == job) {
             return Err(format!("there is no job {job} (or it is turned off)"));
         }
         runs::create_manual(&self.ctx.pool, job, input)
@@ -686,7 +687,7 @@ impl Dispatch {
         if !settings.auto_accept {
             return None;
         }
-        let tools = sources::tools(settings, &run).ok()?;
+        let tools = sources::tools(&settings, &run).ok()?;
         let read: Vec<&str> = tools
             .iter()
             .filter_map(|t| t.strip_prefix("source:"))

@@ -35,7 +35,10 @@ use uuid::Uuid;
 
 pub use inbox::{Act, ActOutcome, InboxItem, Shown};
 pub use jobs::backup::BackupSetup;
-pub use jobs::{AgentSettings, Capabilities, JobError, JobSpec, Task, resolve};
+pub use jobs::{
+    AgentSettings, Capabilities, JobError, JobSpec, Task, resolve, standard_jobs,
+    standard_jobs_triggers,
+};
 pub use questions::Question;
 pub use runs::Run;
 
@@ -66,7 +69,10 @@ pub(crate) struct Ctx {
 #[derive(Clone)]
 pub struct Dispatch {
     ctx: Ctx,
-    jobs: Arc<Vec<JobSpec>>,
+    /// The jobs as they are now: frood.yaml's and the console's changes (docs/26 §4).
+    jobs: Arc<std::sync::RwLock<Arc<Vec<JobSpec>>>>,
+    /// What the jobs are made from again when the console changes one.
+    job_base: Option<Arc<connections::JobBase>>,
     /// Since when each module has not answered (detectors).
     down_since: Arc<std::sync::Mutex<BTreeMap<String, chrono::DateTime<chrono::Utc>>>>,
 }
@@ -105,7 +111,8 @@ impl Dispatch {
                 backup: Arc::new(None),
                 spheres: Arc::new(Vec::new()),
             },
-            jobs: Arc::new(jobs),
+            jobs: Arc::new(std::sync::RwLock::new(Arc::new(jobs))),
+            job_base: None,
             down_since: Arc::default(),
         }
     }
@@ -151,8 +158,21 @@ impl Dispatch {
         self
     }
 
-    pub fn jobs(&self) -> &[JobSpec] {
-        &self.jobs
+    /// The jobs this installation runs now.
+    pub fn jobs(&self) -> Arc<Vec<JobSpec>> {
+        self.jobs.read().expect("jobs lock").clone()
+    }
+
+    /// What jobs are made from: the config and what the installation can run. With it, the
+    /// console can change jobs.
+    pub fn with_job_base(mut self, base: connections::JobBase) -> Self {
+        self.job_base = Some(Arc::new(base));
+        self
+    }
+
+    /// Replaces the jobs, as when the console changes one.
+    pub fn set_jobs(&self, jobs: Vec<JobSpec>) {
+        *self.jobs.write().expect("jobs lock") = Arc::new(jobs);
     }
 
     /// Turns new journal events into runs. Returns how many events it read.
@@ -188,7 +208,7 @@ impl Dispatch {
             let id: Uuid = event.try_get("id")?;
             let position: i64 = event.try_get("position")?;
             let subject: Option<String> = event.try_get("subject")?;
-            for job in self.jobs.iter().filter(|j| j.matches(&event_type, &data)) {
+            for job in self.jobs().iter().filter(|j| j.matches(&event_type, &data)) {
                 let input = json!({ "event": {
                     "position": position, "id": id, "type": event_type, "subject": subject,
                     "actor": event.try_get::<String, _>("actor")?, "data": data,
@@ -223,7 +243,8 @@ impl Dispatch {
         let Some(run) = runs::claim(&self.ctx.pool).await? else {
             return Ok(None);
         };
-        let Some(spec) = self.jobs.iter().find(|j| j.name == run.job) else {
+        let jobs = self.jobs();
+        let Some(spec) = jobs.iter().find(|j| j.name == run.job) else {
             runs::cancel(&self.ctx.pool, run.id, "the job is turned off").await?;
             return Ok(Some(run.id));
         };
@@ -288,7 +309,8 @@ impl Dispatch {
             Ok(_) => {}
             Err(err) => tracing::error!(error = %err, "cannot requeue interrupted runs"),
         }
-        let names: Vec<&str> = self.jobs.iter().map(|j| j.name.as_str()).collect();
+        let jobs = self.jobs();
+        let names: Vec<&str> = jobs.iter().map(|j| j.name.as_str()).collect();
         tracing::info!(jobs = ?names, workers, "dispatcher started");
         let mut tasks = Vec::new();
         {
@@ -415,7 +437,7 @@ impl Dispatch {
 
     /// The jobs this installation runs, as the console shows them: name, what they use, when.
     pub fn jobs_shown(&self) -> Vec<Value> {
-        self.jobs
+        self.jobs()
             .iter()
             .map(|j| json!({ "name": j.name, "uses": j.uses, "triggers": j.triggers }))
             .collect()

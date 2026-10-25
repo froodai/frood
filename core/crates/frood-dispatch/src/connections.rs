@@ -56,11 +56,91 @@ impl Vault {
     }
 }
 
-/// The console's layer of the config. Only sources so far.
+/// The console's layer of the config: sources, and changes to jobs as `frood.yaml`'s `jobs`
+/// section would make them.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Overlay {
     #[serde(default)]
     pub sources: BTreeMap<String, Source>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub jobs: BTreeMap<String, frood_config::Job>,
+}
+
+/// What jobs are made from: the config as read, and what the installation can run.
+pub struct JobBase {
+    pub config: frood_config::Config,
+    pub api_accounts: Vec<String>,
+    pub embeddings: bool,
+    pub modules: usize,
+    pub base_dir: std::path::PathBuf,
+}
+
+impl JobBase {
+    /// The config with the console's layer: its sources and job changes; `frood.yaml`'s
+    /// source or job of the same name wins.
+    fn merged(&self, overlay: &Overlay) -> frood_config::Config {
+        let mut config = self.config.clone();
+        for (name, source) in &overlay.sources {
+            config
+                .sources
+                .entry(name.clone())
+                .or_insert_with(|| source.clone());
+        }
+        for (name, job) in &overlay.jobs {
+            config
+                .jobs
+                .entry(name.clone())
+                .or_insert_with(|| job.clone());
+        }
+        config
+    }
+
+    fn resolve(&self, config: &frood_config::Config) -> (Vec<crate::JobSpec>, Vec<String>) {
+        crate::resolve(
+            config,
+            &crate::Capabilities {
+                api_accounts: &self.api_accounts,
+                embeddings: self.embeddings,
+                modules: self.modules,
+                base_dir: &self.base_dir,
+            },
+        )
+    }
+}
+
+/// A job as the console shows it for changing.
+#[derive(Debug, Clone, Serialize)]
+pub struct JobSetting {
+    pub name: String,
+    pub uses: String,
+    /// `config` (frood.yaml changes it, and only there), `console` or `default`.
+    pub from: &'static str,
+    /// Whether it runs; when not, `why`.
+    pub running: bool,
+    pub why: Option<String>,
+    pub enabled: bool,
+    pub schedules: Vec<frood_config::Trigger>,
+    /// Starts on events too (then its schedule is not the console's to change).
+    pub on_events: bool,
+    pub model: Option<String>,
+    pub account: Option<String>,
+    pub budget: Option<frood_config::Budget>,
+}
+
+/// What the console may change in a job; the rest is `frood.yaml`'s.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct JobChange {
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    /// Cron schedules with their time zones; empty: only by hand.
+    #[serde(default)]
+    pub schedules: Option<Vec<frood_config::Trigger>>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub account: Option<String>,
+    #[serde(default)]
+    pub budget: Option<frood_config::Budget>,
 }
 
 /// A source as the console shows it: where it comes from, and whether a token is stored.
@@ -481,6 +561,174 @@ impl Dispatch {
         tx.commit().await?;
         self.reload_sources().await?;
         Ok(name)
+    }
+
+    /// The jobs from `frood.yaml` and the console's changes, made again.
+    pub async fn reload_jobs(&self) -> sqlx::Result<Vec<String>> {
+        let Some(base) = &self.job_base else {
+            return Ok(Vec::new());
+        };
+        let (_, overlay) = self.overlay().await?;
+        let config = base.merged(&overlay);
+        let (jobs, warnings) = base.resolve(&config);
+        self.set_jobs(jobs);
+        Ok(warnings)
+    }
+
+    /// Every standard job and every job `frood.yaml` names, as the console changes them.
+    pub async fn job_settings(&self) -> sqlx::Result<Vec<JobSetting>> {
+        let Some(base) = &self.job_base else {
+            return Ok(Vec::new());
+        };
+        let (_, overlay) = self.overlay().await?;
+        let config = base.merged(&overlay);
+        let (_, warnings) = base.resolve(&config);
+        let running = self.jobs();
+        let mut names: Vec<(String, String)> = crate::standard_jobs();
+        for name in config.jobs.keys() {
+            if !names.iter().any(|(n, _)| n == name) {
+                names.push((
+                    name.clone(),
+                    config.jobs[name].uses.clone().unwrap_or_default(),
+                ));
+            }
+        }
+        Ok(names
+            .into_iter()
+            .map(|(name, uses)| {
+                let spec = running.iter().find(|j| j.name == name);
+                let change = config.jobs.get(&name);
+                let from = if base.config.jobs.contains_key(&name) {
+                    "config"
+                } else if overlay.jobs.contains_key(&name) {
+                    "console"
+                } else {
+                    "default"
+                };
+                let triggers: Vec<frood_config::Trigger> = match spec {
+                    Some(spec) => spec.triggers.clone(),
+                    None => change
+                        .and_then(|c| c.on.clone())
+                        .unwrap_or_else(|| crate::standard_jobs_triggers(&name)),
+                };
+                let why = warnings
+                    .iter()
+                    .find(|w| {
+                        w.starts_with(&format!("job {name} "))
+                            || w.starts_with(&format!("job {name}:"))
+                    })
+                    .cloned();
+                let with = |key: &str| {
+                    spec.and_then(|s| s.with_str(key).map(str::to_owned))
+                        .or_else(|| match key {
+                            "model" => change.and_then(|c| c.model.clone()),
+                            _ => change.and_then(|c| c.account.clone()),
+                        })
+                };
+                JobSetting {
+                    running: spec.is_some(),
+                    why,
+                    enabled: change.and_then(|c| c.enabled) != Some(false),
+                    on_events: triggers.iter().any(|t| t.event.is_some()),
+                    schedules: triggers
+                        .into_iter()
+                        .filter(|t| t.schedule.is_some())
+                        .collect(),
+                    model: with("model"),
+                    account: with("account"),
+                    budget: change.and_then(|c| c.budget.clone()),
+                    name,
+                    uses,
+                    from,
+                }
+            })
+            .collect())
+    }
+
+    /// Changes a job from the console: on or off, its schedules, model, account and budget.
+    /// Checked as `frood.yaml` would be; a job `frood.yaml` changes is changed only there.
+    /// Returns the revision and what keeps the job from running, if anything.
+    pub async fn change_job(
+        &self,
+        actor: &str,
+        name: &str,
+        change: JobChange,
+    ) -> Result<(i64, Option<String>), ConnectError> {
+        let base = self
+            .job_base
+            .clone()
+            .ok_or_else(|| ConnectError::Invalid("jobs cannot be changed here".to_owned()))?;
+        if base.config.jobs.contains_key(name) {
+            return Err(ConnectError::InConfig(name.to_owned()));
+        }
+        if !crate::standard_jobs().iter().any(|(n, _)| n == name) {
+            return Err(ConnectError::NotFound(name.to_owned()));
+        }
+        let (_, mut overlay) = self.overlay().await?;
+        let mut job = overlay.jobs.get(name).cloned().unwrap_or_default();
+        if let Some(enabled) = change.enabled {
+            job.enabled = (!enabled).then_some(false);
+        }
+        if let Some(schedules) = change.schedules {
+            if schedules
+                .iter()
+                .any(|t| t.schedule.is_none() || t.event.is_some())
+            {
+                return Err(ConnectError::Invalid(
+                    "a schedule needs `schedule` (cron) and no event".to_owned(),
+                ));
+            }
+            let on_events = crate::standard_jobs_triggers(name)
+                .iter()
+                .any(|t| t.event.is_some());
+            if on_events {
+                return Err(ConnectError::Invalid(format!(
+                    "{name} starts on events, not on a schedule"
+                )));
+            }
+            job.on = Some(schedules);
+        }
+        if let Some(model) = change.model {
+            job.model = Some(model.trim().to_owned()).filter(|m| !m.is_empty());
+        }
+        if let Some(account) = change.account {
+            job.account = Some(account.trim().to_owned()).filter(|a| !a.is_empty());
+        }
+        if change.budget.is_some() {
+            job.budget = change.budget;
+        }
+        overlay.jobs.insert(name.to_owned(), job);
+        let config = base.merged(&overlay);
+        frood_config::check(&config).map_err(|e| match e {
+            frood_config::ConfigError::Invalid(problems) => ConnectError::Invalid(format!(
+                "this change does not work: {}",
+                problems.join("; ")
+            )),
+            other => ConnectError::Invalid(other.to_string()),
+        })?;
+        let (_, warnings) = base.resolve(&config);
+        let why = warnings.into_iter().find(|w| {
+            w.starts_with(&format!("job {name} ")) || w.starts_with(&format!("job {name}:"))
+        });
+        let mut tx = self.ctx.pool.begin().await?;
+        let revision = record(&mut tx, actor, &overlay, &format!("changed job {name}")).await?;
+        tx.commit().await?;
+        self.reload_jobs().await?;
+        Ok((revision, why))
+    }
+
+    /// Takes the console's change of a job back: the job is as `frood.yaml` and the defaults
+    /// make it.
+    pub async fn reset_job(&self, actor: &str, name: &str) -> Result<i64, ConnectError> {
+        let (_, mut overlay) = self.overlay().await?;
+        if overlay.jobs.remove(name).is_none() {
+            return Err(ConnectError::NotFound(name.to_owned()));
+        }
+        let mut tx = self.ctx.pool.begin().await?;
+        let revision = record(&mut tx, actor, &overlay, &format!("reset job {name}")).await?;
+        tx.commit().await?;
+        self.reload_jobs().await?;
+        Ok(revision)
     }
 
     /// Whether the console can store tokens.

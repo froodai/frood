@@ -117,6 +117,20 @@ fn trigger(event: &str, filter: &[(&str, Value)]) -> Trigger {
     }
 }
 
+/// The triggers a standard job starts with.
+pub fn standard_jobs_triggers(name: &str) -> Vec<Trigger> {
+    standard()
+        .into_iter()
+        .find(|j| j.name == name)
+        .map(|j| j.triggers)
+        .unwrap_or_default()
+}
+
+/// Names and capabilities of the standard jobs, for the console.
+pub fn standard_jobs() -> Vec<(String, String)> {
+    standard().into_iter().map(|j| (j.name, j.uses)).collect()
+}
+
 /// The standard set (bundle `frood/standard`, built in until the registry exists).
 fn standard() -> Vec<JobSpec> {
     vec![

@@ -447,3 +447,133 @@ async fn a_source_connects_by_signing_in() {
             .contains("connect_error=")
     );
 }
+
+/// Jobs changed from the console (QY1 — b): a schedule, off and on, back to the default; checked
+/// as frood.yaml is, and frood.yaml's own change wins.
+#[tokio::test]
+async fn jobs_change_from_the_console() {
+    let Some(url) = frood_store::testing::database_url() else {
+        eprintln!("FROOD_TEST_DATABASE_URL is not set; skipping");
+        return;
+    };
+    let pool = frood_store::testing::fresh_database(&url, "api_jobs")
+        .await
+        .expect("test database");
+    let config = frood_config::parse(
+        "version: 1\ninstallation: {name: test}\nstorage: {uses: postgres, url: 'postgres://unused', objects: {uses: database}}\n\
+         deploy: {server: host}\njobs:\n  transcribe: {enabled: false}\n",
+        &frood_config::Secrets::from_pairs(Vec::<(String, String)>::new()),
+    )
+    .unwrap()
+    .config;
+    let auth = Auth::new(pool.clone(), AuthSettings::from_config(&config));
+    let alice = auth
+        .user_id_by_email("alice@example.com", true)
+        .await
+        .unwrap();
+    let all: Vec<String> = frood_auth::scope::ALL
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect();
+    let (_, admin) = auth
+        .create_personal_token(alice, "admin", &all, None)
+        .await
+        .unwrap();
+    let state =
+        frood_api::assemble(&config, std::path::Path::new("."), pool.clone(), |_| None).state;
+    let dispatch = state.dispatch.clone();
+    let app = router(state);
+    let running = |name: &str| dispatch.jobs().iter().any(|j| j.name == name);
+    let setting = |listed: &Value, name: &str| {
+        listed["jobs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|j| j["name"] == name)
+            .unwrap()
+            .clone()
+    };
+
+    let (status, listed) = call(&app, "GET", "/v1/jobs/settings", &admin, None).await;
+    assert_eq!(status, StatusCode::OK, "{listed}");
+    let digest = setting(&listed, "digest");
+    assert_eq!(digest["from"], "default");
+    assert_eq!(digest["running"], false);
+    assert_eq!(setting(&listed, "transcribe")["from"], "config");
+    assert_eq!(setting(&listed, "extract")["on_events"], true);
+    assert!(!running("digest"));
+
+    // A schedule from the console: the digest runs, the next tick uses it.
+    let (status, changed) = call(
+        &app,
+        "PUT",
+        "/v1/jobs/digest",
+        &admin,
+        Some(json!({
+        "schedules": [{ "schedule": "30 8 * * 1-5", "timezone": "Europe/Belgrade" }] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{changed}");
+    assert!(changed["why"].is_null(), "{changed}");
+    assert!(running("digest"));
+    let (_, listed) = call(&app, "GET", "/v1/jobs/settings", &admin, None).await;
+    let digest = setting(&listed, "digest");
+    assert_eq!(digest["from"], "console");
+    assert_eq!(digest["schedules"][0]["schedule"], "30 8 * * 1-5");
+
+    // Checked as frood.yaml is: a schedule that is not cron, a job that starts on events, a job
+    // frood.yaml changes.
+    let (status, bad) = call(
+        &app,
+        "PUT",
+        "/v1/jobs/digest",
+        &admin,
+        Some(json!({ "schedules": [{ "schedule": "every morning" }] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{bad}");
+    assert!(running("digest"), "a refused change changes nothing");
+    let (status, _) = call(
+        &app,
+        "PUT",
+        "/v1/jobs/extract",
+        &admin,
+        Some(json!({ "schedules": [{ "schedule": "0 3 * * *" }] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, _) = call(
+        &app,
+        "PUT",
+        "/v1/jobs/transcribe",
+        &admin,
+        Some(json!({ "enabled": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    // Off, then back to the default.
+    let (status, _) = call(
+        &app,
+        "PUT",
+        "/v1/jobs/digest",
+        &admin,
+        Some(json!({ "enabled": false })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(!running("digest"));
+    let (status, _) = call(
+        &app,
+        "PUT",
+        "/v1/jobs/digest",
+        &admin,
+        Some(json!({ "enabled": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(running("digest"));
+    let (status, _) = call(&app, "DELETE", "/v1/jobs/digest", &admin, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(!running("digest"));
+}

@@ -99,6 +99,12 @@ pub fn parse(raw: &str, secrets: &Secrets) -> Result<Loaded, ConfigError> {
     })
 }
 
+/// Checks a config built in code, as `parse` checks one read from a file: the console's
+/// changes go through the same rules as `frood.yaml`.
+pub fn check(config: &Config) -> Result<(), ConfigError> {
+    validate(config)
+}
+
 fn validate(config: &Config) -> Result<(), ConfigError> {
     let mut problems = Vec::new();
     if config.version != 1 {
