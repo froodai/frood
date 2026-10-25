@@ -776,7 +776,10 @@ async fn digests_and_investigations() {
     // What is new: the accepted fact, the conflict waiting.
     let (status, digest) = call(&app, get_json("/v1/digest", &pat)).await;
     assert_eq!(status, StatusCode::OK, "{digest}");
-    assert_eq!(digest["accepted"], json!(["Релиз 2.4 — 14 ноября"]));
+    assert_eq!(
+        digest["accepted"],
+        json!([{ "text": "Релиз 2.4 — 14 ноября", "sphere": null }])
+    );
     assert_eq!(digest["waiting"]["count"], 1);
     assert_eq!(
         digest["waiting"]["items"][0]["what"],
@@ -790,7 +793,7 @@ async fn digests_and_investigations() {
     let sent = channel.lock().unwrap().sent[1].clone();
     assert_eq!(sent["item"]["item"]["kind"], "digest");
     assert_eq!(
-        sent["item"]["content"]["accepted"][0],
+        sent["item"]["content"]["accepted"][0]["text"],
         "Релиз 2.4 — 14 ноября"
     );
     let (_, again) = call(&app, get_json("/v1/digest", &pat)).await;

@@ -303,6 +303,10 @@ pub struct Act {
     /// For snooze and defer: how long, default a day.
     #[serde(default)]
     pub hours: Option<i64>,
+    /// For accept: the sphere the person put it in instead of the proposed one; `none` for
+    /// no sphere.
+    #[serde(default)]
+    pub sphere: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -774,10 +778,12 @@ impl Dispatch {
         for alternative in &p.alternatives {
             let mut changes = Vec::new();
             for op in &alternative.operations {
-                let (kind, title, before, after) = match op {
+                let mut sphere_before = None;
+                let (kind, title, sphere, before, after) = match op {
                     Operation::Create { assertion, .. } => (
                         assertion.kind.clone(),
                         assertion.title.clone(),
+                        assertion.sphere.clone(),
                         None,
                         Some(assertion.text.clone()),
                     ),
@@ -795,9 +801,14 @@ impl Dispatch {
                             .title
                             .clone()
                             .or_else(|| current.as_ref().and_then(|a| a.version.title.clone()));
+                        let sphere = assertion
+                            .sphere
+                            .clone()
+                            .or_else(|| current.as_ref().and_then(|a| a.version.sphere.clone()));
                         (
                             assertion.kind.clone(),
                             title,
+                            sphere,
                             current.map(|a| a.version.text),
                             Some(assertion.text.clone()),
                         )
@@ -815,15 +826,42 @@ impl Dispatch {
                                 .map(|a| a.version.kind.clone())
                                 .unwrap_or_default(),
                             current.as_ref().and_then(|a| a.version.title.clone()),
+                            current.as_ref().and_then(|a| a.version.sphere.clone()),
                             current.map(|a| a.version.text),
                             None,
                         )
                     }
+                    // Only the sphere moves: the text stays as it is.
+                    Operation::SetSphere {
+                        assertion_id,
+                        sphere,
+                    } => {
+                        let current = self
+                            .ctx
+                            .ledger
+                            .assertion(*assertion_id, None, None)
+                            .await
+                            .ok();
+                        sphere_before = current.as_ref().and_then(|a| a.version.sphere.clone());
+                        (
+                            current
+                                .as_ref()
+                                .map(|a| a.version.kind.clone())
+                                .unwrap_or_default(),
+                            current.as_ref().and_then(|a| a.version.title.clone()),
+                            sphere.clone(),
+                            None,
+                            current.map(|a| a.version.text),
+                        )
+                    }
                     _ => continue,
                 };
-                changes.push(
-                    json!({ "kind": kind, "title": title, "before": before, "after": after }),
-                );
+                let mut change = json!({ "kind": kind, "title": title, "sphere": sphere,
+                                         "before": before, "after": after });
+                if matches!(op, Operation::SetSphere { .. }) {
+                    change["sphere_before"] = json!(sphere_before);
+                }
+                changes.push(change);
             }
             alternatives.push(
                 json!({ "key": alternative.key, "label": alternative.label, "changes": changes }),
@@ -867,6 +905,43 @@ impl Dispatch {
             "quote": quote,
             "origin": origin,
         })
+    }
+
+    /// The operations of one alternative with the knowledge put in another sphere (`none`:
+    /// out of any), for accepting it as edited.
+    async fn in_sphere(
+        &self,
+        proposal_id: Uuid,
+        alternative: Option<&str>,
+        sphere: &str,
+    ) -> Result<(String, Vec<Operation>), String> {
+        let proposal = self
+            .ctx
+            .ledger
+            .proposal(proposal_id)
+            .await
+            .map_err(|e| e.to_string())?;
+        let chosen = match alternative {
+            Some(key) => proposal.alternatives.iter().find(|a| a.key == key),
+            None if proposal.alternatives.len() == 1 => proposal.alternatives.first(),
+            None => None,
+        }
+        .ok_or("choose one of the alternatives")?;
+        let sphere = (sphere != "none").then(|| sphere.to_owned());
+        let operations = chosen
+            .operations
+            .iter()
+            .cloned()
+            .map(|mut op| {
+                if let Operation::Create { assertion, .. }
+                | Operation::Supersede { assertion, .. } = &mut op
+                {
+                    assertion.sphere = sphere.clone();
+                }
+                op
+            })
+            .collect();
+        Ok((chosen.key.clone(), operations))
     }
 
     /// Takes back a person's decision on a proposal item (docs/25 §3.2); the item opens again.
@@ -937,10 +1012,20 @@ impl Dispatch {
                     "reject" => Decision::Reject,
                     _ => Decision::Defer,
                 };
+                let pid = id("proposal_id")?;
+                let (decision, alternative, operations) = match (&act.sphere, decision) {
+                    (Some(sphere), Decision::Accept) => {
+                        let (key, operations) = self
+                            .in_sphere(pid, act.alternative.as_deref(), sphere)
+                            .await?;
+                        (Decision::AcceptWithEdits, Some(key), Some(operations))
+                    }
+                    _ => (decision, act.alternative.clone(), None),
+                };
                 let verdict = VerdictInput {
                     decision,
-                    alternative: act.alternative.clone(),
-                    operations: None,
+                    alternative,
+                    operations,
                     reason: Some(format!("from the Inbox ({actor})")),
                     deferred_until: (decision == Decision::Defer)
                         .then(|| Utc::now() + Duration::hours(hours)),
@@ -948,7 +1033,7 @@ impl Dispatch {
                 match self
                     .ctx
                     .ledger
-                    .submit_verdict(&ledger_actor, id("proposal_id")?, verdict)
+                    .submit_verdict(&ledger_actor, pid, verdict)
                     .await
                 {
                     Ok(proposal) if proposal.state == ProposalState::Deferred => {

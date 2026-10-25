@@ -45,6 +45,13 @@ export const pt: Catalog = {
   "kind.status": "Status",
   "kind.event": "Evento",
   "kind.open_question": "Pergunta em aberto",
+  "sphere.label": "Esfera",
+  "sphere.all": "Todas as esferas",
+  "sphere.none": "Sem esfera",
+  "sphere.tech": "Trabalho · técnico",
+  "sphere.business": "Trabalho · negócios",
+  "sphere.personal": "Pessoal",
+  "sphere.moved": "Movido para “{sphere}”",
 
   "inbox.filter.all": "Tudo",
   "inbox.keys": "j k — navegar · a o s — decidir · x — selecionar",

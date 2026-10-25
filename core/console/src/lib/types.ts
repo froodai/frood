@@ -1,6 +1,14 @@
 // Shapes of the API responses the console reads (core/crates/frood-*).
 
-export type Change = { kind: string; title?: string | null; before: string | null; after: string | null };
+export type Change = {
+  kind: string;
+  title?: string | null;
+  /** The sphere the knowledge goes to; for a move, `sphere_before` is where it was. */
+  sphere?: string | null;
+  sphere_before?: string | null;
+  before: string | null;
+  after: string | null;
+};
 
 export type ProposalContent = {
   proposal_id: string;
@@ -49,6 +57,7 @@ export type Assertion = {
   version: number;
   kind: string;
   title?: string | null;
+  sphere?: string | null;
   text: string;
   subjects: string[];
   slots: Record<string, unknown>;

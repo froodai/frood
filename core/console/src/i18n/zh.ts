@@ -45,6 +45,13 @@ export const zh: Catalog = {
   "kind.status": "状态",
   "kind.event": "事件",
   "kind.open_question": "待解决问题",
+  "sphere.label": "领域",
+  "sphere.all": "所有领域",
+  "sphere.none": "无领域",
+  "sphere.tech": "工作 · 技术",
+  "sphere.business": "工作 · 业务",
+  "sphere.personal": "个人",
+  "sphere.moved": "已移至“{sphere}”",
 
   "inbox.filter.all": "全部",
   "inbox.keys": "j k — 移动 · a o s — 决定 · x — 选择",

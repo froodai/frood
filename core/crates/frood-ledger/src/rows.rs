@@ -8,7 +8,7 @@ use crate::model::{AssertionVersion, Entity, Evidence, Observation, Proposal, Ve
 
 macro_rules! version_columns {
     () => {
-        "assertion_id, version, kind, title, text, subjects, slots, modality, authority, said_at, \
+        "assertion_id, version, kind, title, sphere, text, subjects, slots, modality, authority, said_at, \
          valid_from, valid_to, recorded_from, recorded_to, status, review_after, evidence, \
          proposal_id, verdict_id"
     };
@@ -21,6 +21,7 @@ pub(crate) fn version(row: &PgRow) -> Result<AssertionVersion> {
         version: row.try_get("version")?,
         kind: row.try_get("kind")?,
         title: row.try_get("title")?,
+        sphere: row.try_get("sphere")?,
         text: row.try_get("text")?,
         subjects: row.try_get("subjects")?,
         slots: row.try_get("slots")?,

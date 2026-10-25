@@ -45,6 +45,13 @@ export const fr: Catalog = {
   "kind.status": "Statut",
   "kind.event": "Événement",
   "kind.open_question": "Question ouverte",
+  "sphere.label": "Sphère",
+  "sphere.all": "Toutes les sphères",
+  "sphere.none": "Sans sphère",
+  "sphere.tech": "Travail · technique",
+  "sphere.business": "Travail · business",
+  "sphere.personal": "Personnel",
+  "sphere.moved": "Déplacé vers « {sphere} »",
 
   "inbox.filter.all": "Tout",
   "inbox.keys": "j k — naviguer · a o s — décider · x — sélectionner",

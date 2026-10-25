@@ -55,6 +55,15 @@ pub(crate) fn validate(operations: &[Operation], base: &[BaseRef]) -> Result<()>
             Operation::Reverify { assertion_id, .. } => {
                 require_base(&base_ids, *assertion_id).map_err(at)?
             }
+            Operation::SetSphere {
+                assertion_id,
+                sphere,
+            } => {
+                require_base(&base_ids, *assertion_id).map_err(at)?;
+                if let Some(sphere) = sphere {
+                    check_sphere(sphere).map_err(at)?;
+                }
+            }
             Operation::Link { from, to, .. } => {
                 check_reference(from, &assertion_refs).map_err(at)?;
                 check_reference(to, &assertion_refs).map_err(at)?;
@@ -112,6 +121,9 @@ fn validate_content(
             "title must be at most {MAX_TITLE_CHARS} characters; the rest belongs in text"
         ));
     }
+    if let Some(sphere) = &content.sphere {
+        check_sphere(sphere)?;
+    }
     if !content.slots.is_object() {
         return Err("slots must be an object".to_owned());
     }
@@ -133,6 +145,30 @@ pub const MAX_TITLE_CHARS: usize = 120;
 /// A title as stored: trimmed, and none when blank.
 fn title(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|t| !t.is_empty())
+}
+
+/// A sphere id: up to 32 lowercase letters, digits and dashes, starting with a letter.
+fn check_sphere(value: &str) -> std::result::Result<(), String> {
+    let mut chars = value.chars();
+    let valid = matches!(chars.next(), Some(c) if c.is_ascii_lowercase())
+        && value.len() <= 32
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+    if valid {
+        Ok(())
+    } else {
+        Err(format!("sphere {value:?} is not a sphere id"))
+    }
+}
+
+/// Spheres an operation list names.
+pub(crate) fn spheres_in(operations: &[Operation]) -> impl Iterator<Item = &str> {
+    operations.iter().filter_map(|op| match op {
+        Operation::Create { assertion, .. } | Operation::Supersede { assertion, .. } => {
+            assertion.sphere.as_deref()
+        }
+        Operation::SetSphere { sphere, .. } => sphere.as_deref(),
+        _ => None,
+    })
 }
 
 fn require_base(base_ids: &HashSet<Uuid>, id: Uuid) -> std::result::Result<(), String> {
@@ -184,6 +220,8 @@ pub(crate) struct Applier<'a> {
     pub verdict_id: Uuid,
     pub actor: &'a str,
     pub events: Vec<Event>,
+    /// The installation's spheres; a subject's usual sphere outside them is not taken.
+    pub spheres: Option<&'a [String]>,
     entity_refs: HashMap<String, Uuid>,
     assertion_refs: HashMap<String, Uuid>,
 }
@@ -203,6 +241,7 @@ impl<'a> Applier<'a> {
             verdict_id,
             actor,
             events: Vec::new(),
+            spheres: None,
             entity_refs: HashMap::new(),
             assertion_refs: HashMap::new(),
         }
@@ -234,6 +273,14 @@ impl<'a> Applier<'a> {
                     .unwrap_or(self.at);
                 let subjects = self.resolve_subjects(&assertion.subjects).await?;
                 self.check_evidence(&assertion.evidence).await?;
+                let sphere = match &assertion.sphere {
+                    Some(sphere) => Some(sphere.clone()),
+                    None => self.usual_sphere(&subjects).await?,
+                };
+                let assertion = &AssertionContent {
+                    sphere,
+                    ..assertion.clone()
+                };
                 self.insert_version(
                     id,
                     1,
@@ -260,6 +307,10 @@ impl<'a> Applier<'a> {
                 let current = self.current(*assertion_id).await?;
                 let subjects = self.resolve_subjects(&assertion.subjects).await?;
                 self.check_evidence(&assertion.evidence).await?;
+                let assertion = &AssertionContent {
+                    sphere: assertion.sphere.clone().or_else(|| current.sphere.clone()),
+                    ..assertion.clone()
+                };
                 let new_from = assertion
                     .valid_from
                     .or(assertion.said_at)
@@ -357,6 +408,36 @@ impl<'a> Applier<'a> {
                     "assertion.reverified",
                     *assertion_id,
                     json!({ "assertion_id": assertion_id, "version": next }),
+                );
+            }
+            Operation::SetSphere {
+                assertion_id,
+                sphere,
+            } => {
+                let current = self.current(*assertion_id).await?;
+                if current.sphere == *sphere {
+                    return Ok(());
+                }
+                self.close_row(&current).await?;
+                let next = self.max_version(*assertion_id).await? + 1;
+                let content = AssertionContent {
+                    sphere: sphere.clone(),
+                    ..row_content(&current, current.review_after)
+                };
+                self.insert_version(
+                    *assertion_id,
+                    next,
+                    &content,
+                    &current.subjects,
+                    current.valid_from,
+                    current.valid_to,
+                    current.status,
+                )
+                .await?;
+                self.event(
+                    "assertion.sphere_set",
+                    *assertion_id,
+                    json!({ "assertion_id": assertion_id, "version": next, "sphere": sphere }),
                 );
             }
             Operation::Link { from, to, kind } => {
@@ -519,15 +600,16 @@ impl<'a> Applier<'a> {
     ) -> Result<()> {
         let slots = self.resolve_slot_refs(&content.slots)?;
         sqlx::query(
-            "INSERT INTO assertion_versions (assertion_id, version, kind, title, text, subjects, slots, modality, \
-             authority, said_at, valid_from, valid_to, recorded_from, status, review_after, evidence, proposal_id, \
-             verdict_id) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)",
+            "INSERT INTO assertion_versions (assertion_id, version, kind, title, sphere, text, subjects, slots, \
+             modality, authority, said_at, valid_from, valid_to, recorded_from, status, review_after, evidence, \
+             proposal_id, verdict_id) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)",
         )
         .bind(id)
         .bind(version)
         .bind(&content.kind)
         .bind(title(content.title.as_deref()))
+        .bind(&content.sphere)
         .bind(content.text.trim())
         .bind(subjects)
         .bind(&slots)
@@ -557,19 +639,7 @@ impl<'a> Applier<'a> {
         status: Status,
         review_after: Option<Timestamp>,
     ) -> Result<()> {
-        let content = AssertionContent {
-            kind: row.kind.clone(),
-            title: row.title.clone(),
-            text: row.text.clone(),
-            subjects: Vec::new(),
-            slots: row.slots.clone(),
-            modality: row.modality,
-            authority: row.authority.clone(),
-            said_at: row.said_at,
-            valid_from: Some(row.valid_from),
-            review_after,
-            evidence: row.evidence.clone(),
-        };
+        let content = row_content(row, review_after);
         self.insert_version(
             row.assertion_id,
             version,
@@ -580,6 +650,23 @@ impl<'a> Applier<'a> {
             status,
         )
         .await
+    }
+
+    /// The sphere most current assertions about these subjects have.
+    async fn usual_sphere(&mut self, subjects: &[Uuid]) -> Result<Option<String>> {
+        if subjects.is_empty() {
+            return Ok(None);
+        }
+        Ok(sqlx::query_scalar(
+            "SELECT sphere FROM assertion_versions \
+             WHERE recorded_to IS NULL AND status = 'active' AND sphere IS NOT NULL AND subjects && $1 \
+               AND ($2::text[] IS NULL OR sphere = ANY($2)) \
+             GROUP BY sphere ORDER BY count(*) DESC, sphere LIMIT 1",
+        )
+        .bind(subjects)
+        .bind(self.spheres)
+        .fetch_optional(&mut *self.conn)
+        .await?)
     }
 
     /// Slot values `ref:<key>` (an owner created in the same proposal) become entity ids.
@@ -667,6 +754,24 @@ impl<'a> Applier<'a> {
             .await?
             .ok_or_else(|| crate::LedgerError::NotFound(format!("entity {id}")))?;
         Ok((row.try_get("id")?, row.try_get("merged_into")?))
+    }
+}
+
+/// An existing row's content, as a new version re-records it.
+fn row_content(row: &AssertionVersion, review_after: Option<Timestamp>) -> AssertionContent {
+    AssertionContent {
+        kind: row.kind.clone(),
+        title: row.title.clone(),
+        sphere: row.sphere.clone(),
+        text: row.text.clone(),
+        subjects: Vec::new(),
+        slots: row.slots.clone(),
+        modality: row.modality,
+        authority: row.authority.clone(),
+        said_at: row.said_at,
+        valid_from: Some(row.valid_from),
+        review_after,
+        evidence: row.evidence.clone(),
     }
 }
 

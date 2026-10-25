@@ -17,6 +17,11 @@ pub struct Config {
     pub deploy: Deploy,
     #[serde(default)]
     pub policies: Policies,
+    /// Areas of life knowledge belongs to (docs/26 §3): a label for reading and filters, not a
+    /// boundary of who sees what. Without this section: `tech`, `business` and `personal`; an
+    /// empty list turns spheres off.
+    #[serde(default = "default_spheres")]
+    pub spheres: Vec<Sphere>,
     #[serde(default)]
     pub auth: Auth,
     /// Accounts of model providers, by name (docs/13 §8).
@@ -338,6 +343,70 @@ fn default_true() -> bool {
 
 fn default_merge_threshold() -> Option<f32> {
     Some(0.9)
+}
+
+/// One sphere. The built-in ones (`tech`, `business`, `personal`) need only the id: the
+/// interface names them in its language, and the model knows what goes there.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Sphere {
+    /// Lowercase letters, digits and dashes, e.g. `family`.
+    pub id: String,
+    /// What people see, e.g. `Семья`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// What belongs there, for the model that picks the sphere, e.g. `home, children, relatives`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub about: Option<String>,
+}
+
+/// Built-in spheres: id, English name, what belongs there.
+pub const BUILT_IN_SPHERES: [(&str, &str, &str); 3] = [
+    (
+        "tech",
+        "Work · tech",
+        "technical work: architecture, code, infrastructure, technical decisions and agreements",
+    ),
+    (
+        "business",
+        "Work · business",
+        "the business side of work: deadlines, agreements with people, clients, money, priorities",
+    ),
+    ("personal", "Personal", "life outside work"),
+];
+
+impl Sphere {
+    fn built_in(&self) -> Option<&'static (&'static str, &'static str, &'static str)> {
+        BUILT_IN_SPHERES.iter().find(|(id, ..)| *id == self.id)
+    }
+
+    pub fn is_built_in(&self) -> bool {
+        self.built_in().is_some()
+    }
+
+    /// The configured name, else the built-in English one, else the id.
+    pub fn name(&self) -> &str {
+        self.name
+            .as_deref()
+            .or(self.built_in().map(|b| b.1))
+            .unwrap_or(&self.id)
+    }
+
+    /// What belongs there: the configured text, else the built-in one.
+    pub fn about(&self) -> Option<&str> {
+        self.about.as_deref().or(self.built_in().map(|b| b.2))
+    }
+}
+
+fn default_spheres() -> Vec<Sphere> {
+    BUILT_IN_SPHERES
+        .iter()
+        .map(|(id, ..)| Sphere {
+            id: (*id).to_owned(),
+            name: None,
+            about: None,
+        })
+        .collect()
 }
 
 /// An account that pays for model calls.

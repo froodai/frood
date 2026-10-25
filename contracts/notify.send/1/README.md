@@ -25,7 +25,7 @@ person's channel account in `external_id`: the action is that linked person's
       "rationale": "#release, Olya, 18:02",
       "quote": "релиз переносим на 28.11",
       "alternatives": [
-        { "key": "default", "label": null, "changes": [ { "kind": "commitment", "title": "Релиз 2.4 — 28 ноября", "before": "Релиз 2.4 — 14 ноября", "after": "Оля переносит релиз 2.4 на 28 ноября" } ] }
+        { "key": "default", "label": null, "changes": [ { "kind": "commitment", "title": "Релиз 2.4 — 28 ноября", "sphere": "business", "before": "Релиз 2.4 — 14 ноября", "after": "Оля переносит релиз 2.4 на 28 ноября" } ] }
       ],
       "origin": { "uri": "https://chat.example/release/p1762707720", "title": "#release, Olya" }
     },
@@ -45,13 +45,18 @@ person's channel account in `external_id`: the action is that linked person's
   it:
   - `proposal`: `risk`, `author`, `rationale`, `quote` (the words it rests on), `alternatives`
     with `changes` (`kind`; `title`, a short headline, null for knowledge recorded without one;
-    `before` / `after` texts — `before` is null for new knowledge, `after` is null for a closing),
+    `sphere`, the sphere of life it goes to — `tech`, `business`, `personal` or the
+    installation's own, named by `GET /v1/spheres` — or null; `before` / `after` texts —
+    `before` is null for new knowledge, `after` is null for a closing; a move to another sphere
+    has `sphere_before` too),
     and `origin` (`uri`, `title`) — where to open the original, an http or https address — or
     null;
   - `question`: `text`, `options`, `context`, `job`;
   - `reminder`: `assertion_id`, `text`, `due`, `step` (`before`, `today`, `overdue`);
   - `alert`: `run_id`, `job`, `error`;
-  - `digest`: `since`, `sections`.
+  - `digest`: `since`, `until`, `accepted` (`text`, `sphere`), `waiting` (`count`, `items` with
+    `what`, `kind`, `sphere`), `due_soon` (`text`, `due`, `sphere`), `failed_runs` (`job`, `error`);
+    a channel may group each list by sphere.
 - `item.item.investigation`, when present, carries an agent's `report` gathered before anyone was
   told: show it with the item.
 - `actions` are what the person may do; each becomes a button. Send the chosen one back as the

@@ -204,6 +204,7 @@ pub(crate) async fn assertions(
     if let Some(kind) = &filter.kind {
         builder.push(" AND kind = ").push_bind(kind.clone());
     }
+    push_sphere(&mut builder, filter.sphere.as_deref());
     if let Some(status) = filter.status {
         builder.push(" AND status = ").push_bind(status.as_str());
     }
@@ -393,4 +394,17 @@ pub(crate) async fn proposals(
         .iter()
         .map(rows::proposal)
         .collect()
+}
+
+/// Narrows to one sphere; `none` means assertions without one.
+pub(crate) fn push_sphere(builder: &mut QueryBuilder<sqlx::Postgres>, sphere: Option<&str>) {
+    match sphere {
+        Some("none") => {
+            builder.push(" AND sphere IS NULL");
+        }
+        Some(sphere) => {
+            builder.push(" AND sphere = ").push_bind(sphere.to_owned());
+        }
+        None => {}
+    }
 }

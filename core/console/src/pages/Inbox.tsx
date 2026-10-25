@@ -1,9 +1,9 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronDown, ExternalLink, Search, X } from "lucide-react";
+import { ArrowRight, Check, ChevronDown, ExternalLink, Search, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
-import { KindBadge, TypeBadge } from "@/components/badges";
+import { KindBadge, SphereBadge, SphereFilter, SpherePicker, TypeBadge } from "@/components/badges";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -15,11 +15,11 @@ import { api } from "@/lib/frood";
 import { useKeys, useMediaQuery } from "@/lib/hooks";
 import { useInbox, waiting } from "@/lib/queries";
 import { kindTone } from "@/lib/kinds";
-import { headline, kindOf, type Origin, originOf, proposal, summary, TONE, type Type, TYPES, typeKey, typeOf } from "@/lib/situations";
+import { headline, kindOf, type Origin, originOf, proposal, sphereOf, summary, TONE, type Type, TYPES, typeKey, typeOf } from "@/lib/situations";
 import type { Change, InboxEntry, QuestionContent } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-type Act = { action: string; alternative?: string; answer?: string };
+type Act = { action: string; alternative?: string; answer?: string; sphere?: string };
 const ORIGINS: Origin[] = ["agent", "extract", "person"];
 
 /** Decides at once on screen; the server catches up, and a failure puts the items back. */
@@ -70,6 +70,7 @@ export function Inbox() {
   const [type, setType] = useState<Type | "all">("all");
   const [origin, setOrigin] = useState<Origin | "all">("all");
   const [kind, setKind] = useState<string>("all");
+  const [sphere, setSphere] = useState<string>("all");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
@@ -80,15 +81,16 @@ export function Inbox() {
       (type === "all" || typeOf(e) === type) &&
       (origin === "all" || originOf(e).origin === origin) &&
       (kind === "all" || kindOf(e) === kind) &&
+      (sphere === "all" || (sphereOf(e) ?? "none") === sphere) &&
       (!needle || JSON.stringify(e.content).toLowerCase().includes(needle)),
   );
   const current = visible.find((e) => e.item.id === id) ?? (wide ? visible[0] : undefined);
   const chosen = visible.filter((e) => selected.has(e.item.id)).map((e) => e.item.id);
-  const filtered = type !== "all" || origin !== "all" || kind !== "all" || !!needle;
+  const filtered = type !== "all" || origin !== "all" || kind !== "all" || sphere !== "all" || !!needle;
   const kinds = [...new Set(open.map(kindOf).filter((k): k is string => !!k))];
 
   const show = (entry: InboxEntry | undefined) => navigate(entry ? `../inbox/${entry.item.id}` : "../inbox", { replace: true });
-  const reset = () => (setType("all"), setOrigin("all"), setKind("all"), setQuery(""), setSelected(new Set()));
+  const reset = () => (setType("all"), setOrigin("all"), setKind("all"), setSphere("all"), setQuery(""), setSelected(new Set()));
 
   const decide = (ids: string[], a: Act) => {
     if (ids.length === 0) return;
@@ -196,6 +198,7 @@ export function Inbox() {
               </SelectContent>
             </Select>
           )}
+          <SphereFilter value={sphere} onChange={setSphere} />
         </div>
 
         <div className="flex flex-wrap items-center gap-1.5">
@@ -275,6 +278,7 @@ export function Inbox() {
                     {description && <span className="line-clamp-1 text-[13px] leading-snug text-muted-foreground">{description}</span>}
                     <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted-foreground">
                       {k && <KindBadge kind={k} />}
+                      <SphereBadge sphere={sphereOf(entry)} />
                       {(!k || ty !== "new") && <TypeBadge type={ty} />}
                       <span className="ms-0.5">{originLabel(entry)}</span>
                     </span>
@@ -339,6 +343,16 @@ function CheckBox({ checked, label, onClick }: { checked: boolean; label: string
 
 function ChangeBoxes({ change, title }: { change: Change; title: string }) {
   const { t } = useI18n();
+  if (change.sphere_before !== undefined) {
+    // Only the sphere moves.
+    return (
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-primary/50 bg-accent p-3 text-sm">
+        {change.sphere_before ? <SphereBadge sphere={change.sphere_before} /> : <span className="text-xs text-muted-foreground">{t("sphere.none")}</span>}
+        <ArrowRight className="size-3.5 text-muted-foreground rtl:rotate-180" aria-hidden />
+        {change.sphere ? <SphereBadge sphere={change.sphere} /> : <span className="text-xs text-muted-foreground">{t("sphere.none")}</span>}
+      </div>
+    );
+  }
   if (!change.before) {
     // New knowledge: the text under the title, unless the title already says it all.
     return change.after && change.after.trim() !== title ? <p className="text-sm leading-relaxed text-foreground/85">{change.after}</p> : null;
@@ -393,6 +407,11 @@ function Detail({ entry, busy, onAct }: { entry: InboxEntry; busy: boolean; onAc
   const k = kindOf(entry);
   const { title, description } = summary(entry);
   const several = (p?.alternatives.length ?? 0) > 1;
+  // The person may put the knowledge in another sphere as they accept it.
+  const proposed = sphereOf(entry);
+  const [sphere, setSphere] = useState<string | null>(proposed);
+  const movable = !!p && has("accept") && !!k && p.alternatives[0]?.changes[0]?.sphere_before === undefined;
+  const into = sphere !== proposed ? { sphere: sphere ?? "none" } : {};
 
   return (
     <div className="flex min-h-full flex-col">
@@ -400,6 +419,7 @@ function Detail({ entry, busy, onAct }: { entry: InboxEntry; busy: boolean; onAc
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
             {k && <KindBadge kind={k} />}
+            {movable ? <SpherePicker value={sphere} onChange={setSphere} disabled={busy} /> : <SphereBadge sphere={proposed} />}
             <TypeBadge type={ty} />
             {entry.item.urgency === "now" && <span className="font-medium text-warning">{t("inbox.urgent")}</span>}
           </div>
@@ -417,7 +437,7 @@ function Detail({ entry, busy, onAct }: { entry: InboxEntry; busy: boolean; onAc
               <ChangeBoxes key={i} change={change} title={title} />
             ))}
             {several && (
-              <Button size="sm" className="self-start" disabled={busy} onClick={() => onAct({ action: "accept", alternative: alternative.key })}>
+              <Button size="sm" className="self-start" disabled={busy} onClick={() => onAct({ action: "accept", alternative: alternative.key, ...into })}>
                 {t("inbox.acceptOption", { option: alternative.label ?? alternative.key })}
               </Button>
             )}
@@ -480,7 +500,7 @@ function Detail({ entry, busy, onAct }: { entry: InboxEntry; busy: boolean; onAc
       <div className="sticky bottom-0 flex flex-col gap-2 border-t bg-card/95 p-4 backdrop-blur">
         <div className="flex flex-wrap gap-2">
           {p && !several && has("accept") && (
-            <Button disabled={busy} onClick={() => onAct({ action: "accept" })}>
+            <Button disabled={busy} onClick={() => onAct({ action: "accept", ...into })}>
               {t("inbox.accept")} <kbd dir="ltr" className="font-mono text-[11px] opacity-70">A</kbd>
             </Button>
           )}

@@ -45,6 +45,13 @@ export const hi: Catalog = {
   "kind.status": "स्थिति",
   "kind.event": "घटना",
   "kind.open_question": "खुला सवाल",
+  "sphere.label": "क्षेत्र",
+  "sphere.all": "सभी क्षेत्र",
+  "sphere.none": "कोई क्षेत्र नहीं",
+  "sphere.tech": "काम · तकनीक",
+  "sphere.business": "काम · व्यवसाय",
+  "sphere.personal": "निजी",
+  "sphere.moved": "“{sphere}” में ले जाया गया",
 
   "inbox.filter.all": "सभी",
   "inbox.keys": "j k — आगे-पीछे · a o s — फ़ैसला · x — चुनें",

@@ -51,6 +51,8 @@ pub(crate) struct Ctx {
     pub sources: Arc<BTreeMap<String, frood_config::Source>>,
     pub attention: Arc<frood_config::Attention>,
     pub backup: Arc<Option<jobs::backup::BackupSetup>>,
+    /// The installation's spheres (docs/26 §3); empty when they are off.
+    pub spheres: Arc<Vec<frood_config::Sphere>>,
 }
 
 #[derive(Clone)]
@@ -91,6 +93,7 @@ impl Dispatch {
                 sources: Arc::new(BTreeMap::new()),
                 attention: Arc::new(frood_config::Attention::default()),
                 backup: Arc::new(None),
+                spheres: Arc::new(Vec::new()),
             },
             jobs: Arc::new(jobs),
             down_since: Arc::default(),
@@ -100,6 +103,12 @@ impl Dispatch {
     /// Who is told what, when and where.
     pub fn with_attention(mut self, attention: frood_config::Attention) -> Self {
         self.ctx.attention = Arc::new(attention);
+        self
+    }
+
+    /// The spheres extraction sorts knowledge into.
+    pub fn with_spheres(mut self, spheres: Vec<frood_config::Sphere>) -> Self {
+        self.ctx.spheres = Arc::new(spheres);
         self
     }
 

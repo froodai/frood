@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::error::Result;
 use crate::model::{AssertionVersion, Timestamp};
-use crate::query::entity_group;
+use crate::query::{entity_group, push_sphere};
 use crate::rows::{self, version_columns};
 
 /// How far ahead deadlines are shown.
@@ -58,6 +58,7 @@ async fn holding(
     pool: &PgPool,
     kind: &str,
     group: Option<&[Uuid]>,
+    sphere: Option<&str>,
     at: Timestamp,
 ) -> Result<Vec<AssertionVersion>> {
     let mut builder = QueryBuilder::<Postgres>::new(concat!(
@@ -74,6 +75,7 @@ async fn holding(
     if let Some(group) = group {
         builder.push(" AND subjects && ").push_bind(group.to_vec());
     }
+    push_sphere(&mut builder, sphere);
     builder.push(" ORDER BY assertion_id, valid_from DESC");
     let mut versions = builder
         .build()
@@ -86,7 +88,12 @@ async fn holding(
     Ok(versions)
 }
 
-pub(crate) async fn now(pool: &PgPool, project: Option<Uuid>, at: Timestamp) -> Result<NowView> {
+pub(crate) async fn now(
+    pool: &PgPool,
+    project: Option<Uuid>,
+    sphere: Option<&str>,
+    at: Timestamp,
+) -> Result<NowView> {
     let group = match project {
         Some(id) => Some(entity_group(pool, id).await?),
         None => None,
@@ -95,7 +102,7 @@ pub(crate) async fn now(pool: &PgPool, project: Option<Uuid>, at: Timestamp) -> 
 
     let today = at.date_naive();
     let horizon = today + Duration::days(AHEAD_DAYS);
-    let mut deadlines: Vec<Due> = holding(pool, "commitment", group, at)
+    let mut deadlines: Vec<Due> = holding(pool, "commitment", group, sphere, at)
         .await?
         .into_iter()
         .filter_map(|version| {
@@ -111,11 +118,11 @@ pub(crate) async fn now(pool: &PgPool, project: Option<Uuid>, at: Timestamp) -> 
     deadlines.sort_by(|a, b| a.due.cmp(&b.due));
     deadlines.truncate(LIMIT);
 
-    let mut decisions = holding(pool, "decision", group, at).await?;
+    let mut decisions = holding(pool, "decision", group, sphere, at).await?;
     decisions.truncate(LIMIT);
-    let mut owners = holding(pool, "responsibility", group, at).await?;
+    let mut owners = holding(pool, "responsibility", group, sphere, at).await?;
     owners.truncate(LIMIT);
-    let mut questions = holding(pool, "open_question", group, at).await?;
+    let mut questions = holding(pool, "open_question", group, sphere, at).await?;
     questions.truncate(LIMIT);
 
     let mut builder = QueryBuilder::<Postgres>::new(concat!(
@@ -127,6 +134,7 @@ pub(crate) async fn now(pool: &PgPool, project: Option<Uuid>, at: Timestamp) -> 
     if let Some(group) = group {
         builder.push(" AND subjects && ").push_bind(group.to_vec());
     }
+    push_sphere(&mut builder, sphere);
     builder.push(" ORDER BY assertion_id, valid_from DESC");
     let mut recent = builder
         .build()
@@ -137,16 +145,30 @@ pub(crate) async fn now(pool: &PgPool, project: Option<Uuid>, at: Timestamp) -> 
         .collect::<Result<Vec<_>>>()?;
     recent.sort_by_key(|v| std::cmp::Reverse(v.recorded_from));
     recent.truncate(LIMIT);
+    let since = at - Duration::days(BACK_DAYS);
     let mut changes = Vec::with_capacity(recent.len());
     for assertion in recent {
-        let before: Option<String> = sqlx::query_scalar(
-            "SELECT text FROM assertion_versions WHERE assertion_id = $1 AND version < $2 \
-             ORDER BY version DESC, valid_from DESC LIMIT 1",
+        let earlier: Vec<(String, Option<String>, String, Timestamp)> = sqlx::query_as(
+            "SELECT text, sphere, status, recorded_from FROM assertion_versions \
+             WHERE assertion_id = $1 AND version <= $2 ORDER BY version DESC, valid_from DESC LIMIT 20",
         )
         .bind(assertion.assertion_id)
         .bind(assertion.version)
-        .fetch_optional(pool)
+        .fetch_all(pool)
         .await?;
+        // Moving knowledge to another sphere is not news: what counts is the version the moves
+        // started from.
+        let mut content = 0;
+        while let (Some(this), Some(previous)) = (earlier.get(content), earlier.get(content + 1)) {
+            if previous.0 != this.0 || previous.2 != this.2 || previous.1 == this.1 {
+                break;
+            }
+            content += 1;
+        }
+        if content > 0 && earlier[content].3 <= since {
+            continue;
+        }
+        let before = earlier.get(content + 1).map(|row| row.0.clone());
         changes.push(Changed { assertion, before });
     }
 

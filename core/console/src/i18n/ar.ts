@@ -45,6 +45,13 @@ export const ar: Catalog = {
   "kind.status": "حالة",
   "kind.event": "حدث",
   "kind.open_question": "سؤال مفتوح",
+  "sphere.label": "المجال",
+  "sphere.all": "كل المجالات",
+  "sphere.none": "بلا مجال",
+  "sphere.tech": "العمل · تقني",
+  "sphere.business": "العمل · أعمال",
+  "sphere.personal": "شخصي",
+  "sphere.moved": "نُقل إلى «{sphere}»",
 
   "inbox.filter.all": "الكل",
   "inbox.keys": "j k — تنقّل · a o s — قرّر · x — حدّد",

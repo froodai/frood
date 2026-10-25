@@ -19,6 +19,14 @@ deploy:
   server: __SERVER__   # container: Frood runs in Docker; host: you run `frood serve` yourself
 __IMAGE_OR_BUILD__  postgres_port: __PG_PORT__
 
+# Spheres of life knowledge is sorted into (docs/26 §3): a label for reading and filters.
+# Without this section: tech, business and personal; `spheres: []` turns them off.
+# spheres:
+#   - id: tech
+#   - id: business
+#   - id: personal
+#   - { id: family, name: Семья, about: "home, children, relatives" }
+
 # Who may sign in, and through which identity providers (docs/12 §3).
 auth:
   allow: []                  # exact addresses, e.g. [you@example.com]

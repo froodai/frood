@@ -17,6 +17,10 @@ Give each assertion a `title`: a headline of a few words, under 80 characters, t
 - `kind`: decision, commitment, rule, responsibility, fact, status, event or open_question.
 - `modality` is how firmly it was said, and it matters: `mentioned` (came up), `proposed` (someone suggested), `agreed` (people agreed), `decided` (a decision was made), `reported` (someone reports a fact), `observed` (seen first-hand), `inferred` (you concluded it). "We discussed moving the release" is `mentioned`, not `agreed`.
 
+## Sphere
+
+When the input lists `<spheres>`, give each assertion the `sphere` it belongs to: the area of life, by its id, from the description that fits best. A known entity's usual `sphere` is a strong hint: a project's knowledge stays in its sphere unless the source plainly says otherwise. For a `supersede`, keep the target's sphere unless the change moves it.
+
 ## Time
 
 The source says when it was said (`said_at`). Resolve relative dates against it: "next Friday" said on Thursday 2026-10-15 is 2026-10-23. Put dates as YYYY-MM-DD.

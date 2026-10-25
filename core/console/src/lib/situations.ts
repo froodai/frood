@@ -64,6 +64,11 @@ export function kindOf(entry: InboxEntry): string | null {
   return proposal(entry)?.alternatives[0]?.changes[0]?.kind || null;
 }
 
+/** The sphere a proposal puts knowledge in, from its first change. */
+export function sphereOf(entry: InboxEntry): string | null {
+  return proposal(entry)?.alternatives[0]?.changes[0]?.sphere ?? null;
+}
+
 /** The line a person reads first, and the text under it. */
 export function summary(entry: InboxEntry): Titled {
   const change = proposal(entry)?.alternatives[0]?.changes[0];

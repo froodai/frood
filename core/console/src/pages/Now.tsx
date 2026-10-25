@@ -7,6 +7,7 @@ import { useI18n } from "@/i18n";
 import { api } from "@/lib/frood";
 import { useInbox, waiting } from "@/lib/queries";
 import { titled } from "@/lib/situations";
+import { sphereIcon, useSphereName, useSpheres } from "@/lib/spheres";
 import type { Assertion } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -37,9 +38,18 @@ function Panel({ title, sub, children, empty }: { title: string; sub?: string; c
 /** A title, with the text under it in one line when there is more to say. */
 function What({ a }: { a: Assertion }) {
   const { title, description } = titled(a.title, a.text);
+  const name = useSphereName();
+  const Icon = a.sphere ? sphereIcon(a.sphere) : null;
   return (
     <>
-      <span>{title}</span>
+      <span>
+        {Icon && a.sphere && (
+          <span aria-hidden title={name(a.sphere)} className="me-1.5 inline-flex align-[-2px] text-muted-foreground">
+            <Icon className="size-3.5" />
+          </span>
+        )}
+        {title}
+      </span>
       {description && <span className="line-clamp-1 text-[13px] text-muted-foreground">{description}</span>}
     </>
   );
@@ -57,12 +67,22 @@ export function Now() {
   const { t, date, ago } = useI18n();
   const [params, setParams] = useSearchParams();
   const project = params.get("project") ?? "";
+  const sphere = params.get("sphere") ?? "";
+  const spheres = useSpheres().data ?? [];
+  const sphereName = useSphereName();
   const inbox = useInbox();
   const now = useQuery({
-    queryKey: ["now", project],
-    queryFn: () => api<NowView>(`/v1/now${project ? `?project=${project}` : ""}`),
+    queryKey: ["now", project, sphere],
+    queryFn: () => {
+      const query = new URLSearchParams({ ...(project ? { project } : {}), ...(sphere ? { sphere } : {}) }).toString();
+      return api<NowView>(`/v1/now${query ? `?${query}` : ""}`);
+    },
     refetchInterval: 60_000,
   });
+  const narrow = (next: { project?: string; sphere?: string }) => {
+    const merged = { project, sphere, ...next };
+    setParams({ ...(merged.project ? { project: merged.project } : {}), ...(merged.sphere ? { sphere: merged.sphere } : {}) });
+  };
   const count = waiting(inbox.data).length;
   const v = now.data;
   const about = (a: Assertion) => a.subjects.map((s) => v?.names[s]).filter(Boolean).join(", ");
@@ -98,11 +118,26 @@ export function Now() {
         </div>
       </div>
 
+      {spheres.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="me-1 text-sm text-muted-foreground">{t("sphere.label")}</span>
+          {[{ id: "", name: t("sphere.all") }, ...spheres.map((s) => ({ id: s.id, name: sphereName(s.id) }))].map((s) => {
+            const Icon = s.id ? sphereIcon(s.id) : null;
+            return (
+              <Button key={s.id} size="sm" variant={sphere === s.id ? "default" : "outline"} className="rounded-full" onClick={() => narrow({ sphere: s.id })}>
+                {Icon && <Icon className="size-3.5" aria-hidden />}
+                {s.name}
+              </Button>
+            );
+          })}
+        </div>
+      )}
+
       {v && v.projects.length > 0 && (
         <div className="flex flex-wrap items-center gap-2">
           <span className="me-1 text-sm text-muted-foreground">{t("now.project")}</span>
           {[{ id: "", name: t("now.allProjects") }, ...v.projects].map((p) => (
-            <Button key={p.id} size="sm" variant={project === p.id ? "default" : "outline"} className="rounded-full" onClick={() => setParams(p.id ? { project: p.id } : {})}>
+            <Button key={p.id} size="sm" variant={project === p.id ? "default" : "outline"} className="rounded-full" onClick={() => narrow({ project: p.id })}>
               {p.name}
             </Button>
           ))}

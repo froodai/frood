@@ -169,6 +169,9 @@ pub struct SearchParams {
 #[derive(Deserialize, JsonSchema)]
 pub struct ListParams {
     pub kind: Option<String>,
+    /// A sphere id (tech, business, personal or the installation's own; get_context lists
+    /// them), or `none` for assertions without one.
+    pub sphere: Option<String>,
     pub entity: Option<String>,
     pub status: Option<String>,
     /// Only assertions whose `due` slot is on or after this date.
@@ -223,13 +226,17 @@ pub struct CaptureParams {
 #[derive(Deserialize, JsonSchema)]
 pub struct ProposeParams {
     /// Operations as in the Frood API (docs/11 §6), each an object with `op`: create
-    /// {assertion: {kind, title, text, modality, subjects?, slots?, said_at?, valid_from?, evidence?}},
+    /// {assertion: {kind, title, text, modality, sphere?, subjects?, slots?, said_at?, valid_from?, evidence?}},
     /// supersede {assertion_id, assertion}, close {assertion_id, status, valid_to?},
-    /// reverify {assertion_id}, link {from, to, kind}, create_entity {ref?, type, name, aliases?}.
+    /// reverify {assertion_id}, set_sphere {assertion_id, sphere}, link {from, to, kind},
+    /// create_entity {ref?, type, name, aliases?}.
     /// kind: decision, commitment, rule, responsibility, fact, status, event or open_question.
     /// title: a headline of a few words (under 80 characters) a person reads first, e.g.
     /// "AIRC-1808: finished session loads for 22 minutes"; text: the full statement under it.
     /// modality: mentioned, proposed, agreed, decided, reported, observed or inferred.
+    /// sphere: the area of life it belongs to: tech, business or personal, unless the
+    /// installation has its own (get_context lists them). Without it, a create takes its
+    /// subjects' usual sphere and a supersede keeps the current one.
     /// subjects: entity ids, or `ref:<key>` of a create_entity earlier in the same list.
     /// slots: an object such as {"due": "2026-11-14", "owner": "<entity id>"}.
     /// A supersede or close needs the assertion and its version in `base`.
@@ -439,7 +446,7 @@ impl FroodMcp {
     }
 
     #[tool(
-        description = "List assertions by structure: kind, entity, status, due dates, owner, and points in time (valid_at: what was true then; as_of: what Frood knew then).",
+        description = "List assertions by structure: kind, sphere, entity, status, due dates, owner, and points in time (valid_at: what was true then; as_of: what Frood knew then).",
         annotations(read_only_hint = true)
     )]
     async fn list_assertions(&self, Parameters(p): Parameters<ListParams>) -> ToolResult {
@@ -467,6 +474,7 @@ impl FroodMcp {
         }
         let filter = AssertionFilter {
             kind: p.kind,
+            sphere: p.sphere,
             entity: p
                 .entity
                 .as_deref()
@@ -488,7 +496,7 @@ impl FroodMcp {
     }
 
     #[tool(
-        description = "Summary of a project, person or subject: matching entities with their current assertions, and assertions that mention the topic.",
+        description = "Summary of a project, person or subject: matching entities with their current assertions, assertions that mention the topic, and the installation's spheres.",
         annotations(read_only_hint = true)
     )]
     async fn get_context(&self, Parameters(p): Parameters<ContextParams>) -> ToolResult {
@@ -507,7 +515,8 @@ impl FroodMcp {
                 .assertions(&filter)
                 .await
                 .map_err(ledger_error)?;
-            return render(json!({ "entity": entity, "assertions": assertions }));
+            return render(json!({ "entity": entity, "assertions": assertions,
+                                  "spheres": self.ledger.spheres() }));
         }
         let Some(topic) = p.topic.filter(|t| !t.trim().is_empty()) else {
             return Err("give a topic or an entity_id".into());
@@ -543,7 +552,7 @@ impl FroodMcp {
             .assertions(&filter)
             .await
             .map_err(ledger_error)?;
-        render(json!({ "entities": about, "mentions": mentions }))
+        render(json!({ "entities": about, "mentions": mentions, "spheres": self.ledger.spheres() }))
     }
 
     #[tool(

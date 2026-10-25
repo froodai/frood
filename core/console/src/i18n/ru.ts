@@ -45,6 +45,13 @@ export const ru: Catalog = {
   "kind.status": "Статус",
   "kind.event": "Событие",
   "kind.open_question": "Открытый вопрос",
+  "sphere.label": "Сфера",
+  "sphere.all": "Все сферы",
+  "sphere.none": "Без сферы",
+  "sphere.tech": "Работа · техника",
+  "sphere.business": "Работа · бизнес",
+  "sphere.personal": "Личное",
+  "sphere.moved": "Перенесено: «{sphere}»",
 
   "inbox.filter.all": "Все",
   "inbox.keys": "j k — по списку · a o s — решить · x — выбрать",

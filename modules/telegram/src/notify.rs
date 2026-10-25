@@ -6,6 +6,7 @@ use serde_json::{Value, json};
 
 use crate::Bot;
 use crate::lang::{KINDS, Words};
+use crate::spheres::Spheres;
 
 fn short(text: &str, max: usize) -> String {
     if text.chars().count() <= max {
@@ -31,7 +32,7 @@ pub(crate) fn esc(text: &str) -> String {
 
 /// The message of a shown item (`{item, content, actions}`), in Telegram's HTML: a bold
 /// headline, short labelled lines, the quote in italics.
-pub(crate) fn text(shown: &Value, w: &Words) -> String {
+pub(crate) fn text(shown: &Value, w: &Words, spheres: &Spheres) -> String {
     let item = &shown["item"];
     let content = &shown["content"];
     let mut lines: Vec<String> = Vec::new();
@@ -48,16 +49,22 @@ pub(crate) fn text(shown: &Value, w: &Words) -> String {
                 .as_array()
                 .cloned()
                 .unwrap_or_default();
-            // What happened, and to what kind of knowledge: «🆕 New knowledge · Decision».
-            let kind = alternatives
-                .first()
-                .and_then(|a| a["changes"][0]["kind"].as_str())
+            // What happened, to what kind of knowledge, in which sphere:
+            // «🆕 New knowledge · Decision · 💼 Work · business».
+            let first = alternatives.first().map(|a| &a["changes"][0]);
+            let kind = first
+                .and_then(|c| c["kind"].as_str())
                 .and_then(|k| KINDS.iter().position(|known| *known == k))
                 .map(|i| w.kinds[i]);
-            lines.push(match kind {
-                Some(kind) => format!("<b>{}</b> · {}", esc(headline), esc(kind)),
-                None => format!("<b>{}</b>", esc(headline)),
-            });
+            let mut header = format!("<b>{}</b>", esc(headline));
+            if let Some(kind) = kind {
+                header.push_str(&format!(" · {}", esc(kind)));
+            }
+            let moved = first.is_some_and(|c| c.get("sphere_before").is_some());
+            if let Some(sphere) = first.and_then(|c| c["sphere"].as_str()).filter(|_| !moved) {
+                header.push_str(&format!(" · {}", esc(&spheres.label(sphere, w))));
+            }
+            lines.push(header);
             for alternative in &alternatives {
                 if alternatives.len() > 1 {
                     let name = alternative["label"]
@@ -70,6 +77,19 @@ pub(crate) fn text(shown: &Value, w: &Words) -> String {
                     let title = change["title"].as_str().filter(|t| !t.trim().is_empty());
                     if let Some(title) = title {
                         lines.push(format!("<b>{}</b>", esc(&short(title, 120))));
+                    }
+                    if let Some(from) = change.get("sphere_before") {
+                        // Only the sphere moves.
+                        let label = |v: &Value| match v.as_str() {
+                            Some(id) => spheres.label(id, w),
+                            None => w.no_sphere.to_owned(),
+                        };
+                        lines.push(format!(
+                            "<b>{}:</b> {} → {}",
+                            esc(w.sphere),
+                            esc(&label(from)),
+                            esc(&label(&change["sphere"]))
+                        ));
                     }
                     match (change["before"].as_str(), change["after"].as_str()) {
                         (Some(before), Some(after)) => {
@@ -157,7 +177,7 @@ pub(crate) fn text(shown: &Value, w: &Words) -> String {
                 lines.push(esc(&short(error, 400)));
             }
         }
-        "digest" => lines.push(digest_text(content, w)),
+        "digest" => lines.push(digest_text(content, w, spheres)),
         _ => lines.push(esc(&short(&content.to_string(), 800))),
     }
     if let Some(report) = item
@@ -212,16 +232,20 @@ fn detector_text(c: &Value, w: &Words) -> String {
     out
 }
 
-/// A digest (`GET /v1/digest` or a `digest` item) as text.
-pub(crate) fn digest_text(digest: &Value, w: &Words) -> String {
+/// A digest (`GET /v1/digest` or a `digest` item) as text, each section by sphere.
+pub(crate) fn digest_text(digest: &Value, w: &Words, spheres: &Spheres) -> String {
     let mut lines = vec![format!("<b>{}</b>", esc(w.digest))];
     // A few short lines per section; the rest is a count, the console or /inbox has it all.
-    let list = |title: String, items: Vec<String>, total: usize, lines: &mut Vec<String>| {
+    let list = |title: String,
+                items: Vec<(Option<String>, String)>,
+                total: usize,
+                lines: &mut Vec<String>| {
         if items.is_empty() {
             return;
         }
         lines.push(format!("\n<b>{title}</b>"));
-        lines.extend(items.iter().take(DIGEST_ITEMS).map(|i| format!("• {i}")));
+        let shown = items.iter().take(DIGEST_ITEMS).cloned().collect();
+        lines.extend(spheres.grouped(shown, w));
         if total > DIGEST_ITEMS.min(items.len()) {
             lines.push(format!(
                 "<i>{}</i>",
@@ -231,22 +255,27 @@ pub(crate) fn digest_text(digest: &Value, w: &Words) -> String {
             ));
         }
     };
-    let strings = |v: &Value| -> Vec<String> {
-        v.as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(Value::as_str)
-            .map(|s| esc(&short(s, DIGEST_CHARS)))
-            .collect()
-    };
-    let accepted = strings(&digest["accepted"]);
-    let accepted_total = accepted.len();
-    list(esc(w.digest_accepted), accepted, accepted_total, &mut lines);
-    let waiting: Vec<String> = digest["waiting"]["items"]
+    let sphere = |v: &Value| v["sphere"].as_str().map(str::to_owned);
+    // Each accepted item is {text, sphere}; a core before spheres sent plain strings.
+    let accepted: Vec<(Option<String>, String)> = digest["accepted"]
         .as_array()
         .into_iter()
         .flatten()
-        .filter_map(|i| i["what"].as_str().map(|s| esc(&short(s, DIGEST_CHARS))))
+        .filter_map(|a| {
+            let text = a.as_str().or_else(|| a["text"].as_str())?;
+            Some((sphere(a), esc(&short(text, DIGEST_CHARS))))
+        })
+        .collect();
+    let accepted_total = accepted.len();
+    list(esc(w.digest_accepted), accepted, accepted_total, &mut lines);
+    let waiting: Vec<(Option<String>, String)> = digest["waiting"]["items"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|i| {
+            let what = i["what"].as_str()?;
+            Some((sphere(i), esc(&short(what, DIGEST_CHARS))))
+        })
         .collect();
     let count = digest["waiting"]["count"].as_u64().unwrap_or(0) as usize;
     if count > 0 {
@@ -257,30 +286,32 @@ pub(crate) fn digest_text(digest: &Value, w: &Words) -> String {
             &mut lines,
         );
     }
-    let due: Vec<String> = digest["due_soon"]
+    let due: Vec<(Option<String>, String)> = digest["due_soon"]
         .as_array()
         .into_iter()
         .flatten()
         .map(|d| {
-            format!(
+            let line = format!(
                 "<b>{}</b> — {}",
                 esc(d["due"].as_str().unwrap_or("?")),
                 esc(&short(d["text"].as_str().unwrap_or("?"), DIGEST_CHARS))
-            )
+            );
+            (sphere(d), line)
         })
         .collect();
     let due_total = due.len();
     list(esc(w.digest_due), due, due_total, &mut lines);
-    let failed: Vec<String> = digest["failed_runs"]
+    let failed: Vec<(Option<String>, String)> = digest["failed_runs"]
         .as_array()
         .into_iter()
         .flatten()
         .map(|r| {
-            format!(
+            let line = format!(
                 "{}: {}",
                 esc(r["job"].as_str().unwrap_or("?")),
                 esc(&short(r["error"].as_str().unwrap_or("?"), DIGEST_CHARS))
-            )
+            );
+            (None, line)
         })
         .collect();
     let failed_total = failed.len();
@@ -415,10 +446,11 @@ impl Bot {
         let shown = &body["item"];
         let w = self.lang.words();
         let console = body["console_url"].as_str();
+        let spheres = self.spheres().await;
         let sent = self
             .telegram(
                 "sendMessage",
-                json!({ "chat_id": chat, "text": text(shown, w), "parse_mode": "HTML", "reply_markup": keyboard(shown, w, console) }),
+                json!({ "chat_id": chat, "text": text(shown, w, &spheres), "parse_mode": "HTML", "reply_markup": keyboard(shown, w, console) }),
             )
             .await?;
         Ok(json!({ "message_ref": message_ref(&json!(chat), &sent["message_id"]) }))
@@ -441,7 +473,7 @@ impl Bot {
         let result = self
             .telegram(
                 "editMessageText",
-                json!({ "chat_id": chat, "message_id": message_id, "text": text(shown, w), "parse_mode": "HTML",
+                json!({ "chat_id": chat, "message_id": message_id, "text": text(shown, w, &self.spheres().await), "parse_mode": "HTML",
                         "reply_markup": markup(shown, w, console.as_deref()) }),
             )
             .await;
@@ -604,7 +636,7 @@ mod tests {
         let mut shown = conflict();
         shown["content"]["quote"] = json!("a <b>bold</b> & <script>");
         assert!(
-            text(&shown, Lang::Ru.words())
+            text(&shown, Lang::Ru.words(), &Spheres::default())
                 .contains("«a &lt;b&gt;bold&lt;/b&gt; &amp; &lt;script&gt;»")
         );
     }
@@ -614,7 +646,7 @@ mod tests {
         let w = Lang::Ru.words();
         let shown = conflict();
         assert_eq!(
-            text(&shown, w),
+            text(&shown, w, &Spheres::default()),
             "<b>⚠️ Противоречит записанному</b> · Обязательство\n<b>Было:</b> Релиз 2.4 — 14 ноября\n<b>Стало:</b> Релиз 2.4 — 28 ноября\n\n<i>«релиз переносим на 28.11»</i>\n<b>Почему:</b> #release, 18:02\n<i>От агента: daily-sweep</i>\n\n🔎 <b>Агент выяснил:</b> Olya confirmed in #release"
         );
         assert_eq!(
@@ -640,7 +672,7 @@ mod tests {
             "actions": [{ "action": "accept", "alternative": "default" }]
         });
         assert_eq!(
-            text(&shown, w),
+            text(&shown, w, &Spheres::default()),
             "<b>🆕 Новое знание</b> · Факт\n<b>AIRC-1808: сессия грузится 22 минуты</b>\nЗавершённая сессия с длинной историей показывает только хвост и грузится около 22 минут\n<i>От агента: daily-sweep</i>"
         );
         assert_eq!(
@@ -664,7 +696,7 @@ mod tests {
             json!({ "detector": "failures_in_a_row", "job": "transcribe", "error": "ffmpeg missing" }),
         );
         assert_eq!(
-            text(&shown, Lang::Ru.words()),
+            text(&shown, Lang::Ru.words(), &Spheres::default()),
             "🚨 Джоба transcribe падает раз за разом\nffmpeg missing"
         );
         assert_eq!(
@@ -673,7 +705,7 @@ mod tests {
         );
         let shown = alert(json!({ "detector": "module_down", "module": "stt" }));
         assert_eq!(
-            text(&shown, Lang::En.words()),
+            text(&shown, Lang::En.words(), &Spheres::default()),
             "🚨 Module stt does not answer"
         );
     }
@@ -686,15 +718,15 @@ mod tests {
                     "content": { "text": "Сдать отчёт", "due": "2026-11-14", "days": days }, "actions": [] })
         };
         assert_eq!(
-            text(&reminder(-3), w),
+            text(&reminder(-3), w, &Spheres::default()),
             "<b>⏰ Срок 2026-11-14</b>: срок через 3 дн.\nСдать отчёт"
         );
         assert_eq!(
-            text(&reminder(0), w),
+            text(&reminder(0), w, &Spheres::default()),
             "<b>⏰ Срок 2026-11-14</b>: срок сегодня\nСдать отчёт"
         );
         assert_eq!(
-            text(&reminder(2), w),
+            text(&reminder(2), w, &Spheres::default()),
             "<b>⏰ Срок 2026-11-14</b>: срок прошёл 2 дн. назад: выполнено или перенести?\nСдать отчёт"
         );
     }
@@ -703,18 +735,66 @@ mod tests {
     fn a_digest_lists_what_is_new() {
         let w = Lang::Ru.words();
         let digest = json!({
-            "accepted": ["Релиз 2.4 — 28 ноября"],
+            "accepted": [{ "text": "Релиз 2.4 — 28 ноября", "sphere": "business" }],
             "waiting": { "count": 1, "items": [{ "kind": "question", "what": "Решение или обсуждение?" }] },
             "due_soon": [{ "text": "Сдать отчёт", "due": "2026-11-14" }],
             "failed_runs": []
         });
         assert_eq!(
-            digest_text(&digest, w),
+            digest_text(&digest, w, &Spheres::default()),
             "<b>📋 Что нового</b>\n\n<b>Принято</b>\n• Релиз 2.4 — 28 ноября\n\n<b>Ждёт вашего решения (1)</b>\n• Решение или обсуждение?\n\n<b>Скоро сроки</b>\n• <b>2026-11-14</b> — Сдать отчёт"
         );
         assert_eq!(
-            digest_text(&json!({ "waiting": { "count": 0 } }), w),
+            digest_text(
+                &json!({ "waiting": { "count": 0 } }),
+                w,
+                &Spheres::default()
+            ),
             "<b>📋 Что нового</b>\nНичего нового."
+        );
+    }
+
+    #[test]
+    fn cards_and_digests_say_the_sphere() {
+        let w = Lang::Ru.words();
+        let spheres = Spheres::default();
+        let card = |change: Value| {
+            json!({ "item": { "id": "s", "kind": "proposal", "state": "open" },
+                    "content": { "risk": "new", "author": "user:1",
+                                 "alternatives": [{ "key": "default", "changes": [change] }] },
+                    "actions": [] })
+        };
+        let new = card(
+            json!({ "kind": "decision", "title": "Поиск на OpenSearch", "sphere": "tech",
+                               "before": null, "after": "Поиск на OpenSearch" }),
+        );
+        assert!(
+            text(&new, w, &spheres)
+                .starts_with("<b>🆕 Новое знание</b> · Решение · 🛠 Работа · техника\n"),
+            "{}",
+            text(&new, w, &spheres)
+        );
+        let moved = card(
+            json!({ "kind": "decision", "title": "Поиск на OpenSearch", "sphere": "business",
+                                 "sphere_before": "tech", "before": null, "after": "Поиск на OpenSearch" }),
+        );
+        assert!(
+            text(&moved, w, &spheres)
+                .contains("<b>Сфера:</b> 🛠 Работа · техника → 💼 Работа · бизнес"),
+            "{}",
+            text(&moved, w, &spheres)
+        );
+
+        let digest = json!({
+            "accepted": [{ "text": "Билеты на праздники", "sphere": "personal" },
+                         { "text": "Релиз 2.4 — 28 ноября", "sphere": "business" }],
+            "waiting": { "count": 0 },
+            "due_soon": [],
+            "failed_runs": []
+        });
+        assert_eq!(
+            digest_text(&digest, w, &spheres),
+            "<b>📋 Что нового</b>\n\n<b>Принято</b>\n<i>💼 Работа · бизнес</i>\n• Релиз 2.4 — 28 ноября\n<i>🏠 Личное</i>\n• Билеты на праздники"
         );
     }
 
@@ -725,9 +805,9 @@ mod tests {
         shown["item"]["state"] = json!("resolved");
         shown["item"]["resolution"] =
             json!({ "action": "accept", "by": "user:0199/via/claude-code" });
-        assert!(text(&shown, w).ends_with("✅ Принято в другом месте"));
+        assert!(text(&shown, w, &Spheres::default()).ends_with("✅ Принято в другом месте"));
         shown["item"]["resolution"] = json!({ "action": "reject", "by": "user:0199/via/telegram" });
-        assert!(text(&shown, w).ends_with("↩️ Оставлено старое"));
+        assert!(text(&shown, w, &Spheres::default()).ends_with("↩️ Оставлено старое"));
         assert_eq!(parse_ref("373739001:52"), Some((373_739_001, 52)));
     }
 }

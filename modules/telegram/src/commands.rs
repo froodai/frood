@@ -5,6 +5,7 @@ use serde_json::{Value, json};
 
 use crate::lang::{Lang, Texts};
 use crate::notify::{esc, keyboard, text};
+use crate::spheres::Spheres;
 use crate::{Bot, Message};
 
 /// What the menu shows; the descriptions come from the language's texts.
@@ -12,6 +13,9 @@ const MENU: [&str; 5] = ["now", "inbox", "ask", "digest", "help"];
 
 /// How many deadlines `/now` lists, and how many items `/inbox` sends at once.
 const SHOWN: usize = 5;
+
+/// How long the installation's spheres are taken as known before asking again.
+const SPHERES_FOR: std::time::Duration = std::time::Duration::from_secs(600);
 
 impl Bot {
     /// Puts the commands into Telegram's menu, in the bot's language and in each one it speaks.
@@ -80,6 +84,23 @@ impl Bot {
         base.as_ref().map(|base| format!("{base}inbox/{item_id}"))
     }
 
+    /// The installation's spheres, asked again every few minutes; a core without them leaves
+    /// the built-in names.
+    pub(crate) async fn spheres(&self) -> Spheres {
+        let mut cached = self.spheres.lock().await;
+        if let Some((at, spheres)) = cached.as_ref()
+            && at.elapsed() < SPHERES_FOR
+        {
+            return spheres.clone();
+        }
+        let spheres = match self.get("/v1/spheres").await {
+            Ok(list) => Spheres::from_api(&list),
+            Err(_) => cached.as_ref().map(|(_, s)| s.clone()).unwrap_or_default(),
+        };
+        *cached = Some((std::time::Instant::now(), spheres.clone()));
+        spheres
+    }
+
     pub(crate) async fn inbox_item(&self, id: &str) -> Option<Value> {
         self.get(&format!("/v1/inbox/{id}")).await.ok()
     }
@@ -129,21 +150,22 @@ impl Bot {
             out.push(esc(t.nothing_due));
         } else {
             out.push(format!("<b>{}</b>", esc(t.deadlines)));
-            for d in deadlines.iter().take(SHOWN) {
-                let when = if d["overdue"] == true {
-                    t.overdue.to_owned()
-                } else {
-                    day(d["due"].as_str().unwrap_or_default(), t)
-                };
-                out.push(format!(
-                    "• <b>{}</b> — {}",
-                    esc(&when),
-                    esc(&short(
-                        d["title"].as_str().or(d["text"].as_str()).unwrap_or("?"),
-                        110
-                    ))
-                ));
-            }
+            let lines = deadlines
+                .iter()
+                .take(SHOWN)
+                .map(|d| {
+                    let when = if d["overdue"] == true {
+                        t.overdue.to_owned()
+                    } else {
+                        day(d["due"].as_str().unwrap_or_default(), t)
+                    };
+                    let what = d["title"].as_str().or(d["text"].as_str()).unwrap_or("?");
+                    let line = format!("<b>{}</b> — {}", esc(&when), esc(&short(what, 110)));
+                    (d["sphere"].as_str().map(str::to_owned), line)
+                })
+                .collect();
+            // By sphere, when the deadlines come from more than one.
+            out.extend(self.spheres().await.grouped(lines, self.lang.words()));
         }
         out.push(String::new());
         let bold = |template: &str, n: usize| esc(template).replace("{n}", &format!("<b>{n}</b>"));
@@ -200,6 +222,7 @@ impl Bot {
             }
         };
         let open = open(&inbox);
+        let spheres = self.spheres().await;
         if open.is_empty() {
             let _ = self
                 .telegram(
@@ -217,7 +240,7 @@ impl Bot {
             let sent = self
                 .telegram(
                     "sendMessage",
-                    json!({ "chat_id": chat, "text": text(shown, w), "parse_mode": "HTML", "reply_markup": keyboard(shown, w, console.as_deref()) }),
+                    json!({ "chat_id": chat, "text": text(shown, w, &spheres), "parse_mode": "HTML", "reply_markup": keyboard(shown, w, console.as_deref()) }),
                 )
                 .await;
             let one_option = shown["item"]["kind"] == "proposal"
