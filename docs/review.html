@@ -297,13 +297,14 @@ details.area[open] summary .tw{transform:rotate(90deg)}
         <span class="pill done">план MVP</span>
         <span class="pill done">консоль и бот (M8)</span>
         <span class="pill done">вложения, сферы, подключения</span>
-        <span class="pill done">M9 · первый час (принят)</span>
+        <span class="pill done">M9 · первый час</span>
+        <span class="pill wait">M10 · хаб</span>
         <span class="pill">исходники: docs/*.md</span>
       </div>
     </header>
 
     <div class="tabs" role="tablist" aria-label="Этапы ревью">
-      <button class="tab" role="tab" id="t-now" data-tab="now" aria-controls="now" aria-selected="true">Сейчас на ревью <span class="n">8</span></button>
+      <button class="tab" role="tab" id="t-now" data-tab="now" aria-controls="now" aria-selected="true">Сейчас на ревью <span class="n">7</span></button>
       <button class="tab" role="tab" id="t-mvp" data-tab="mvp" aria-controls="mvp" aria-selected="false">План MVP</button>
       <button class="tab" role="tab" id="t-platform" data-tab="platform" aria-controls="platform" aria-selected="false">Платформа</button>
       <button class="tab" role="tab" id="t-notify" data-tab="notify" aria-controls="notify" aria-selected="false">Inbox и уведомления</button>
@@ -320,67 +321,56 @@ details.area[open] summary .tw{transform:rotate(90deg)}
       <section id="now-intro">
         <div class="sh"><h2>Что нужно от вас</h2></div>
         <div class="prose">
-          <p>Раунд 23 — M9 «Первый час». Заметка — <code>docs/27_m9_first_hour.md</code>.</p>
-          <p>Цель: за первый час человек ставит Frood на ноутбук одной командой, подключает Claude Code или Codex готовой строкой, забирает то, что о нём уже помнят его ассистенты, и видит в Inbox только то, где эти памяти расходятся.</p>
+          <p>Раунд 24 — M10 «Хаб». Заметка — <code>docs/28_m10_hub.md</code>.</p>
+          <p>Цель: Claude в браузере и ChatGPT подключаются к Frood на ноутбуке без своего домена, вход в личную установку — без Google, Hermes и OpenClaw берут память из Frood и пишут в неё, уведомления приходят туда, где человек общается с OpenClaw.</p>
           <ul>
-            <li><b>На решение</b> — F1–F5: ноутбук по умолчанию, мастер <code>frood init</code>, стандартный набор, свои правки без ревью, импорт памяти.</li>
-            <li><b>На выбор</b> — QF1–QF3: вход на ноутбуке, пометка у импортированного, находки агентов.</li>
-          </ul>
-          <p><b>Раунд 23 принят</b> (25.10): F1, F2, F4, F5 — да; QF1 — (а), QF2 — (а), QF3 — (б). F3 — по замечанию «не надо пачку шаблонов»: никаких шаблонов и бандлов, разумные значения (сводка, напоминания, бэкап) встроены в сервер и меняются в консоли; мастер спрашивает только время сводки. M9 сделан (выйдет в 0.1.9):</p>
-          <ul>
-            <li><b>Свои правки</b> принимаются сразу. <b>Новые находки агентов</b> — тоже, но с пометкой «не проверено»: она видна в консоли, боте и ответах ассистентов, «Верно» её снимает.</li>
-            <li><b>Ноутбук по умолчанию:</b> вход «на этом компьютере» без пароля. <code>frood init</code> спрашивает почту, ключ (проверяет списком моделей, сам выбирает самую дешёвую), бота, папку бэкапов, время сводки — и запускает Frood. Сводка, напоминания и бэкапы работают без строк в конфиге. Программа <code>frood</code> для Mac — в выпуске на GitHub.</li>
-            <li><b>Импорт:</b> <code>frood import</code> забирает память Claude Code, Codex, OpenClaw, Hermes и папок Markdown. В Claude и ChatGPT — подсказка «Move my memory into Frood». Всё помечено «из памяти ассистента · не проверено»; где памяти расходятся — Inbox.</li>
+            <li><b>На решение</b> — T1–T4: туннель, вход без Google, провайдер памяти для Hermes и OpenClaw, OpenClaw как канал.</li>
+            <li><b>На выбор</b> — QT1–QT3: какой туннель, какой вход, что делать из OpenClaw и Hermes.</li>
           </ul>
         </div>
         <div class="locked"><span class="caption">Принято:</span><span class="chip">MVP</span><span class="chip">Фазы 1–6</span><span class="chip">M0–M8</span><span class="chip">U1–U4</span><span class="chip">QH1 + 8 языков</span><span class="chip">Y1–Y3</span><span class="chip">QY1 (б)</span><span class="chip">F1–F5</span><span class="chip">QF1–QF3</span></div>
       </section>
 
       <section id="now-done">
-        <div class="sh"><span class="tag ref">сделано по раунду 22</span><h2>0.1.6 и 0.1.7, дальше 0.1.8</h2></div>
+        <div class="sh"><span class="tag ref">сделано по раунду 23</span><h2>M9 «Первый час» — выпуск 0.1.9</h2></div>
         <div class="prose">
           <ul>
-            <li><b>Сферы</b> (0.1.6): у каждого знания — «техника», «бизнес» или «личное», фильтр и перенос в консоли, бот группирует по сферам.</li>
-            <li><b>Вложения</b> (0.1.7): фото, видео, документы и ссылки у знания и у изменения в Inbox — в консоли и ответом на карточку в боте. Файлы — в папке сервера или в S3, попадают в бэкап.</li>
-            <li><b>Подключения из консоли</b> (0.1.7): каталог, токен или вход через OAuth, проверка, выбор инструментов; джобы и расписания.</li>
-            <li><b>Уведомления и свои настройки</b> (0.1.8): насколько срочна каждая ситуация, что исследовать сначала, лимит push, напоминания, пороги «заглохло»; у каждого — тихие часы, свои напоминания, привязка Telegram кодом.</li>
-            <li>Сервер на 0.1.7: файл переехал из базы в папку, бэкап с ним прошёл в B2 и на диск, проверка восстановления — тоже.</li>
+            <li><b>Свои правки</b> принимаются сразу. <b>Новые находки агентов</b> — тоже, но с пометкой «не проверено»: она видна в консоли, боте и ответах ассистентов, «Верно» её снимает.</li>
+            <li><b>Ноутбук по умолчанию:</b> вход «на этом компьютере» без пароля. <code>frood init</code> спрашивает почту, ключ (проверяет списком моделей, сам выбирает самую дешёвую), бота, папку бэкапов, время сводки — и запускает Frood. Сводка, напоминания и бэкапы работают без строк в конфиге. Программа <code>frood</code> для Mac — в выпуске на GitHub.</li>
+            <li><b>Импорт:</b> <code>frood import</code> забирает память Claude Code, Codex, OpenClaw, Hermes и папок Markdown. В Claude и ChatGPT — подсказка «Move my memory into Frood». Всё помечено «из памяти ассистента · не проверено»; где памяти расходятся — Inbox.</li>
           </ul>
         </div>
       </section>
 
       <section id="now-decisions">
-        <div class="sh"><span class="tag need">нужно ваше решение</span><h2>Первый час</h2></div>
+        <div class="sh"><span class="tag need">нужно ваше решение</span><h2>Хаб</h2></div>
         <div class="rv-list">
-          <div class="rv" data-id="impl14_F1" data-kind="decision" data-label="F1 Ноутбук по умолчанию">
-            <div class="txt"><span class="id">F1</span><h3>Ноутбук — путь по умолчанию: Frood в Docker Desktop на 127.0.0.1, без домена и без провайдера входа. Claude Code, Codex и Cursor подключаются к локальному адресу с личным токеном, Telegram работает и с ноутбука. Claude в браузере и ChatGPT — только с сервером или туннелем (M10)</h3><p class="why">Сейчас ноутбук работает, но описан как частный случай, а шаблон рассчитан на сервер. Ночные джобы после сна догоняют пропущенное. Переезд на сервер уже есть: бэкап и <code>frood restore</code>.</p></div><div class="ctl"></div>
+          <div class="rv" data-id="impl15_T1" data-kind="decision" data-label="T1 Туннель">
+            <div class="txt"><span class="id">T1</span><h3>Туннель для облачных клиентов: модуль доступа рядом с Frood даёт постоянный HTTPS-адрес без своего домена и открытых портов. Его адрес становится <code>server.public_url</code>, и Claude в браузере и ChatGPT подключаются к ноутбуку или домашнему серверу</h3><p class="why">Быстрые туннели (<code>trycloudflare.com</code>) не годятся: адрес меняется при перезапуске, а он — издатель OAuth, подключения бы ломались. С публичным адресом вход «на этом компьютере» выключается — нужен T2.</p></div><div class="ctl"></div>
           </div>
-          <div class="rv" data-id="impl14_F2" data-kind="decision" data-label="F2 Мастер frood init">
-            <div class="txt"><span class="id">F2</span><h3>Мастер <code>frood init</code>: где работает, ваша почта, чем читать заметки (ключ Anthropic или OpenAI), Telegram, голосовые, бэкапы, время утренней сводки. У каждого вопроса ответ по умолчанию. Потом мастер сам запускает <code>frood apply</code>, проверяет подключения без трат и печатает команды для Claude Code и Codex и код для бота</h3><p class="why">Проверка без трат: ключ — списком моделей, бот — <code>getMe</code>, бэкап — пробной записью. Модель извлечения — самая дешёвая из подходящих. <code>--yes</code> берёт ответы по умолчанию без вопросов, прежние флаги остаются.</p></div><div class="ctl"></div>
+          <div class="rv" data-id="impl15_T2" data-kind="decision" data-label="T2 Вход без Google">
+            <div class="txt"><span class="id">T2</span><h3>Вход в личную установку с публичным адресом — без Google. Для рабочей установки остаётся SSO (решение A3 пересматривается только для личной)</h3><p class="why">Google Cloud Console — самый неприятный шаг установки. Как именно входить — QT2.</p></div><div class="ctl"></div>
           </div>
-          <div class="rv" data-id="impl14_F3" data-kind="decision" data-label="F3 Стандартный набор">
-            <div class="txt"><span class="id">F3</span><h3>Стандартный набор включён сразу: сводка по утрам, напоминания о сроках (за день и в день срока, в 09:00), бэкап каждые 6 часов и проверка раз в неделю. Ночной проход — когда подключён источник</h3><p class="why">Стандартные джобы уже встроены в сервер, но расписания сводки и напоминаний пусты, пока их не впишут. <code>bundles/standard</code> перестаёт обещать «пусто до M3–M4»: бандлы остаются для рецептов (H15, позже).</p></div><div class="ctl"></div>
+          <div class="rv" data-id="impl15_T3" data-kind="decision" data-label="T3 Провайдер памяти">
+            <div class="txt"><span class="id">T3</span><h3>Провайдер памяти для Hermes и плагин памяти для OpenClaw: перед ходом — поиск во Frood в контекст, инструменты «найти» и «запомнить». Что агент решил запомнить, идёт во Frood с пометкой «из памяти ассистента · не проверено». Ходы целиком не пишутся</h3><p class="why">Токен плагина — чтение, заметки и предложения, без права решать. Код — в репозитории Frood под Apache-2.0; публикация в каталогах ClawHub и Hermes — отдельным шагом, когда вы скажете. У OpenClaw внутренний интерфейс памяти для внешних хранилищ ещё не доделан и версии ломают совместимость, поэтому адаптер тонкий, с тестом на каждую версию.</p></div><div class="ctl"></div>
           </div>
-          <div class="rv" data-id="impl14_F4" data-kind="decision" data-label="F4 Свои правки без ревью">
-            <div class="txt"><span class="id">F4</span><h3>Изменение своего знания принимается сразу, если его пишет тот же человек, у знания нет свидетельств из чужих источников и оно ни с чем не спорит. «Перешли на Postgres 17» при своём «Postgres 16» — без Inbox, старая версия в истории, отмена одной кнопкой</h3><p class="why">Сейчас правило своих фактов принимает только новое. Знание из YouTrack, от коллеги или агента по-прежнему меняется через решение.</p></div><div class="ctl"></div>
-          </div>
-          <div class="rv" data-id="impl14_F5" data-kind="decision" data-label="F5 Импорт памяти">
-            <div class="txt"><span class="id">F5</span><h3>Импорт накопленной памяти: <code>frood import</code> находит память Claude Code, Codex, OpenClaw, Hermes и папки Markdown, показывает найденное с ценой извлечения и после одного подтверждения отправляет. Для Claude и ChatGPT — MCP-подсказка «Перенести память во Frood». В Inbox попадает только то, где памяти расходятся</h3><p class="why">Работает и с сервером (<code>--server</code>, <code>--token</code>): команда запускается там, где лежат файлы. Извлечение начнёт читать текст загруженных <code>.md</code> и <code>.txt</code> — сейчас пропускает. Историю чатов из ZIP-выгрузок не берём: дорого, а память ассистентов уже её выжимка. Писать через MCP в ChatGPT могут Business и Enterprise.</p></div><div class="ctl"></div>
+          <div class="rv" data-id="impl15_T4" data-kind="decision" data-label="T4 OpenClaw как канал">
+            <div class="txt"><span class="id">T4</span><h3>OpenClaw как канал доставки: записи Inbox и сводка приходят в выбранный разговор OpenClaw (WhatsApp, iMessage, Signal), ответы «да», «нет», «1», «2» принимают решение</h3><p class="why">Через <code>openclaw mcp serve</code>: <code>messages_send</code>, <code>events_poll</code>. Ограничения OpenClaw — только текст, без кнопок и правки сообщений; писать можно лишь в разговор, где человек уже писал агенту.</p></div><div class="ctl"></div>
           </div>
         </div>
         <div class="rv-list" style="margin-top:16px">
-          <div class="rv q" data-id="impl14_Q1" data-kind="question" data-label="QF1 Вход на ноутбуке">
-            <div class="txt"><span class="id">QF1</span><h3>Вход в консоль на ноутбуке: (а) «на этом компьютере» — без пароля, только с этой машины и только для адресов из <code>auth.allow</code>; (б) как на сервере — только через Google или другой OIDC?</h3><p class="affects">Я предлагаю (а): ноутбук и так защищён входом в систему, а Google Cloud Console — самый неприятный шаг установки. Такой вход работает, только пока у установки нет публичного адреса; сейчас так устроен <code>dev</code>.</p></div><div class="ctl"></div>
+          <div class="rv q" data-id="impl15_Q1" data-kind="question" data-label="QT1 Какой туннель">
+            <div class="txt"><span class="id">QT1</span><h3>Туннель по умолчанию: (а) Tailscale Funnel (адрес <code>…ts.net</code>, бесплатно), Cloudflare Tunnel — для своего домена в Cloudflare; (б) только Cloudflare Tunnel со своим доменом; (в) пока ничего — только свой сервер с доменом?</h3><p class="affects">Я предлагаю (а). Funnel у Tailscale пока бета: скорость не опубликована, портов три. Для памяти, где запросы маленькие, этого хватает.</p></div><div class="ctl"></div>
           </div>
-          <div class="rv q" data-id="impl14_Q2" data-kind="question" data-label="QF2 Пометка у импортированного">
-            <div class="txt"><span class="id">QF2</span><h3>Знания из памяти ассистентов: (а) принимаются сразу с пометкой «из памяти ассистента · не проверено», пометка снимается одним нажатием; (б) принимаются сразу без пометки, как свои заметки; (в) все ждут решения в Inbox?</h3><p class="affects">Я предлагаю (а): это пересказ модели, часто устаревший. Пометка честно это говорит и не заставляет разбирать сотни пунктов. Расхождения между памятями в любом случае идут в Inbox.</p></div><div class="ctl"></div>
+          <div class="rv q" data-id="impl15_Q2" data-kind="question" data-label="QT2 Какой вход">
+            <div class="txt"><span class="id">QT2</span><h3>Вход в личную установку с публичным адресом: (а) кнопка «Войти» в Telegram; (б) passkey (отпечаток, Face ID); (в) оба — Telegram сразу, passkey следом; (г) как сейчас — только Google или другой OIDC?</h3><p class="affects">Я предлагаю (в): у всех, кто ставит Frood по M9, бот уже привязан, а passkey закрывает случай без Telegram.</p></div><div class="ctl"></div>
           </div>
-          <div class="rv q" data-id="impl14_Q3" data-kind="question" data-label="QF3 Находки агентов">
-            <div class="txt"><span class="id">QF3</span><h3>Находки агентов из обычных (не доверенных) источников: (а) как сейчас — всё ждёт решения; (б) новое знание принимается сразу с пометкой «не проверено», а изменения сроков, ответственных и решений, конфликты и слияния ждут человека?</h3><p class="affects">Я предлагаю (б): ночной проход по YouTrack приносит десятки новых знаний за ночь, и Inbox превращается в поток. Требование 01 §4 («автоматически — не всё») выполняется. Пометка видна в ответах ассистентов («по данным YouTrack, не проверено») и снимается одним нажатием.</p></div><div class="ctl"></div>
+          <div class="rv q" data-id="impl15_Q3" data-kind="question" data-label="QT3 OpenClaw и Hermes">
+            <div class="txt"><span class="id">QT3</span><h3>Что из OpenClaw и Hermes делать: (а) всё — провайдер памяти (T3) и канал (T4); (б) только провайдер памяти, канал позже; (в) пока ничего — импорта из M9 хватает?</h3><p class="affects">Без предпочтения: зависит от того, пользуетесь ли вы ими и важны ли WhatsApp, iMessage и Signal.</p></div><div class="ctl"></div>
           </div>
         </div>
-        <div class="overall" data-id="impl14_overall" data-kind="overall" data-label="Общий вердикт по раунду 23">
-          <h3>Общий вердикт по раунду 23</h3>
+        <div class="overall" data-id="impl15_overall" data-kind="overall" data-label="Общий вердикт по раунду 24">
+          <h3>Общий вердикт по раунду 24</h3>
           <div class="ctl"></div>
         </div>
       </section>
@@ -1750,6 +1740,7 @@ jobs:
             <tr><td class="k">21</td><td>Консоль, бот, порядок (U1–U4, QH1)</td><td>всё принято; интерфейс на восьми языках; M8 сделан (0.1.3, 0.1.4)</td></tr>
             <tr><td class="k">22</td><td>После 0.1.4: вложения, сферы, подключения из консоли (Y1–Y3, QY1)</td><td>всё принято; QY1 — (б), по шагам; сделаны 0.1.5–0.1.7: сферы, вложения, источники и джобы из консоли; затем правила уведомлений и личные настройки</td></tr>
             <tr><td class="k">23</td><td>M9 «Первый час» (F1–F5, QF1–QF3)</td><td>принято; QF1 — (а), QF2 — (а), QF3 — (б); F3 — без шаблонов, значения встроены в сервер; сделано (0.1.9)</td></tr>
+            <tr><td class="k">24</td><td>M10 «Хаб» (T1–T4, QT1–QT3)</td><td>на ревью</td></tr>
           </tbody>
         </table></div>
         <p class="caption">Все отметки хранятся в странице и продублированы в docs/README.md.</p>
@@ -1854,7 +1845,7 @@ jobs:
 
 <div class="bar" role="region" aria-label="Итог ревью">
   <div class="bar-in">
-    <div class="tally"><span>Решения <b id="n-model">0</b>/5</span><span>Вопросы <b id="n-q">0</b>/3</span><span>Вердикт <b id="n-all">—</b></span></div>
+    <div class="tally"><span>Решения <b id="n-model">0</b>/4</span><span>Вопросы <b id="n-q">0</b>/3</span><span>Вердикт <b id="n-all">—</b></span></div>
     <div class="status" id="status" aria-live="polite">Подключаюсь к хранилищу страницы…</div>
     <button class="btn" id="copy" type="button">Скопировать ответ</button>
   </div>
@@ -1984,13 +1975,13 @@ jobs:
     var a = 0, m = 0, q = 0;
     items.forEach(function(el){
       var id = el.dataset.id, s = state[id] || {};
-      if (el.dataset.kind === "decision" && s.verdict) { if (id.indexOf("impl14_") === 0) m++; else a++; }
+      if (el.dataset.kind === "decision" && s.verdict) { if (id.indexOf("impl15_") === 0) m++; else a++; }
       if (el.dataset.kind === "question" && (s.comment || "").trim()) q++;
     });
     var na = document.getElementById("n-arch"); if (na) na.textContent = a;
     document.getElementById("n-model").textContent = m;
     document.getElementById("n-q").textContent = q;
-    var o = state.impl14_overall || {};
+    var o = state.impl15_overall || {};
     document.getElementById("n-all").textContent = o.verdict ? LABEL[o.verdict] : "—";
   }
 
@@ -2017,9 +2008,9 @@ jobs:
   }
 
   function compose(){
-    var lines = ["Ревью Frood, раунд 23: M9 «Первый час»"];
-    var o = state.impl14_overall || {};
-    lines.push("Общее по раунду 23: " + (o.verdict ? LABEL[o.verdict] : "без вердикта") + (o.comment ? ". " + o.comment.trim() : ""));
+    var lines = ["Ревью Frood, раунд 24: M10 «Хаб»"];
+    var o = state.impl15_overall || {};
+    lines.push("Общее по раунду 24: " + (o.verdict ? LABEL[o.verdict] : "без вердикта") + (o.comment ? ". " + o.comment.trim() : ""));
     items.forEach(function(el){
       var k = el.dataset.kind, s = state[el.dataset.id] || {}, c = (s.comment || "").trim();
       if (k === "decision") lines.push(el.dataset.label + ": " + (s.verdict ? LABEL[s.verdict] : "без отметки") + (c ? ". " + c : ""));
