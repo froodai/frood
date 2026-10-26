@@ -907,3 +907,264 @@ async fn a_laptop_signs_in_on_this_computer() {
     .to_string();
     assert!(problems.contains("sign-in on this computer"), "{problems}");
 }
+
+/// Sign-in with a button in Telegram (docs/28 §2): the page asks for the address, the bot
+/// shows the code and two buttons, a press from the linked account lets the browser in; a
+/// press from anyone else does nothing, "Not me" refuses, and nobody new gets in.
+#[tokio::test]
+async fn a_person_signs_in_with_a_button_in_telegram() {
+    let Some(url) = frood_store::testing::database_url() else {
+        return;
+    };
+    let pool = frood_store::testing::fresh_database(&url, "oauth_telegram")
+        .await
+        .expect("test database");
+    let sent: Arc<Mutex<Vec<Value>>> = Arc::default();
+    let edited: Arc<Mutex<Vec<Value>>> = Arc::default();
+    let module = Router::new()
+        .route(
+            "/manifest",
+            get(|| async { Json(json!({ "name": "telegram", "version": "0.0.1", "provides": ["notify.send@1", "notify.update@1"], "frood_api": [] })) }),
+        )
+        .route("/healthz", get(|| async { Json(json!({ "status": "ok" })) }))
+        .route(
+            "/v1/capabilities/notify.send@1",
+            post({
+                let sent = sent.clone();
+                move |Json(body): Json<Value>| async move {
+                    sent.lock().unwrap().push(body);
+                    Json(json!({ "message_ref": "42:7" }))
+                }
+            }),
+        )
+        .route(
+            "/v1/capabilities/notify.update@1",
+            post({
+                let edited = edited.clone();
+                move |Json(body): Json<Value>| async move {
+                    edited.lock().unwrap().push(body);
+                    Json(json!({}))
+                }
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let fake = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, module).await.unwrap() });
+
+    let raw = format!(
+        "version: 1\ninstallation: {{name: home}}\nserver: {{listen: '127.0.0.1:8080'}}\n\
+         storage: {{uses: postgres, url: 'postgres://unused', objects: {{uses: database}}}}\n\
+         deploy: {{server: host}}\njobs:\n  extract: {{ enabled: false }}\n\
+         modules:\n  telegram: {{ url: '{fake}' }}\n\
+         auth:\n  allow: [alice@example.com, carol@example.com]\n  providers: [{{kind: telegram, id: telegram}}]\n"
+    );
+    let config = frood_config::parse(
+        &raw,
+        &frood_config::Secrets::from_pairs(Vec::<(String, String)>::new()),
+    )
+    .expect("config")
+    .config;
+    let assembly = frood_api::assemble(&config, std::path::Path::new("."), pool.clone(), |name| {
+        (name == "FROOD_MODULE_TOKEN_TELEGRAM").then(|| "tg-token".to_owned())
+    });
+    assembly.modules.discover("telegram").await.unwrap();
+    let dispatch = assembly.state.dispatch.clone();
+    let auth = assembly.state.auth.clone();
+    let app = router(assembly.state);
+    // At start the server registers each module's token; the bot acts with it.
+    auth.register_service_token(
+        "telegram",
+        "tg-token",
+        &["knowledge:read".to_owned(), "channels:act".to_owned()],
+    )
+    .await
+    .unwrap();
+    let alice = auth
+        .user_id_by_email("alice@example.com", true)
+        .await
+        .unwrap();
+    auth.user_id_by_email("carol@example.com", true)
+        .await
+        .unwrap();
+    frood_store::sqlx::query(
+        "INSERT INTO channel_links (channel, external_id, user_id) VALUES ('telegram', '42', $1)",
+    )
+    .bind(alice)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // The console asks to sign in; the page offers the button.
+    let start = async || {
+        let (_, challenge) = pkce();
+        let authorize = format!(
+            "/oauth/authorize?response_type=code&client_id=frood-admin&redirect_uri={}&code_challenge={challenge}&code_challenge_method=S256&state=s",
+            url::form_urlencoded::byte_serialize(format!("{ISSUER}/admin/").as_bytes())
+                .collect::<String>()
+        );
+        let reply = get_with(&app, &authorize, None).await;
+        let reply = get_with(&app, &path_and_query(&reply.location()), None).await;
+        query(&reply.location(), "tx")
+    };
+    let tx = start().await;
+    let page = get_with(&app, &format!("/oauth/login/telegram?tx={tx}"), None).await;
+    let html = page.text();
+    assert!(html.contains("Sign in with Telegram"), "{html}");
+    assert!(
+        html.contains("action=\"/oauth/login/telegram/ask\""),
+        "{html}"
+    );
+
+    // Nobody new, and nobody without a linked Telegram.
+    let ask = |email: &'static str, tx: String| {
+        let app = app.clone();
+        async move {
+            post_form(
+                &app,
+                "/oauth/login/telegram/ask",
+                &[("tx", &tx), ("email", email)],
+                None,
+            )
+            .await
+        }
+    };
+    let refused = ask("bob@example.com", tx.clone()).await;
+    assert_eq!(refused.status, StatusCode::FORBIDDEN, "{}", refused.text());
+    let unlinked = ask("carol@example.com", tx.clone()).await;
+    assert_eq!(
+        unlinked.status,
+        StatusCode::FORBIDDEN,
+        "{}",
+        unlinked.text()
+    );
+    assert!(
+        unlinked.text().contains("No telegram account is linked"),
+        "{}",
+        unlinked.text()
+    );
+    assert!(sent.lock().unwrap().is_empty());
+
+    // Alice gets the button with the code the page shows.
+    let asked = ask("alice@example.com", tx.clone()).await;
+    assert!(asked.status.is_redirection(), "{}", asked.text());
+    let wait = path_and_query(&asked.location());
+    assert_eq!(asked.location().path(), "/oauth/login/telegram/wait");
+    let message = sent
+        .lock()
+        .unwrap()
+        .last()
+        .cloned()
+        .expect("a button was sent");
+    assert_eq!(message["recipient"]["external_id"], "42");
+    assert_eq!(message["item"]["item"]["kind"], "sign_in");
+    assert_eq!(message["item"]["content"]["client"], "Frood admin panel");
+    let actions: Vec<&str> = message["item"]["actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["action"].as_str().unwrap())
+        .collect();
+    assert_eq!(actions, ["approve", "deny"]);
+    let code = message["item"]["content"]["code"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let waiting = get_with(&app, &wait, None).await;
+    assert_eq!(waiting.status, StatusCode::OK);
+    let html = waiting.text();
+    assert!(html.contains(&code), "{html}");
+    assert!(html.contains("http-equiv=\"refresh\""), "{html}");
+
+    // A press from another Telegram account does nothing; Alice's lets the browser in.
+    let item = message["item"]["item"]["id"].as_str().unwrap().to_owned();
+    let press = |external_id: &'static str, action: &'static str| {
+        let app = app.clone();
+        let item = item.clone();
+        async move {
+            send(
+                &app,
+                Request::post(format!("/v1/inbox/{item}/act"))
+                    .header(header::AUTHORIZATION, "Bearer tg-token")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        json!({ "action": action, "external_id": external_id }).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+        }
+    };
+    let stranger = press("99", "approve").await;
+    assert!(!stranger.status.is_success(), "{}", stranger.text());
+    assert_eq!(get_with(&app, &wait, None).await.status, StatusCode::OK);
+    let pressed = press("42", "approve").await;
+    assert!(pressed.status.is_success(), "{}", pressed.text());
+    let signed = get_with(&app, &wait, None).await;
+    assert!(signed.status.is_redirection(), "{}", signed.text());
+    assert_eq!(signed.location().path(), "/oauth/consent");
+    assert!(
+        signed
+            .header(header::SET_COOKIE)
+            .starts_with("frood_session=")
+    );
+    // Once: the same page again only goes on to consent, with no new session.
+    let again = get_with(&app, &wait, None).await;
+    assert_eq!(again.location().path(), "/oauth/consent");
+    assert!(again.header(header::SET_COOKIE).is_empty());
+    // The message says how it ended, and the console's Inbox never lists the button.
+    dispatch.deliver_once().await.unwrap();
+    assert_eq!(edited.lock().unwrap().len(), 1);
+    assert!(dispatch.inbox(true, 50).await.unwrap().is_empty());
+
+    // "Not me" refuses.
+    let tx = start().await;
+    let asked = ask("alice@example.com", tx).await;
+    let wait = path_and_query(&asked.location());
+    let item = sent.lock().unwrap().last().unwrap()["item"]["item"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let denied = send(
+        &app,
+        Request::post(format!("/v1/inbox/{item}/act"))
+            .header(header::AUTHORIZATION, "Bearer tg-token")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({ "action": "deny", "external_id": "42" }).to_string(),
+            ))
+            .unwrap(),
+    )
+    .await;
+    assert!(denied.status.is_success(), "{}", denied.text());
+    let refused = get_with(&app, &wait, None).await;
+    assert_eq!(refused.status, StatusCode::FORBIDDEN);
+    assert!(refused.text().contains("declined"), "{}", refused.text());
+
+    // A newer button replaces a waiting one; the old one closes and its message says so.
+    let tx = start().await;
+    let first = ask("alice@example.com", tx.clone()).await;
+    let first_wait = path_and_query(&first.location());
+    let tx2 = start().await;
+    ask("alice@example.com", tx2).await;
+    let expired = get_with(&app, &first_wait, None).await;
+    assert!(
+        expired.text().contains("The button expired"),
+        "{}",
+        expired.text()
+    );
+    let before = edited.lock().unwrap().len();
+    dispatch.deliver_once().await.unwrap();
+    assert_eq!(
+        edited.lock().unwrap().len(),
+        before + 2,
+        "the denied and the replaced messages"
+    );
+
+    // A fuse: no more than five buttons an hour.
+    let tx = start().await;
+    let fifth = ask("alice@example.com", tx.clone()).await;
+    assert!(fifth.status.is_redirection(), "{}", fifth.text());
+    let sixth = ask("alice@example.com", tx).await;
+    assert_eq!(sixth.status, StatusCode::FORBIDDEN, "{}", sixth.text());
+    assert!(sixth.text().contains("Too many"), "{}", sixth.text());
+}

@@ -375,6 +375,17 @@ pub enum Provider {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         label: Option<String>,
     },
+    /// Sign-in with a button in the person's linked Telegram (docs/28 §2), for the addresses in
+    /// `auth.allow` only. Works with a public address; the channel module only shows the button
+    /// and passes the press on.
+    Telegram {
+        id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        label: Option<String>,
+        /// The channel the button goes to.
+        #[serde(default = "default_sign_in_channel")]
+        channel: String,
+    },
     /// Development only: type an email address. Allowed only on a loopback address without
     /// `server.public_url`.
     Dev {
@@ -387,17 +398,25 @@ pub enum Provider {
 impl Provider {
     pub fn id(&self) -> &str {
         match self {
-            Self::Oidc { id, .. } | Self::Local { id, .. } | Self::Dev { id, .. } => id,
+            Self::Oidc { id, .. }
+            | Self::Local { id, .. }
+            | Self::Telegram { id, .. }
+            | Self::Dev { id, .. } => id,
         }
     }
 
     pub fn label(&self) -> &str {
         match self {
-            Self::Oidc { label, id, .. } | Self::Local { label, id } | Self::Dev { label, id } => {
-                label.as_deref().unwrap_or(id)
-            }
+            Self::Oidc { label, id, .. }
+            | Self::Local { label, id }
+            | Self::Telegram { label, id, .. }
+            | Self::Dev { label, id } => label.as_deref().unwrap_or(id),
         }
     }
+}
+
+fn default_sign_in_channel() -> String {
+    "telegram".to_owned()
 }
 
 /// Auto-verdict policies of the Ledger (docs/11_knowledge_model.md §8).

@@ -452,10 +452,17 @@ pub fn config_text(
     }
     if let Some(email) = &answers.email {
         text = text.replacen("  allow: []", &format!("  allow: [{email}]"), 1);
-        if answers.public_url.is_none() {
+        // A laptop signs in on this computer; a server with the bot, with a button in Telegram
+        // (docs/28 §2); a server without it, through an OIDC provider added by hand.
+        let provider = match (&answers.public_url, &answers.telegram) {
+            (None, _) => Some("{ kind: local, id: local, label: On this computer }"),
+            (Some(_), Some(_)) => Some("{ kind: telegram, id: telegram, label: Telegram }"),
+            (Some(_), None) => None,
+        };
+        if let Some(provider) = provider {
             text = text.replacen(
                 "  providers: []",
-                "  providers:\n    - { kind: local, id: local, label: On this computer }",
+                &format!("  providers:\n    - {provider}"),
                 1,
             );
         }
@@ -706,7 +713,22 @@ mod tests {
         );
         assert!(
             config.auth.providers.is_empty(),
-            "a server signs in through OIDC"
+            "a server without the bot signs in through OIDC"
+        );
+        let with_bot = Answers {
+            telegram: Some(("123:abc".into(), "my_frood_bot".into())),
+            ..server
+        };
+        let config = load(
+            &config_text(&bare, "personal", &with_bot, None),
+            &[("TELEGRAM_BOT_TOKEN".into(), "123:abc".into())],
+        );
+        assert!(
+            matches!(
+                config.auth.providers.as_slice(),
+                [frood_config::Provider::Telegram { .. }]
+            ),
+            "a server with the bot signs in with a button in Telegram"
         );
     }
 }

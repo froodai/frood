@@ -45,6 +45,8 @@ auth:
   #    client_secret: ${secret:GOOGLE_CLIENT_SECRET}
   #  - kind: local           # on this computer: no password, only the addresses in allow
   #    id: local
+  #  - kind: telegram        # a "Sign in" button in your linked Telegram; only the addresses in allow
+  #    id: telegram
   #  - kind: dev             # development only: type an email; local servers only
   #    id: dev
 

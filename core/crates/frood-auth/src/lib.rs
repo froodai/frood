@@ -12,6 +12,7 @@ pub use clients::ADMIN_CLIENT;
 mod oidc;
 mod pages;
 mod secret;
+mod sign_in;
 mod tokens;
 mod users;
 mod web;
@@ -26,9 +27,10 @@ use uuid::Uuid;
 
 pub use channels::{ChannelLink, LinkCode};
 pub use clients::{ClientInfo, is_public_ip};
+pub use sign_in::{ASK_MINUTES, SignInAsk};
 pub use tokens::RunToken;
 pub use tokens::{PersonalToken, TokenPair};
-pub use web::routes;
+pub use web::{problem_page, routes};
 
 /// Scopes a token can carry (docs/12 §3.3). They are rights of the token, not roles.
 pub mod scope {

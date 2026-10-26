@@ -171,6 +171,9 @@ async fn welcome(paths: &Paths, answers: &Answers) -> anyhow::Result<()> {
             "Telegram:     open https://t.me/{bot}?start={} within 15 minutes",
             code.code
         );
+        if loaded.config.server.public_url.is_some() {
+            println!("              then sign in with the button the bot sends");
+        }
     }
     if answers.model.is_none() {
         println!(

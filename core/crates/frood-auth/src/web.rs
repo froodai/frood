@@ -16,7 +16,8 @@ use crate::clients::{RegistrationRequest, redirect_allowed};
 use crate::oidc::OidcProvider;
 use crate::pages::{self, Consent};
 use crate::secret::{hash, new_secret, pkce_challenge, pkce_matches};
-use crate::{Auth, AuthError, Resource, scope};
+use crate::sign_in::{Asked, SignInAsk};
+use crate::{Auth, AuthError, AuthSettings, Resource, scope};
 
 const SESSION_COOKIE: &str = "frood_session";
 const SESSION_DAYS: i32 = 7;
@@ -45,6 +46,7 @@ pub fn routes(auth: Auth) -> Router {
             "/oauth/login/{provider}",
             get(provider_start).post(dev_login),
         )
+        .route("/oauth/login/{provider}/wait", get(sign_in_wait))
         .route("/oauth/callback/{provider}", get(provider_callback))
         .route("/oauth/consent", get(consent_page).post(consent_submit))
         .route("/oauth/token", post(token))
@@ -433,13 +435,26 @@ async fn provider_start(
         .into_response(),
         Some(frood_config::Provider::Local { id, .. }) => {
             let settings = auth.settings();
-            // One person: their address is already filled in.
-            let only = match settings.allow.as_slice() {
-                [only] => only.as_str(),
-                _ => "",
-            };
-            pages::local_form(&settings.installation, &settings.base_path, id, &tx, only)
-                .into_response()
+            pages::local_form(
+                &settings.installation,
+                &settings.base_path,
+                id,
+                &tx,
+                only_address(settings),
+            )
+            .into_response()
+        }
+        Some(frood_config::Provider::Telegram { id, label, .. }) => {
+            let settings = auth.settings();
+            pages::channel_form(&pages::ChannelForm {
+                installation: &settings.installation,
+                base: &settings.base_path,
+                provider: id,
+                channel: label.as_deref().unwrap_or("Telegram"),
+                tx: &tx,
+                email: only_address(settings),
+            })
+            .into_response()
         }
         Some(frood_config::Provider::Oidc {
             id,
@@ -485,6 +500,14 @@ async fn provider_start(
                 Err(err) => error_page(StatusCode::BAD_GATEWAY, &err.to_string()),
             }
         }
+    }
+}
+
+/// One person: their address is already filled in.
+fn only_address(settings: &AuthSettings) -> &str {
+    match settings.allow.as_slice() {
+        [only] => only.as_str(),
+        _ => "",
     }
 }
 
@@ -609,6 +632,103 @@ async fn provider_callback(
         return error_page(StatusCode::INTERNAL_SERVER_ERROR, "Cannot continue sign-in.");
     }
     finish_sign_in(&auth, &tx, &identity.email, identity.name.as_deref()).await
+}
+
+/// A sign-in problem as a page, for routes outside this crate.
+pub fn problem_page(status: StatusCode, message: &str) -> Response {
+    error_page(status, message)
+}
+
+impl Auth {
+    /// The form of a sign-in through a channel (docs/28 §2), checked and kept as an ask: the
+    /// sign-in request and the button to send. The server sends it and then shows
+    /// [`Auth::sign_in_wait_path`]; a refusal is a status and a message for [`problem_page`].
+    pub async fn ask_from_form(
+        &self,
+        provider_id: &str,
+        headers: &HeaderMap,
+        form: &[u8],
+    ) -> std::result::Result<(String, SignInAsk), (StatusCode, String)> {
+        let Some(frood_config::Provider::Telegram { channel, .. }) = self.provider(provider_id)
+        else {
+            return Err((
+                StatusCode::NOT_FOUND,
+                "Unknown sign-in provider.".to_owned(),
+            ));
+        };
+        if !self.same_origin(headers) {
+            return Err((
+                StatusCode::FORBIDDEN,
+                "Cross-site request refused.".to_owned(),
+            ));
+        }
+        let values = form_values(form);
+        let (Some(tx), Some(email)) = (form_value(&values, "tx"), form_value(&values, "email"))
+        else {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "The form is incomplete.".to_owned(),
+            ));
+        };
+        if let Err(err) = self.pending("tx", tx).await {
+            return Err((StatusCode::BAD_REQUEST, err.to_string()));
+        }
+        match self.ask_sign_in(tx, email, channel).await {
+            Ok(ask) => Ok((tx.to_owned(), ask)),
+            Err(AuthError::Invalid(message)) => Err((StatusCode::FORBIDDEN, message)),
+            Err(err) => Err((StatusCode::INTERNAL_SERVER_ERROR, err.to_string())),
+        }
+    }
+
+    /// The page that waits for the press.
+    pub fn sign_in_wait_path(&self, provider_id: &str, tx: &str) -> String {
+        self.settings()
+            .path(&format!("/oauth/login/{provider_id}/wait?tx={tx}"))
+    }
+}
+
+/// Waits for the press in the channel: the code to compare while the button works, the session
+/// once it is pressed.
+async fn sign_in_wait(
+    State(auth): State<Auth>,
+    Path(provider_id): Path<String>,
+    Query(TxQuery { tx }): Query<TxQuery>,
+) -> Response {
+    let Some(frood_config::Provider::Telegram { label, .. }) = auth.provider(&provider_id) else {
+        return error_page(StatusCode::NOT_FOUND, "Unknown sign-in provider.");
+    };
+    if let Err(err) = auth.pending("tx", &tx).await {
+        return error_page(StatusCode::BAD_REQUEST, &err.to_string());
+    }
+    let settings = auth.settings();
+    let channel = label.as_deref().unwrap_or("Telegram");
+    let again = settings.path(&format!("/oauth/login/{provider_id}?tx={tx}"));
+    match auth.asked(&tx).await {
+        Ok(Some(Asked::Waiting { code })) => {
+            pages::channel_wait(&settings.installation, channel, &code, &again).into_response()
+        }
+        Ok(Some(Asked::Approved { id, user_id })) => match auth.use_sign_in(id).await {
+            Ok(true) => match auth.user_email(user_id).await {
+                Ok(email) => finish_sign_in(&auth, &tx, &email, None).await,
+                Err(err) => error_page(StatusCode::INTERNAL_SERVER_ERROR, &err.to_string()),
+            },
+            // Another load of this page took it a moment ago.
+            Ok(false) => {
+                Redirect::to(&settings.path(&format!("/oauth/consent?tx={tx}"))).into_response()
+            }
+            Err(err) => error_page(StatusCode::INTERNAL_SERVER_ERROR, &err.to_string()),
+        },
+        Ok(Some(Asked::Used)) => {
+            Redirect::to(&settings.path(&format!("/oauth/consent?tx={tx}"))).into_response()
+        }
+        Ok(Some(Asked::Denied)) => error_page(
+            StatusCode::FORBIDDEN,
+            &format!("The sign-in was declined in {channel}."),
+        ),
+        Ok(Some(Asked::Expired)) => pages::channel_expired(channel, &again).into_response(),
+        Ok(None) => Redirect::to(&again).into_response(),
+        Err(err) => error_page(StatusCode::INTERNAL_SERVER_ERROR, &err.to_string()),
+    }
 }
 
 async fn finish_sign_in(auth: &Auth, tx: &str, email: &str, name: Option<&str>) -> Response {
