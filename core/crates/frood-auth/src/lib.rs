@@ -11,6 +11,7 @@ mod clients;
 pub use clients::ADMIN_CLIENT;
 mod oidc;
 mod pages;
+mod passkey;
 mod secret;
 mod sign_in;
 mod tokens;
@@ -27,6 +28,7 @@ use uuid::Uuid;
 
 pub use channels::{ChannelLink, LinkCode};
 pub use clients::{ClientInfo, is_public_ip};
+pub use passkey::{LINK_MINUTES as PASSKEY_LINK_MINUTES, PasskeyInfo};
 pub use sign_in::{ASK_MINUTES, SignInAsk};
 pub use tokens::RunToken;
 pub use tokens::{PersonalToken, TokenPair};
@@ -290,6 +292,8 @@ struct Inner {
     http: reqwest::Client,
     cimd_cache: Mutex<HashMap<String, (ClientInfo, std::time::Instant)>>,
     oidc_cache: Mutex<HashMap<String, oidc::ProviderMetadata>>,
+    /// A passkey's challenge between its two steps, by the link or the sign-in request.
+    passkey_steps: Mutex<HashMap<String, (passkey::Step, std::time::Instant)>>,
 }
 
 impl Auth {
@@ -306,6 +310,7 @@ impl Auth {
                 http,
                 cimd_cache: Mutex::new(HashMap::new()),
                 oidc_cache: Mutex::new(HashMap::new()),
+                passkey_steps: Mutex::new(HashMap::new()),
             }),
         }
     }

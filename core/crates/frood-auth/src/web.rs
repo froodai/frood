@@ -47,6 +47,7 @@ pub fn routes(auth: Auth) -> Router {
             get(provider_start).post(dev_login),
         )
         .route("/oauth/login/{provider}/wait", get(sign_in_wait))
+        .merge(crate::passkey::routes())
         .route("/oauth/callback/{provider}", get(provider_callback))
         .route("/oauth/consent", get(consent_page).post(consent_submit))
         .route("/oauth/token", post(token))
@@ -134,7 +135,7 @@ struct AuthorizeQuery {
     resource: Option<String>,
 }
 
-fn error_page(status: StatusCode, message: &str) -> Response {
+pub(crate) fn error_page(status: StatusCode, message: &str) -> Response {
     (status, pages::error(message)).into_response()
 }
 
@@ -267,7 +268,7 @@ async fn authorize(
     Redirect::to(&auth.settings().path(&format!("/oauth/{next}?tx={tx}"))).into_response()
 }
 
-struct PendingRequest {
+pub(crate) struct PendingRequest {
     client_id: String,
     client_name: Option<String>,
     redirect_uri: String,
@@ -282,7 +283,11 @@ struct PendingRequest {
 }
 
 impl Auth {
-    async fn pending(&self, column: &str, secret: &str) -> Result<PendingRequest, AuthError> {
+    pub(crate) async fn pending(
+        &self,
+        column: &str,
+        secret: &str,
+    ) -> Result<PendingRequest, AuthError> {
         let sql = match column {
             "tx" => "SELECT * FROM auth_requests WHERE id_hash = $1 AND expires_at > now()",
             _ => {
@@ -354,7 +359,7 @@ impl Auth {
     }
 
     /// Browser POSTs must come from this installation's own pages.
-    fn same_origin(&self, headers: &HeaderMap) -> bool {
+    pub(crate) fn same_origin(&self, headers: &HeaderMap) -> bool {
         match headers.get(header::ORIGIN).and_then(|v| v.to_str().ok()) {
             None => true,
             Some(origin) => Url::parse(&self.settings().issuer)
@@ -444,6 +449,17 @@ async fn provider_start(
             )
             .into_response()
         }
+        Some(frood_config::Provider::Passkey { id, .. }) => {
+            let settings = auth.settings();
+            crate::passkey::sign_in_form(
+                &settings.installation,
+                &settings.base_path,
+                id,
+                &tx,
+                only_address(settings),
+            )
+            .into_response()
+        }
         Some(frood_config::Provider::Telegram { id, label, .. }) => {
             let settings = auth.settings();
             pages::channel_form(&pages::ChannelForm {
@@ -511,11 +527,11 @@ fn only_address(settings: &AuthSettings) -> &str {
     }
 }
 
-fn form_values(form: &[u8]) -> Vec<(String, String)> {
+pub(crate) fn form_values(form: &[u8]) -> Vec<(String, String)> {
     url::form_urlencoded::parse(form).into_owned().collect()
 }
 
-fn form_value<'a>(values: &'a [(String, String)], key: &str) -> Option<&'a str> {
+pub(crate) fn form_value<'a>(values: &'a [(String, String)], key: &str) -> Option<&'a str> {
     values
         .iter()
         .find(|(k, _)| k == key)
@@ -731,7 +747,12 @@ async fn sign_in_wait(
     }
 }
 
-async fn finish_sign_in(auth: &Auth, tx: &str, email: &str, name: Option<&str>) -> Response {
+pub(crate) async fn finish_sign_in(
+    auth: &Auth,
+    tx: &str,
+    email: &str,
+    name: Option<&str>,
+) -> Response {
     let user_id = match auth.sign_in(email, name).await {
         Ok(id) => id,
         Err(AuthError::Invalid(message)) => return error_page(StatusCode::FORBIDDEN, &message),

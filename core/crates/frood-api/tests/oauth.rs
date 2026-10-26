@@ -1168,3 +1168,212 @@ async fn a_person_signs_in_with_a_button_in_telegram() {
     assert_eq!(sixth.status, StatusCode::FORBIDDEN, "{}", sixth.text());
     assert!(sixth.text().contains("Too many"), "{}", sixth.text());
 }
+
+/// Passkeys (docs/28 §2): the console makes a one-time link, the device creates a passkey
+/// there, and the sign-in page then lets the person in with it; nobody else, no unknown
+/// passkey, and not after the person removes it. A software passkey stands in for the device.
+#[tokio::test]
+async fn a_person_adds_a_passkey_and_signs_in_with_it() {
+    use webauthn_authenticator_rs::WebauthnAuthenticator;
+    use webauthn_authenticator_rs::prelude::{
+        CreationChallengeResponse, RequestChallengeResponse, Url,
+    };
+    use webauthn_authenticator_rs::softpasskey::SoftPasskey;
+
+    let Some(url) = frood_store::testing::database_url() else {
+        return;
+    };
+    let pool = frood_store::testing::fresh_database(&url, "oauth_passkey")
+        .await
+        .expect("test database");
+    const SITE: &str = "https://mem.example.com";
+    let raw = "version: 1\ninstallation: {name: home}\n\
+               server: {listen: '127.0.0.1:8080', public_url: 'https://mem.example.com'}\n\
+               storage: {uses: postgres, url: 'postgres://unused', objects: {uses: database}}\n\
+               deploy: {server: host}\njobs:\n  extract: { enabled: false }\n\
+               auth:\n  allow: [alice@example.com, carol@example.com]\n  providers: [{kind: passkey, id: passkey}]\n";
+    let config = frood_config::parse(
+        raw,
+        &frood_config::Secrets::from_pairs(Vec::<(String, String)>::new()),
+    )
+    .expect("config")
+    .config;
+    let assembly = frood_api::assemble(&config, std::path::Path::new("."), pool, |_| None);
+    let auth = assembly.state.auth.clone();
+    let app = router(assembly.state);
+    let alice = auth
+        .user_id_by_email("alice@example.com", true)
+        .await
+        .unwrap();
+    let (_, console) = auth
+        .create_personal_token(
+            alice,
+            "console",
+            &[frood_auth::scope::ADMIN.to_owned()],
+            None,
+        )
+        .await
+        .unwrap();
+    let api = |method: &str, path: &str| {
+        Request::builder()
+            .method(method)
+            .uri(path)
+            .header(header::AUTHORIZATION, format!("Bearer {console}"))
+            .body(Body::empty())
+            .unwrap()
+    };
+    // The browser posts from the installation's own pages.
+    let post_json = |path: &str, body: Value| {
+        Request::post(path)
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::ORIGIN, SITE)
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    };
+    let post_form = |path: &str, form: &[(&str, &str)]| {
+        let body = url::form_urlencoded::Serializer::new(String::new())
+            .extend_pairs(form)
+            .finish();
+        Request::post(path)
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .header(header::ORIGIN, SITE)
+            .body(Body::from(body))
+            .unwrap()
+    };
+    let origin = Url::parse(SITE).unwrap();
+    let mut device = WebauthnAuthenticator::new(SoftPasskey::new(true));
+
+    // No passkeys yet; the console makes a link.
+    assert_eq!(
+        send(&app, api("GET", "/v1/me/passkeys")).await.json(),
+        json!({ "on": true, "passkeys": [] })
+    );
+    let link = send(&app, api("POST", "/v1/me/passkeys/links")).await;
+    assert_eq!(link.status, StatusCode::OK, "{}", link.text());
+    let link = Url::parse(link.json()["url"].as_str().unwrap()).unwrap();
+    assert_eq!(link.path(), "/oauth/passkey");
+    let code = query(&link, "code");
+    let page = get_with(&app, &path_and_query(&link), None).await;
+    assert!(page.text().contains("Add a passkey"), "{}", page.text());
+    assert!(page.text().contains("alice@example.com"), "{}", page.text());
+
+    // The device creates the passkey.
+    let options = send(
+        &app,
+        post_json("/oauth/passkey/options", json!({ "code": code })),
+    )
+    .await;
+    assert_eq!(options.status, StatusCode::OK, "{}", options.text());
+    let options: CreationChallengeResponse = serde_json::from_slice(&options.body).unwrap();
+    let created = device.do_registration(origin.clone(), options).unwrap();
+    let created = serde_json::to_string(&created).unwrap();
+    let added = send(
+        &app,
+        post_form(
+            "/oauth/passkey",
+            &[
+                ("code", &code),
+                ("credential", &created),
+                ("label", "Test phone"),
+            ],
+        ),
+    )
+    .await;
+    assert_eq!(added.status, StatusCode::OK, "{}", added.text());
+    assert!(added.text().contains("Passkey added"), "{}", added.text());
+    // The link works once.
+    let again = send(
+        &app,
+        post_json("/oauth/passkey/options", json!({ "code": code })),
+    )
+    .await;
+    assert_eq!(again.status, StatusCode::FORBIDDEN, "{}", again.text());
+    let listed = send(&app, api("GET", "/v1/me/passkeys")).await.json()["passkeys"].clone();
+    assert_eq!(listed[0]["label"], "Test phone");
+    assert!(listed[0]["last_used_at"].is_null());
+
+    // Sign in from the console's sign-in page.
+    let start = async || {
+        let (_, challenge) = pkce();
+        let authorize = format!(
+            "/oauth/authorize?response_type=code&client_id=frood-admin&redirect_uri={}&code_challenge={challenge}&code_challenge_method=S256&state=s",
+            url::form_urlencoded::byte_serialize(format!("{SITE}/admin/").as_bytes())
+                .collect::<String>()
+        );
+        let reply = get_with(&app, &authorize, None).await;
+        let reply = get_with(&app, &path_and_query(&reply.location()), None).await;
+        query(&reply.location(), "tx")
+    };
+    let tx = start().await;
+    let page = get_with(&app, &format!("/oauth/login/passkey?tx={tx}"), None).await;
+    let html = page.text();
+    assert!(html.contains("Sign in with a passkey"), "{html}");
+    assert!(
+        html.contains("data-options=\"/oauth/login/passkey/passkey/options\""),
+        "{html}"
+    );
+    let ask = |tx: &str, email: &str| {
+        post_json(
+            "/oauth/login/passkey/passkey/options",
+            json!({ "tx": tx, "email": email }),
+        )
+    };
+    let stranger = send(&app, ask(&tx, "bob@example.com")).await;
+    assert_eq!(
+        stranger.status,
+        StatusCode::FORBIDDEN,
+        "{}",
+        stranger.text()
+    );
+    let without = send(&app, ask(&tx, "carol@example.com")).await;
+    assert_eq!(without.status, StatusCode::FORBIDDEN, "{}", without.text());
+    assert!(without.text().contains("No passkey"), "{}", without.text());
+
+    // Another device's passkey does not match.
+    let options = send(&app, ask(&tx, "alice@example.com")).await;
+    assert_eq!(options.status, StatusCode::OK, "{}", options.text());
+    let challenge: RequestChallengeResponse = serde_json::from_slice(&options.body).unwrap();
+    let mut other = WebauthnAuthenticator::new(SoftPasskey::new(true));
+    assert!(other.do_authentication(origin.clone(), challenge).is_err());
+
+    let options = send(&app, ask(&tx, "alice@example.com")).await;
+    let challenge: RequestChallengeResponse = serde_json::from_slice(&options.body).unwrap();
+    let answer =
+        serde_json::to_string(&device.do_authentication(origin.clone(), challenge).unwrap())
+            .unwrap();
+    let signed = send(
+        &app,
+        post_form(
+            "/oauth/login/passkey/passkey",
+            &[("tx", &tx), ("credential", &answer)],
+        ),
+    )
+    .await;
+    assert!(signed.status.is_redirection(), "{}", signed.text());
+    assert_eq!(signed.location().path(), "/oauth/consent");
+    assert!(
+        signed
+            .header(header::SET_COOKIE)
+            .starts_with("frood_session=")
+    );
+    // The same answer cannot sign in twice.
+    let replayed = send(
+        &app,
+        post_form(
+            "/oauth/login/passkey/passkey",
+            &[("tx", &tx), ("credential", &answer)],
+        ),
+    )
+    .await;
+    assert!(!replayed.status.is_redirection(), "{}", replayed.text());
+    let listed = send(&app, api("GET", "/v1/me/passkeys")).await.json()["passkeys"].clone();
+    assert!(listed[0]["last_used_at"].is_string(), "{listed}");
+
+    // Removed, it signs in no more.
+    let id = listed[0]["id"].as_str().unwrap().to_owned();
+    let removed = send(&app, api("DELETE", &format!("/v1/me/passkeys/{id}"))).await;
+    assert_eq!(removed.status, StatusCode::NO_CONTENT);
+    let tx = start().await;
+    let gone = send(&app, ask(&tx, "alice@example.com")).await;
+    assert_eq!(gone.status, StatusCode::FORBIDDEN, "{}", gone.text());
+}

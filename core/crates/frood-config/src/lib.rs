@@ -384,7 +384,24 @@ fn validate_auth(config: &Config, problems: &mut Vec<String>) {
             Provider::Telegram { channel, .. } if !is_valid_name(channel) => problems.push(format!(
                 "auth provider {id}: channel {channel:?} must be lowercase letters, digits or dashes"
             )),
-            Provider::Local { .. } | Provider::Telegram { .. } | Provider::Dev { .. } => {}
+            Provider::Passkey { .. } if auth.allow.is_empty() => problems.push(format!(
+                "auth provider {id}: passkeys need the addresses that may sign in in auth.allow"
+            )),
+            Provider::Passkey { .. }
+                if !config
+                    .server
+                    .public_url
+                    .as_deref()
+                    .is_some_and(|u| u.starts_with("https://")) =>
+            {
+                problems.push(format!(
+                    "auth provider {id}: passkeys need the installation's https address in server.public_url; on this computer sign in with kind: local"
+                ))
+            }
+            Provider::Local { .. }
+            | Provider::Telegram { .. }
+            | Provider::Passkey { .. }
+            | Provider::Dev { .. } => {}
         }
     }
     for domain in &auth.allow_domains {
@@ -1323,6 +1340,34 @@ jobs:
             config.auth.providers.as_slice(),
             [Provider::Telegram { channel, .. }] if channel == "telegram"
         ));
+    }
+
+    #[test]
+    fn passkeys_need_an_https_address_and_listed_addresses() {
+        let with_passkey = |raw: String| {
+            raw.replace(
+                "  providers: []",
+                "  providers:\n    - {kind: passkey, id: passkey}",
+            )
+        };
+        let local = with_passkey(
+            template_for(ServerPlacement::Container)
+                .replace("  allow: []", "  allow: [alice@example.com]"),
+        );
+        let public = local.replace(
+            "# public_url: https://mem.example.com",
+            "public_url: https://mem.example.com",
+        );
+        let unlisted = public.replace("  allow: [alice@example.com]", "  allow: []");
+        for (raw, wanted) in [(local, "https address"), (unlisted, "need the addresses")] {
+            match parse(&raw, &secrets()) {
+                Err(ConfigError::Invalid(problems)) => {
+                    assert!(problems.iter().any(|p| p.contains(wanted)), "{problems:?}")
+                }
+                other => panic!("expected Invalid, got {other:?}"),
+            }
+        }
+        assert!(parse(&public, &secrets()).is_ok());
     }
 
     #[test]

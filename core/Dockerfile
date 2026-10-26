@@ -20,7 +20,8 @@ RUN set -eux; \
     esac; \
     printf '%s %s\n' "$triple" "$cc" > /target; \
     apt-get update; \
-    apt-get install -y --no-install-recommends cmake; \
+    # cmake for aws-lc (TLS); perl and make build OpenSSL, which passkeys verify with.
+    apt-get install -y --no-install-recommends cmake make perl; \
     if [ "$(dpkg --print-architecture)" != "$TARGETARCH" ]; then \
       apt-get install -y --no-install-recommends "gcc-$gnu" "libc6-dev-$TARGETARCH-cross"; \
       rustup target add "$triple"; \

@@ -15,6 +15,7 @@ mod inbox;
 mod ledger;
 mod links;
 pub mod logs;
+mod passkeys;
 mod work;
 
 use axum::extract::State;
@@ -263,6 +264,7 @@ pub fn router(state: AppState) -> Router {
         .merge(ledger::routes())
         .merge(account::routes())
         .merge(attention::routes())
+        .merge(passkeys::routes())
         .merge(capture::routes(state.ledger.max_file_bytes()))
         .merge(attachments::routes(state.ledger.max_file_bytes()))
         .merge(channels::routes())
