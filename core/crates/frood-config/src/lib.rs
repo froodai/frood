@@ -143,17 +143,25 @@ fn validate(config: &Config) -> Result<(), ConfigError> {
             )),
         }
     }
-    if config
-        .deploy
-        .proxy
-        .as_ref()
-        .is_some_and(|p| p.routes.is_some())
-        && config.server.public_url.is_none()
-    {
-        problems.push(
-            "deploy.proxy.routes needs server.public_url: Caddy runs only for a public address"
-                .to_owned(),
-        );
+    if let Some(proxy) = &config.deploy.proxy {
+        if proxy.routes.is_some() && config.server.public_url.is_none() {
+            problems.push(
+                "deploy.proxy.routes needs server.public_url: Caddy runs only for a public address"
+                    .to_owned(),
+            );
+        }
+        match proxy.external.as_deref() {
+            Some("") => problems.push("deploy.proxy.external must name a file".to_owned()),
+            Some(_) if config.server.public_url.is_none() => problems.push(
+                "deploy.proxy.external needs server.public_url: the proxy in front serves that address"
+                    .to_owned(),
+            ),
+            Some(_) if proxy.routes.is_some() => problems.push(
+                "deploy.proxy: routes and external do not go together; with a proxy in front, other apps keep their own files there"
+                    .to_owned(),
+            ),
+            _ => {}
+        }
     }
     if config.storage.uses != "postgres" {
         problems.push(format!(
@@ -1356,6 +1364,43 @@ jobs:
             }
             other => panic!("expected Invalid, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_proxy_in_front_needs_an_address_and_takes_no_routes() {
+        let public = |proxy: &str| {
+            template_for(ServerPlacement::Container)
+                .replace(
+                    "  listen: \"0.0.0.0:8080\"\n",
+                    "  listen: \"0.0.0.0:8080\"\n  public_url: https://1-2-3-4.sslip.io/frood\n",
+                )
+                .replace("deploy:\n", &format!("deploy:\n  proxy: {proxy}\n"))
+        };
+        let loaded = parse(
+            &public("{ external: /srv/edge/paths/frood.caddy }"),
+            &secrets(),
+        )
+        .unwrap();
+        assert_eq!(
+            loaded.config.deploy.proxy.unwrap().external.as_deref(),
+            Some("/srv/edge/paths/frood.caddy")
+        );
+        let refused = |text: &str, says: &str| match parse(text, &secrets()) {
+            Err(ConfigError::Invalid(problems)) => {
+                assert!(problems.iter().any(|p| p.contains(says)), "{problems:?}");
+            }
+            other => panic!("expected Invalid, got {other:?}"),
+        };
+        refused(
+            &public("{ external: frood.caddy, routes: pages.caddy }"),
+            "do not go together",
+        );
+        refused(&public("{ external: \"\" }"), "must name a file");
+        refused(
+            &template_for(ServerPlacement::Container)
+                .replace("deploy:\n", "deploy:\n  proxy: { external: frood.caddy }\n"),
+            "deploy.proxy.external needs server.public_url",
+        );
     }
 
     #[test]

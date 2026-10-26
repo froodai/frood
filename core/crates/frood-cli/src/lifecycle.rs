@@ -181,7 +181,36 @@ pub(crate) fn write_deploy(paths: &Paths, loaded: &Loaded) -> anyhow::Result<Pat
         std::fs::write(dir.join("Caddyfile"), caddyfile)
             .with_context(|| format!("cannot write {}", dir.display()))?;
     }
+    if let (Some(file), Some(routes)) = (
+        compose::proxy_external(loaded),
+        compose::external_routes(loaded),
+    ) {
+        write_external_routes(&file, &routes)?;
+    }
     Ok(compose_path)
+}
+
+/// Frood's file in the server's own proxy (docs/29): written whole, so a proxy that watches
+/// its folder never reads half of it, and only when it changed. The proxy picks it up itself.
+fn write_external_routes(file: &Path, routes: &str) -> anyhow::Result<()> {
+    let dir = file.parent().filter(|d| d.is_dir()).with_context(|| {
+        format!(
+            "deploy.proxy.external: the proxy's folder for {} does not exist",
+            file.display()
+        )
+    })?;
+    if std::fs::read_to_string(file).is_ok_and(|now| now == routes) {
+        return Ok(());
+    }
+    let name = file
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let tmp = dir.join(format!(".{name}.tmp"));
+    std::fs::write(&tmp, routes).with_context(|| format!("cannot write {}", tmp.display()))?;
+    std::fs::rename(&tmp, file).with_context(|| format!("cannot write {}", file.display()))?;
+    println!("wrote {}; the proxy in front picks it up", file.display());
+    Ok(())
 }
 
 pub async fn apply(paths: &Paths, render_only: bool) -> anyhow::Result<()> {
@@ -401,6 +430,13 @@ fn print_summary(loaded: &Loaded) {
     println!("listen: {}", config.server.listen);
     if let Some(url) = &config.server.public_url {
         println!("public url: {url}");
+        match compose::proxy_external(loaded) {
+            Some(file) => println!(
+                "proxy: the server's own, in front; Frood writes its routes to {}",
+                file.display()
+            ),
+            None => println!("proxy: Frood's Caddy on ports 80 and 443"),
+        }
     }
     if !loaded.secrets_used.is_empty() {
         let names: Vec<&str> = loaded.secrets_used.iter().map(String::as_str).collect();
@@ -493,7 +529,9 @@ async fn docker_compose_up(compose_path: &Path, build: bool) -> anyhow::Result<(
     command
         .args(["compose", "-f"])
         .arg(compose_path)
-        .args(["up", "-d", "--wait"]);
+        // What the config no longer has goes: a removed module, or Caddy once a proxy in
+        // front serves the address.
+        .args(["up", "-d", "--wait", "--remove-orphans"]);
     if build {
         command.arg("--build");
     }
@@ -643,5 +681,36 @@ mod export_tests {
             "Bearer ${secret:SOURCE_TEAM_TRACKER_TOKEN}"
         );
         assert_eq!(secrets, ["SOURCE_TEAM_TRACKER_TOKEN"]);
+    }
+}
+
+#[cfg(test)]
+mod proxy_tests {
+    use super::*;
+
+    #[test]
+    fn the_routes_file_is_written_whole_and_only_when_it_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("frood.caddy");
+        write_external_routes(&file, "handle_path /frood/* {}\n").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            "handle_path /frood/* {}\n"
+        );
+        let written = std::fs::metadata(&file).unwrap().modified().unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+        write_external_routes(&file, "handle_path /frood/* {}\n").unwrap();
+        assert_eq!(
+            std::fs::metadata(&file).unwrap().modified().unwrap(),
+            written
+        );
+        let names: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name())
+            .collect();
+        assert_eq!(names, ["frood.caddy"], "no temporary file is left");
+        let missing = write_external_routes(&dir.path().join("no/frood.caddy"), "x").unwrap_err();
+        assert!(missing.to_string().contains("does not exist"), "{missing}");
     }
 }

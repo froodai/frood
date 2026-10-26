@@ -206,7 +206,7 @@ pub fn render(
         }
     }
 
-    if loaded.config.server.public_url.is_some() {
+    if loaded.config.server.public_url.is_some() && proxy_external(loaded).is_none() {
         // Only Caddy faces the internet: the server, the database and the modules stay inside
         // (or on 127.0.0.1).
         let https = public_port(loaded);
@@ -280,16 +280,42 @@ pub fn proxy_routes(loaded: &Loaded) -> Option<std::path::PathBuf> {
     Some(host_path(&loaded.base_dir.join(routes)))
 }
 
-/// The Caddyfile of the HTTPS front, for `server.public_url`. With a path such as `/frood`,
-/// Frood answers under it (the path stripped) and at the root only for OAuth discovery
-/// (RFC 8414, RFC 9728); the rest of the site is free for `deploy.proxy.routes`.
-pub fn caddyfile(loaded: &Loaded) -> Option<String> {
-    let public = public_url(loaded)?;
+/// `deploy.proxy.external` as an absolute path on this machine: the file of the server's own
+/// proxy that Frood writes its routes into.
+pub fn proxy_external(loaded: &Loaded) -> Option<std::path::PathBuf> {
+    let file = loaded.config.deploy.proxy.as_ref()?.external.as_ref()?;
+    let path = loaded.base_dir.join(file);
+    Some(std::path::absolute(&path).unwrap_or(path))
+}
+
+/// The site address Caddy serves for `server.public_url`.
+fn site_address(public: &url::Url) -> String {
     let host = public.host_str().unwrap_or("localhost");
-    let site = match public.port() {
+    match public.port() {
         None | Some(443) => host.to_owned(),
         Some(port) => format!("{host}:{port}"),
-    };
+    }
+}
+
+/// Frood's routes inside a site, at one indent: under a path such as `/frood` it answers
+/// there (the path stripped) and at the root only for OAuth discovery (RFC 8414, RFC 9728).
+fn routes(base: &str, upstream: &str) -> String {
+    format!(
+        "\tredir {base} {base}/ 308\n\
+         \thandle_path {base}/* {{\n\t\treverse_proxy {upstream}\n\t}}\n\
+         \t@frood_discovery path /.well-known/oauth-authorization-server /.well-known/oauth-authorization-server{base} /.well-known/oauth-protected-resource{base}/*\n\
+         \thandle @frood_discovery {{\n\t\treverse_proxy {upstream}\n\t}}\n"
+    )
+}
+
+/// The Caddyfile of the HTTPS front, for `server.public_url`, when Frood runs its own. With a
+/// path such as `/frood` the rest of the site is free for `deploy.proxy.routes`.
+pub fn caddyfile(loaded: &Loaded) -> Option<String> {
+    if proxy_external(loaded).is_some() {
+        return None;
+    }
+    let public = public_url(loaded)?;
+    let site = site_address(&public);
     let port = listen_port(loaded);
     let upstream = match loaded.config.deploy.server {
         ServerPlacement::Container => format!("frood:{port}"),
@@ -309,16 +335,42 @@ pub fn caddyfile(loaded: &Loaded) -> Option<String> {
             "\thandle {{\n\t\treverse_proxy {upstream}\n\t}}\n"
         ));
     } else {
-        out.push_str(&format!(
-            "\tredir {base} {base}/ 308\n\
-             \thandle_path {base}/* {{\n\t\treverse_proxy {upstream}\n\t}}\n\
-             \t@frood_discovery path /.well-known/oauth-authorization-server /.well-known/oauth-authorization-server{base} /.well-known/oauth-protected-resource{base}/*\n\
-             \thandle @frood_discovery {{\n\t\treverse_proxy {upstream}\n\t}}\n\
-             \t# Anything no route claims: a clear answer for clients of an old address.\n\
-             \thandle {{\n\t\trespond 404\n\t}}\n"
-        ));
+        out.push_str(&routes(base, &upstream));
+        out.push_str(
+            "\t# Anything no route claims: a clear answer for clients of an old address.\n\
+             \thandle {\n\t\trespond 404\n\t}\n",
+        );
     }
     out.push_str("}\n");
+    Some(out)
+}
+
+/// What Frood writes into `deploy.proxy.external` (docs/29): with a path in
+/// `server.public_url`, its routes for the shared site, which the proxy imports into that
+/// site; without one, a site block of its own. The proxy runs on this machine and reaches the
+/// server on 127.0.0.1, where Compose publishes it.
+pub fn external_routes(loaded: &Loaded) -> Option<String> {
+    proxy_external(loaded)?;
+    let public = public_url(loaded)?;
+    let upstream = format!("127.0.0.1:{}", listen_port(loaded));
+    let base = public.path().trim_end_matches('/');
+    let mut out = format!(
+        "# Frood {}: {} → {upstream}. Written by `frood apply`; changes are overwritten.\n",
+        loaded.config.installation.name,
+        public.as_str().trim_end_matches('/'),
+    );
+    if base.is_empty() {
+        out.push_str(&format!(
+            "{} {{\n\treverse_proxy {upstream}\n}}\n",
+            site_address(&public)
+        ));
+    } else {
+        // Inside the shared site: the same routes, one indent less.
+        for line in routes(base, &upstream).lines() {
+            out.push_str(line.strip_prefix('\t').unwrap_or(line));
+            out.push('\n');
+        }
+    }
     Some(out)
 }
 
@@ -545,6 +597,64 @@ mod tests {
     }
 
     #[test]
+    fn behind_the_servers_own_proxy_frood_runs_no_caddy_and_writes_only_its_routes() {
+        let mut loaded = loaded(ServerPlacement::Container);
+        loaded.base_dir = "/srv/frood".into();
+        loaded.config.server.public_url = Some("https://1-2-3-4.sslip.io/frood/".into());
+        loaded.config.deploy.proxy = Some(frood_config::Proxy {
+            routes: None,
+            external: Some("/srv/edge/paths/frood.caddy".into()),
+        });
+        let out = render(
+            &loaded,
+            Path::new("/x/frood.yaml"),
+            Path::new("/x/s"),
+            Path::new("/x/d"),
+        );
+        let parsed: serde_json::Value = serde_yaml_ng::from_str(&out).unwrap();
+        assert!(parsed["services"].get("caddy").is_none(), "{out}");
+        assert!(parsed["volumes"].get("caddy-data").is_none());
+        assert_eq!(
+            parsed["services"]["frood"]["ports"],
+            serde_json::json!(["127.0.0.1:8080:8080"])
+        );
+        assert!(caddyfile(&loaded).is_none());
+        assert_eq!(
+            proxy_external(&loaded).unwrap(),
+            Path::new("/srv/edge/paths/frood.caddy")
+        );
+        // Routes for the shared site: no site block, no catch-all, the root only for OAuth.
+        let routes = external_routes(&loaded).unwrap();
+        assert!(
+            routes
+                .starts_with("# Frood personal: https://1-2-3-4.sslip.io/frood → 127.0.0.1:8080.")
+        );
+        assert!(routes.contains("\nredir /frood /frood/ 308\nhandle_path /frood/* {\n\treverse_proxy 127.0.0.1:8080\n}\n"));
+        assert!(routes.contains("@frood_discovery path /.well-known/oauth-authorization-server "));
+        assert!(!routes.contains("sslip.io {"), "{routes}");
+        assert!(!routes.contains("respond 404"), "{routes}");
+        // A domain of its own: a site block.
+        loaded.config.server.public_url = Some("https://mem.example.com".into());
+        assert_eq!(
+            external_routes(&loaded)
+                .unwrap()
+                .lines()
+                .skip(1)
+                .collect::<Vec<_>>(),
+            ["mem.example.com {", "\treverse_proxy 127.0.0.1:8080", "}"]
+        );
+        // A relative file is next to the config.
+        loaded.config.deploy.proxy = Some(frood_config::Proxy {
+            routes: None,
+            external: Some("edge/frood.caddy".into()),
+        });
+        assert_eq!(
+            proxy_external(&loaded).unwrap(),
+            Path::new("/srv/frood/edge/frood.caddy")
+        );
+    }
+
+    #[test]
     fn under_a_path_frood_leaves_the_rest_of_the_site_to_other_routes() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("pages.caddy"), "handle /pages/* {\n}\n").unwrap();
@@ -553,6 +663,7 @@ mod tests {
         loaded.config.server.public_url = Some("https://1-2-3-4.sslip.io/frood/".into());
         loaded.config.deploy.proxy = Some(frood_config::Proxy {
             routes: Some("pages.caddy".into()),
+            external: None,
         });
         let caddyfile = caddyfile(&loaded).unwrap();
         let routes = dir.path().canonicalize().unwrap();
