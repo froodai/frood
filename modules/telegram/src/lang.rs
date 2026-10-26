@@ -210,6 +210,16 @@ pub(crate) struct Words {
     pub(crate) source_stale: &'static str,
     pub(crate) budget: &'static str,
     pub(crate) lagging: &'static str,
+    /// A sign-in button (docs/28 §2): the headline, the app and code lines, the advice, the two
+    /// buttons and how it ended.
+    pub(crate) sign_in_title: &'static str,
+    pub(crate) sign_in_app: &'static str,
+    pub(crate) sign_in_code: &'static str,
+    pub(crate) sign_in_hint: &'static str,
+    pub(crate) sign_in: &'static str,
+    pub(crate) not_me: &'static str,
+    pub(crate) signed_in: &'static str,
+    pub(crate) not_signed_in: &'static str,
 }
 
 const EN_TEXTS: Texts = Texts {
@@ -697,6 +707,14 @@ const EN_WORDS: Words = Words {
     source_stale: "{job} has not read {source} for long",
     budget: "Account {account}: {spent} of {limit} spent this month",
     lagging: "Processing of events is behind",
+    sign_in_title: "🔑 Sign-in to Frood",
+    sign_in_app: "App",
+    sign_in_code: "Code",
+    sign_in_hint: "Press “Sign in” only if the page shows the same code. If you are not signing in, press “Not me”.",
+    sign_in: "Sign in",
+    not_me: "Not me",
+    signed_in: "✅ Signed in",
+    not_signed_in: "🚫 Sign-in declined",
 };
 
 const ZH_WORDS: Words = Words {
@@ -776,6 +794,14 @@ const ZH_WORDS: Words = Words {
     source_stale: "{job} 很久没有读取 {source}",
     budget: "账户 {account}：本月已花费 {spent}，上限 {limit}",
     lagging: "事件处理落后",
+    sign_in_title: "🔑 登录 Frood",
+    sign_in_app: "应用",
+    sign_in_code: "代码",
+    sign_in_hint: "仅当页面显示相同代码时才点“登录”。如果不是你在登录，请点“不是我”。",
+    sign_in: "登录",
+    not_me: "不是我",
+    signed_in: "✅ 已登录",
+    not_signed_in: "🚫 已拒绝登录",
 };
 
 const ES_WORDS: Words = Words {
@@ -855,6 +881,14 @@ const ES_WORDS: Words = Words {
     source_stale: "{job} no ha leído {source} desde hace mucho",
     budget: "Cuenta {account}: {spent} de {limit} gastados este mes",
     lagging: "El procesamiento de eventos va con retraso",
+    sign_in_title: "🔑 Inicio de sesión en Frood",
+    sign_in_app: "Aplicación",
+    sign_in_code: "Código",
+    sign_in_hint: "Pulsa «Entrar» solo si la página muestra el mismo código. Si no eres tú, pulsa «No soy yo».",
+    sign_in: "Entrar",
+    not_me: "No soy yo",
+    signed_in: "✅ Sesión iniciada",
+    not_signed_in: "🚫 Inicio de sesión rechazado",
 };
 
 const HI_WORDS: Words = Words {
@@ -934,6 +968,14 @@ const HI_WORDS: Words = Words {
     source_stale: "{job} ने बहुत समय से {source} नहीं पढ़ा",
     budget: "खाता {account}: इस महीने {limit} में से {spent} ख़र्च",
     lagging: "इवेंट प्रोसेसिंग पीछे चल रही है",
+    sign_in_title: "🔑 Frood में साइन-इन",
+    sign_in_app: "ऐप",
+    sign_in_code: "कोड",
+    sign_in_hint: "“साइन इन” तभी दबाएँ जब पेज पर यही कोड दिखे। अगर आप साइन इन नहीं कर रहे, तो “मैं नहीं” दबाएँ।",
+    sign_in: "साइन इन",
+    not_me: "मैं नहीं",
+    signed_in: "✅ साइन इन हो गया",
+    not_signed_in: "🚫 साइन-इन अस्वीकृत",
 };
 
 const AR_WORDS: Words = Words {
@@ -1013,6 +1055,14 @@ const AR_WORDS: Words = Words {
     source_stale: "لم تقرأ {job} المصدر {source} منذ مدة طويلة",
     budget: "الحساب {account}: أُنفق {spent} من {limit} هذا الشهر",
     lagging: "معالجة الأحداث متأخرة",
+    sign_in_title: "🔑 تسجيل الدخول إلى Frood",
+    sign_in_app: "التطبيق",
+    sign_in_code: "الرمز",
+    sign_in_hint: "اضغط «دخول» فقط إذا كانت الصفحة تعرض الرمز نفسه. إن لم تكن أنت، فاضغط «لست أنا».",
+    sign_in: "دخول",
+    not_me: "لست أنا",
+    signed_in: "✅ تم تسجيل الدخول",
+    not_signed_in: "🚫 رُفض تسجيل الدخول",
 };
 
 const FR_WORDS: Words = Words {
@@ -1092,6 +1142,14 @@ const FR_WORDS: Words = Words {
     source_stale: "{job} n’a pas lu {source} depuis longtemps",
     budget: "Compte {account} : {spent} dépensés sur {limit} ce mois-ci",
     lagging: "Le traitement des événements prend du retard",
+    sign_in_title: "🔑 Connexion à Frood",
+    sign_in_app: "Application",
+    sign_in_code: "Code",
+    sign_in_hint: "Appuyez sur « Se connecter » seulement si la page affiche le même code. Si ce n’est pas vous, appuyez sur « Pas moi ».",
+    sign_in: "Se connecter",
+    not_me: "Pas moi",
+    signed_in: "✅ Connecté",
+    not_signed_in: "🚫 Connexion refusée",
 };
 
 const PT_WORDS: Words = Words {
@@ -1171,6 +1229,14 @@ const PT_WORDS: Words = Words {
     source_stale: "{job} não lê {source} há muito tempo",
     budget: "Conta {account}: {spent} de {limit} gastos neste mês",
     lagging: "O processamento de eventos está atrasado",
+    sign_in_title: "🔑 Entrada no Frood",
+    sign_in_app: "Aplicativo",
+    sign_in_code: "Código",
+    sign_in_hint: "Toque em «Entrar» só se a página mostrar o mesmo código. Se não for você, toque em «Não sou eu».",
+    sign_in: "Entrar",
+    not_me: "Não sou eu",
+    signed_in: "✅ Entrada feita",
+    not_signed_in: "🚫 Entrada recusada",
 };
 
 const RU_WORDS: Words = Words {
@@ -1250,6 +1316,14 @@ const RU_WORDS: Words = Words {
     source_stale: "{job} давно не читал источник {source}",
     budget: "Аккаунт {account}: потрачено {spent} из {limit} за месяц",
     lagging: "Обработка событий отстаёт",
+    sign_in_title: "🔑 Вход во Frood",
+    sign_in_app: "Приложение",
+    sign_in_code: "Код",
+    sign_in_hint: "Нажмите «Войти», только если на странице тот же код. Если входите не вы, нажмите «Не я».",
+    sign_in: "Войти",
+    not_me: "Не я",
+    signed_in: "✅ Вход выполнен",
+    not_signed_in: "🚫 Вход отклонён",
 };
 
 #[cfg(test)]

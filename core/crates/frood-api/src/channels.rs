@@ -1,8 +1,9 @@
 //! Channel accounts linked to people (docs/15 §4): a person asks for a one-time code, the
 //! channel module (Telegram, …) redeems it for the account that sent it.
 
-use axum::extract::{Path, State};
-use axum::http::StatusCode;
+use axum::extract::{Path, RawForm, State};
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use frood_auth::{LinkCode, Resource};
@@ -26,6 +27,31 @@ pub fn routes() -> Router<AppState> {
             get(delivered),
         )
         .route("/v1/channels/{channel}/about", put(about))
+        .route("/oauth/login/{provider}/ask", post(ask_sign_in))
+}
+
+/// Sign-in with a button in the person's channel (docs/28 §2): the auth side checks the
+/// address and keeps the ask, the button goes out through the channel module, and the browser
+/// goes on to wait for the press.
+async fn ask_sign_in(
+    State(state): State<AppState>,
+    Path(provider): Path<String>,
+    headers: HeaderMap,
+    RawForm(form): RawForm,
+) -> Response {
+    let (tx, ask) = match state.auth.ask_from_form(&provider, &headers, &form).await {
+        Ok(asked) => asked,
+        Err((status, message)) => return frood_auth::problem_page(status, &message),
+    };
+    if let Err(err) = state.dispatch.ask_sign_in(&ask).await {
+        tracing::warn!(channel = %ask.channel, error = %err, "could not send a sign-in button");
+        let _ = state.auth.drop_sign_in_ask(ask.id).await;
+        return frood_auth::problem_page(
+            StatusCode::BAD_GATEWAY,
+            &format!("Could not send the button to {}: {err}", ask.channel),
+        );
+    }
+    Redirect::to(&state.auth.sign_in_wait_path(&provider, &tx)).into_response()
 }
 
 #[derive(Deserialize)]

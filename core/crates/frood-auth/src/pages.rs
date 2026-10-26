@@ -19,10 +19,15 @@ pub(crate) fn escape(value: &str) -> String {
 const REFERRER_POLICY: &str = "same-origin";
 
 fn page(title: &str, body: &str) -> Html<String> {
+    page_with(title, "", body)
+}
+
+/// A page with more in its head: a refresh while it waits.
+fn page_with(title: &str, head: &str, body: &str) -> Html<String> {
     Html(format!(
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">\
          <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\
-         <meta name=\"referrer\" content=\"{REFERRER_POLICY}\"><title>{title}</title><style>\
+         <meta name=\"referrer\" content=\"{REFERRER_POLICY}\">{head}<title>{title}</title><style>\
          :root{{--bg:#f2f5f1;--card:#fbfcfa;--ink:#17231d;--muted:#56675e;--rule:#d3dfd6;--accent:#1d6b4c;--on-accent:#fff}}\
          @media (prefers-color-scheme:dark){{:root{{--bg:#0e1411;--card:#151d19;--ink:#dce6df;--muted:#93a59b;--rule:#26332c;--accent:#5cc495;--on-accent:#0b1a12}}}}\
          *{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,sans-serif}}\
@@ -32,7 +37,7 @@ fn page(title: &str, body: &str) -> Html<String> {
          .btn.secondary{{background:transparent;color:var(--ink);border:1px solid var(--rule)}}\
          label{{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-top:1px solid var(--rule)}}\
          input[type=email]{{width:100%;padding:9px;border:1px solid var(--rule);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit}}\
-         code{{font-size:13px}}</style></head><body><main><div class=\"card\">{body}</div></main></body></html>"
+         code{{font-size:13px}}.code{{font:600 34px/1.2 ui-monospace,monospace;letter-spacing:.2em;text-align:center;margin:16px 0;font-variant-numeric:tabular-nums}}</style></head><body><main><div class=\"card\">{body}</div></main></body></html>"
     ))
 }
 
@@ -111,6 +116,71 @@ pub(crate) fn local_form(
             escape(provider),
             escape(tx),
             escape(email)
+        ),
+    )
+}
+
+pub(crate) struct ChannelForm<'a> {
+    pub installation: &'a str,
+    pub base: &'a str,
+    pub provider: &'a str,
+    /// How the channel is called on the page: "Telegram".
+    pub channel: &'a str,
+    pub tx: &'a str,
+    pub email: &'a str,
+}
+
+/// Sign-in through a channel (docs/28 §2): the address, then a button in the channel.
+pub(crate) fn channel_form(form: &ChannelForm<'_>) -> Html<String> {
+    page(
+        &format!("Sign in with {}", escape(form.channel)),
+        &format!(
+            "<h1>Sign in with {channel}</h1><p class=\"muted\">Installation <code>{}</code>. Frood sends a \
+             button to the {channel} account linked to your address.</p>\
+             <form method=\"post\" action=\"{}/oauth/login/{}/ask\"><input type=\"hidden\" name=\"tx\" value=\"{}\">\
+             <input type=\"email\" name=\"email\" value=\"{}\" placeholder=\"you@example.com\" required autofocus>\
+             <button class=\"btn\" type=\"submit\">Send the button to {channel}</button></form>",
+            escape(form.installation),
+            escape(form.base),
+            escape(form.provider),
+            escape(form.tx),
+            escape(form.email),
+            channel = escape(form.channel),
+        ),
+    )
+}
+
+/// Waits for the press, reloading itself; `again` sends a new button.
+pub(crate) fn channel_wait(
+    installation: &str,
+    channel: &str,
+    code: &str,
+    again: &str,
+) -> Html<String> {
+    page_with(
+        &format!("Check {}", escape(channel)),
+        "<meta http-equiv=\"refresh\" content=\"2\">",
+        &format!(
+            "<h1>Check {channel}</h1><p>Press <b>Sign in</b> in the message from the bot, if it shows this code:</p>\
+             <p class=\"code\">{}</p><p class=\"muted\">Installation <code>{}</code>. The button works for {} minutes; \
+             this page goes on by itself.</p><a class=\"btn secondary\" href=\"{}\">Send a new button</a>",
+            escape(code),
+            escape(installation),
+            crate::sign_in::ASK_MINUTES,
+            escape(again),
+            channel = escape(channel),
+        ),
+    )
+}
+
+pub(crate) fn channel_expired(channel: &str, again: &str) -> Html<String> {
+    page(
+        "The button expired",
+        &format!(
+            "<h1>The button expired</h1><p>Nobody pressed it in {channel} in time, or a newer one was sent.</p>\
+             <a class=\"btn\" href=\"{}\">Send a new button</a>",
+            escape(again),
+            channel = escape(channel),
         ),
     )
 }

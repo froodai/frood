@@ -200,6 +200,22 @@ pub(crate) fn text(shown: &Value, w: &Words, spheres: &Spheres) -> String {
             }
         }
         "digest" => lines.push(digest_text(content, w, spheres)),
+        "sign_in" => {
+            lines.push(format!("<b>{}</b>", esc(w.sign_in_title)));
+            lines.push(format!(
+                "{}: {}",
+                esc(w.sign_in_app),
+                esc(content["client"].as_str().unwrap_or("Frood"))
+            ));
+            lines.push(format!(
+                "{}: <b>{}</b>",
+                esc(w.sign_in_code),
+                esc(content["code"].as_str().unwrap_or("?"))
+            ));
+            if item["state"] != "resolved" {
+                lines.push(format!("\n<i>{}</i>", esc(w.sign_in_hint)));
+            }
+        }
         _ => lines.push(esc(&short(&content.to_string(), 800))),
     }
     if let Some(report) = item
@@ -363,6 +379,8 @@ fn resolution(resolution: &Value, w: &Words) -> String {
         Some("dismiss") => w.dismissed,
         Some("stale") => w.stale_now,
         Some("recovered") => w.recovered,
+        Some("approve") => w.signed_in,
+        Some("deny") => w.not_signed_in,
         _ => w.resolved,
     };
     let by = resolution["by"].as_str().unwrap_or_default();
@@ -407,6 +425,8 @@ pub(crate) fn keyboard(shown: &Value, w: &Words, console: Option<&str>) -> Value
                 "postpone" => w.postpone.to_owned(),
                 "retry" => w.retry.to_owned(),
                 "dismiss" => w.dismiss.to_owned(),
+                "approve" => w.sign_in.to_owned(),
+                "deny" => w.not_me.to_owned(),
                 other => other.to_owned(),
             };
             json!([{ "text": short(&label, 60), "callback_data": format!("i:{id}:{i}") }])
@@ -824,6 +844,29 @@ mod tests {
             digest_text(&digest, w, &spheres),
             "<b>📋 Что нового</b>\n\n<b>Принято</b>\n<i>💼 Работа · бизнес</i>\n• Релиз 2.4 — 28 ноября\n<i>🏠 Личное</i>\n• Билеты на праздники"
         );
+    }
+
+    #[test]
+    fn a_sign_in_shows_the_app_and_the_code_with_two_buttons() {
+        let w = Lang::Ru.words();
+        let mut shown = json!({
+            "item": { "id": "s", "kind": "sign_in", "state": "open" },
+            "content": { "client": "Claude", "code": "0427", "expires_at": "2026-10-26T06:30:00Z" },
+            "actions": [{ "action": "approve" }, { "action": "deny" }]
+        });
+        let message = text(&shown, w, &Spheres::default());
+        assert!(message.contains("Вход во Frood"), "{message}");
+        assert!(message.contains("Приложение: Claude"), "{message}");
+        assert!(message.contains("Код: <b>0427</b>"), "{message}");
+        assert!(message.contains("тот же код"), "{message}");
+        let buttons = keyboard(&shown, w, None);
+        assert_eq!(buttons["inline_keyboard"][0][0]["text"], "Войти");
+        assert_eq!(buttons["inline_keyboard"][1][0]["text"], "Не я");
+        shown["item"]["state"] = json!("resolved");
+        shown["item"]["resolution"] = json!({ "action": "approve", "by": "user:1/via/telegram" });
+        let message = text(&shown, w, &Spheres::default());
+        assert!(message.contains("Вход выполнен"), "{message}");
+        assert!(!message.contains("тот же код"), "{message}");
     }
 
     #[test]

@@ -370,7 +370,13 @@ fn validate_auth(config: &Config, problems: &mut Vec<String>) {
             Provider::Local { .. } if auth.allow.is_empty() => problems.push(format!(
                 "auth provider {id}: sign-in on this computer needs your address in auth.allow"
             )),
-            Provider::Local { .. } | Provider::Dev { .. } => {}
+            Provider::Telegram { .. } if auth.allow.is_empty() => problems.push(format!(
+                "auth provider {id}: sign-in through Telegram needs the addresses that may sign in in auth.allow"
+            )),
+            Provider::Telegram { channel, .. } if !is_valid_name(channel) => problems.push(format!(
+                "auth provider {id}: channel {channel:?} must be lowercase letters, digits or dashes"
+            )),
+            Provider::Local { .. } | Provider::Telegram { .. } | Provider::Dev { .. } => {}
         }
     }
     for domain in &auth.allow_domains {
@@ -1279,6 +1285,36 @@ jobs:
                 other => panic!("expected Invalid, got {other:?}"),
             }
         }
+    }
+
+    #[test]
+    fn telegram_sign_in_works_on_a_server_for_listed_addresses_only() {
+        let public = template_for(ServerPlacement::Container)
+            .replace(
+                "# public_url: https://mem.example.com",
+                "public_url: https://mem.example.com",
+            )
+            .replace(
+                "  providers: []",
+                "  providers:\n    - {kind: telegram, id: telegram}",
+            );
+        match parse(&public, &secrets()) {
+            Err(ConfigError::Invalid(problems)) => assert!(
+                problems
+                    .iter()
+                    .any(|p| p.contains("sign-in through Telegram needs")),
+                "{problems:?}"
+            ),
+            other => panic!("expected Invalid, got {other:?}"),
+        }
+        let listed = public.replace("  allow: []", "  allow: [alice@example.com]");
+        let config = parse(&listed, &secrets())
+            .expect("a server with a listed address")
+            .config;
+        assert!(matches!(
+            config.auth.providers.as_slice(),
+            [Provider::Telegram { channel, .. }] if channel == "telegram"
+        ));
     }
 
     #[test]

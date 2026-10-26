@@ -178,7 +178,7 @@ pub async fn list(
     let rows = sqlx::query(concat!(
         "SELECT ",
         columns!(),
-        " FROM inbox_items WHERE ($1 OR state <> 'resolved') \
+        " FROM inbox_items WHERE ($1 OR state <> 'resolved') AND kind <> 'sign_in' \
          ORDER BY (state = 'resolved'), (urgency = 'now') DESC, created_at DESC LIMIT $2"
     ))
     .bind(include_resolved)
@@ -274,6 +274,7 @@ fn actions(kind: &str, data: &Value, proposal: Option<&Proposal>) -> Vec<Value> 
             out
         }
         "reminder" => vec![json!({ "action": "done" }), json!({ "action": "postpone" })],
+        "sign_in" => vec![json!({ "action": "approve" }), json!({ "action": "deny" })],
         // A failed run can be retried; a detector's alert can only be hidden until it clears.
         "alert" if data.get("run_id").is_some() && data.get("detector").is_none() => {
             vec![json!({ "action": "retry" }), json!({ "action": "dismiss" })]
@@ -1143,6 +1144,21 @@ impl Dispatch {
                     .await
                     .map_err(db)?;
             }
+            // Only the person signing in answers; the button has no other actions.
+            ("sign_in", action @ ("approve" | "deny")) => {
+                if !item.for_users.contains(&user) {
+                    return Err("only the person signing in can answer".into());
+                }
+                self.ctx
+                    .auth
+                    .decide_sign_in(id("sign_in_id")?, user, action == "approve")
+                    .await
+                    .map_err(|e| e.to_string())?;
+                resolve(pool, &item.subject, &resolution)
+                    .await
+                    .map_err(db)?;
+            }
+            ("sign_in", action) => return Err(format!("a sign_in item has no action {action}")),
             (_, "dismiss") | ("digest", "seen") => {
                 resolve(pool, &item.subject, &resolution)
                     .await
@@ -1286,6 +1302,7 @@ impl Dispatch {
         let pool = &self.ctx.pool;
         let channels = self.ctx.modules.providers("notify.send");
         let mut done = 0;
+        self.close_sign_ins().await?;
         // Snoozed items come back when their time is up.
         sqlx::query(
             "UPDATE inbox_items SET state = 'open', snoozed_until = NULL, notify_after = now(), updated_at = now() \
@@ -1393,6 +1410,90 @@ impl Dispatch {
         }
         done += self.update_resolved().await?;
         Ok(done)
+    }
+
+    /// Sends a sign-in button to the person's channel (docs/28 §2) as an Inbox item, so the
+    /// channel takes the press and edits the message like any other. Silent: the dispatcher's
+    /// deliveries leave it alone, and the console's Inbox does not list it.
+    pub async fn ask_sign_in(&self, ask: &frood_auth::SignInAsk) -> Result<(), String> {
+        let pool = &self.ctx.pool;
+        let db = |e: sqlx::Error| e.to_string();
+        let channels = self.ctx.modules.providers("notify.send");
+        if !channels.contains(&ask.channel) {
+            return Err(format!("the {} module is not running", ask.channel));
+        }
+        let item = insert(
+            pool,
+            NewItem {
+                kind: "sign_in",
+                subject: format!("sign_in/{}", ask.id),
+                urgency: "silent".into(),
+                data: json!({
+                    "sign_in_id": ask.id,
+                    "code": ask.code,
+                    "client": ask.client,
+                    "expires_at": ask.expires_at,
+                }),
+                for_users: vec![ask.user_id],
+                notify_after: Utc::now(),
+                investigation: None,
+            },
+        )
+        .await
+        .map_err(db)?
+        .ok_or("this sign-in was already asked")?;
+        let shown = self.inbox_shown(item.clone()).await.map_err(db)?;
+        let body = json!({
+            "recipient": { "user_id": ask.user_id, "external_id": ask.external_id },
+            "item": shown,
+        });
+        let out = self
+            .ctx
+            .modules
+            .call(&ask.channel, "notify.send", &body)
+            .await
+            .map_err(|e| e.to_string());
+        let out = match out {
+            Ok(out) => out,
+            Err(err) => {
+                let gone = json!({ "action": "expired", "at": Utc::now() });
+                resolve(pool, &item.subject, &gone).await.map_err(db)?;
+                return Err(err);
+            }
+        };
+        sqlx::query(
+            "INSERT INTO inbox_deliveries (item_id, user_id, channel, state, message_ref, attempts) \
+             VALUES ($1, $2, $3, 'sent', $4, 1)",
+        )
+        .bind(item.id)
+        .bind(ask.user_id)
+        .bind(&ask.channel)
+        .bind(out["message_ref"].as_str())
+        .execute(pool)
+        .await
+        .map_err(db)?;
+        Ok(())
+    }
+
+    /// Sign-in buttons nobody pressed in time, or replaced by a newer one, close; the channel
+    /// then edits the message.
+    async fn close_sign_ins(&self) -> sqlx::Result<()> {
+        let pool = &self.ctx.pool;
+        let stale: Vec<String> = sqlx::query_scalar(
+            "SELECT i.subject FROM inbox_items i JOIN sign_in_asks a ON a.id = (i.data->>'sign_in_id')::uuid \
+             WHERE i.kind = 'sign_in' AND i.state = 'open' AND (a.state <> 'asked' OR a.expires_at <= now())",
+        )
+        .fetch_all(pool)
+        .await?;
+        for subject in stale {
+            resolve(
+                pool,
+                &subject,
+                &json!({ "action": "expired", "at": Utc::now() }),
+            )
+            .await?;
+        }
+        Ok(())
     }
 
     /// Edits the messages of items resolved since they were shown.
