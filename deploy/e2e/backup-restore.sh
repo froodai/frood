@@ -102,9 +102,10 @@ EVIDENCE=$(api -X POST "$API/v1/sources" -d '{"kind":"note","content":"agreed wi
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["source"]["evidence"][0]["id"])')
 api -X POST "$API/v1/proposals" -d "{\"risk\":\"new\",\"operations\":[{\"op\":\"create\",\"assertion\":{\"kind\":\"commitment\",\"text\":\"Release 2.4 on Nov 14\",\"slots\":{\"due\":\"2026-11-14\"},\"modality\":\"agreed\",\"evidence\":[\"$EVIDENCE\"]}}]}" >/dev/null
 ASSERTION=$(api "$API/v1/assertions?kind=commitment" | python3 -c 'import json,sys; a=json.load(sys.stdin)[0]; print(a["assertion_id"])')
-PROPOSAL=$(api -X POST "$API/v1/proposals" -d "{\"risk\":\"change\",\"base\":[{\"assertion_id\":\"$ASSERTION\",\"version\":1}],\"operations\":[{\"op\":\"supersede\",\"assertion_id\":\"$ASSERTION\",\"assertion\":{\"kind\":\"commitment\",\"text\":\"Release 2.4 on Nov 28\",\"slots\":{\"due\":\"2026-11-28\"},\"modality\":\"reported\",\"evidence\":[\"$EVIDENCE\"]}}]}" \
-  | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-api -X POST "$API/v1/proposals/$PROPOSAL/verdicts" -d '{"decision":"accept"}' >/dev/null
+# Alice changes what only she said: accepted at once.
+STATE=$(api -X POST "$API/v1/proposals" -d "{\"risk\":\"change\",\"base\":[{\"assertion_id\":\"$ASSERTION\",\"version\":1}],\"operations\":[{\"op\":\"supersede\",\"assertion_id\":\"$ASSERTION\",\"assertion\":{\"kind\":\"commitment\",\"text\":\"Release 2.4 on Nov 28\",\"slots\":{\"due\":\"2026-11-28\"},\"modality\":\"reported\",\"evidence\":[\"$EVIDENCE\"]}}]}" \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["state"])')
+[ "$STATE" = accepted ] || { echo "the change waits: $STATE"; exit 1; }
 # A photo attached to it: kept in the files folder, not in the database.
 printf 'JPEG-the-release-board' > "$WORK/board.jpg"
 curl -fsS -H "Authorization: Bearer $TOKEN" -F "text=the release board" -F "file=@$WORK/board.jpg;type=image/jpeg" \
