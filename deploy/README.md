@@ -61,6 +61,40 @@ the file may import files next to it.
 Caddy after an edit. A sign-in provider's redirect address follows the path:
 `https://203-0-113-7.sslip.io/frood/oauth/callback/google`.
 
+### Behind the server's own proxy
+
+When several apps share the server and none of them should own its HTTPS front, the server runs
+a proxy of its own and Frood is one of the apps behind it:
+
+```yaml
+server:
+  public_url: https://203-0-113-7.sslip.io/frood
+deploy:
+  proxy:
+    external: /srv/edge/paths/frood.caddy   # Frood's file in that proxy
+```
+
+Frood then runs no Caddy and leaves ports 80 and 443 to the proxy; `frood apply` removes a
+Caddy left from an earlier config. It writes only Frood's routes to the file, whole and only when
+they change, reaching the server on `127.0.0.1:<port>`:
+
+- with a path in `public_url`, the routes above without a site block and without the 404 for the
+  rest of the site; the proxy imports the file into its site block for that host;
+- with a domain of its own, a site block for it.
+
+```caddyfile
+203-0-113-7.sslip.io {
+	import /srv/edge/paths/*.caddy
+	handle {
+		respond 404
+	}
+}
+```
+
+The proxy picks the file up itself: `caddy --watch` sees only its main file, not imported ones,
+so watch the folder (a systemd path unit running `caddy reload`, for example).
+`deploy.proxy.routes` does not go with `external`: other apps keep their own files in the proxy.
+
 ## End-to-end checks
 
 - `core/crates/frood-api/tests/scenario.rs` — steps 1–5 of the MVP scenario through the real

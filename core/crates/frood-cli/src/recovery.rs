@@ -264,7 +264,14 @@ pub async fn restore(paths: &Paths, options: &RestoreOptions) -> anyhow::Result<
         ports.push((addr.port(), "the server", "--listen 0.0.0.0:<port>"));
     }
     // Caddy's ports matter only when the installation starts (`frood apply`): said, not refused.
-    let later: Vec<String> = if config.server.public_url.is_some() {
+    // Behind the server's own proxy they are that proxy's.
+    let own_caddy = config.server.public_url.is_some()
+        && config
+            .deploy
+            .proxy
+            .as_ref()
+            .is_none_or(|p| p.external.is_none());
+    let later: Vec<String> = if own_caddy {
         [80, 443]
             .into_iter()
             .filter_map(|port| {
