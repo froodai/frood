@@ -273,6 +273,11 @@ pub struct Proxy {
     /// may import files next to it. Frood's own routes win only for its paths.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub routes: Option<String>,
+    /// The server's own proxy is in front (docs/29): Frood runs no Caddy and writes only its
+    /// routes into this file of that proxy (relative to the config file). With a path in
+    /// `server.public_url` they are routes for the shared site; without one, a site block.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external: Option<String>,
 }
 
 impl Default for Deploy {
