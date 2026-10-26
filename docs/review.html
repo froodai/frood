@@ -304,7 +304,7 @@ details.area[open] summary .tw{transform:rotate(90deg)}
     </header>
 
     <div class="tabs" role="tablist" aria-label="Этапы ревью">
-      <button class="tab" role="tab" id="t-now" data-tab="now" aria-controls="now" aria-selected="true">Сейчас на ревью <span class="n">3</span></button>
+      <button class="tab" role="tab" id="t-now" data-tab="now" aria-controls="now" aria-selected="true">Сейчас на ревью <span class="n">7</span></button>
       <button class="tab" role="tab" id="t-mvp" data-tab="mvp" aria-controls="mvp" aria-selected="false">План MVP</button>
       <button class="tab" role="tab" id="t-platform" data-tab="platform" aria-controls="platform" aria-selected="false">Платформа</button>
       <button class="tab" role="tab" id="t-notify" data-tab="notify" aria-controls="notify" aria-selected="false">Inbox и уведомления</button>
@@ -325,6 +325,7 @@ details.area[open] summary .tw{transform:rotate(90deg)}
           <ul>
             <li><b>Вопрос снова</b> — QT1: какой туннель. Ниже — зачем он вообще.</li>
             <li><b>На подтверждение</b> — как я понял замечание к T2 и ответ на QT3.</li>
+            <li><b>Новое по вашей просьбе</b> — V1–V2, QV1–QV2: общий прокси сервера, в котором Frood — один из проектов.</li>
           </ul>
           <p>Пока вы смотрите, делаю T2 — вход через Telegram. От туннеля он не зависит.</p>
         </div>
@@ -351,6 +352,33 @@ details.area[open] summary .tw{transform:rotate(90deg)}
           <div class="flow"><h3><span class="k">сервер</span>Как у вас: адрес есть, туннель не нужен</h3><div class="steps"><span class="chip you">claude.ai</span><span class="ar">→</span><span class="chip">https://178-104-154-183.sslip.io/frood</span><span class="ar">→</span><span class="chip k">Frood на Hetzner</span></div></div>
           <div class="flow"><h3><span class="k">ноутбук</span>Без туннеля: из облака не достать</h3><div class="steps"><span class="chip you">claude.ai</span><span class="ar">→</span><span class="chip">домашний роутер, адреса в интернете нет</span><span class="ar">✕</span><span class="chip">Frood на ноутбуке</span></div><p class="note">Работают только программы на самом ноутбуке: Claude Code, Codex, консоль. Telegram тоже работает: бот сам ходит в Telegram.</p></div>
           <div class="flow"><h3><span class="k">туннель</span>С туннелем: постоянный адрес без домена и открытых портов</h3><div class="steps"><span class="chip you">claude.ai</span><span class="ar">→</span><span class="chip">https://ноутбук.сеть.ts.net</span><span class="ar">→</span><span class="chip">Tailscale</span><span class="ar">→</span><span class="chip k">Frood на ноутбуке</span></div><p class="note">Программа туннеля стоит рядом с Frood и сама подключается к Tailscale. Пока ноутбук спит, Claude в браузере Frood не видит.</p></div>
+        </div>
+      </section>
+
+      <section id="now-vps">
+        <div class="sh"><span class="tag need">нужно ваше решение</span><h2>VPS: общий вход вместо Caddy из Frood</h2></div>
+        <div class="prose">
+          <p>Заметка — <code>docs/29_shared_proxy.md</code>. Сейчас 80/443 и сертификаты держит Caddy, которого поднимает Frood, а pages и cockpit живут у него в гостях: <code>frood-routes.caddy</code> внутри его сайта. <code>/srv/edge</code> на сервере пока нет.</p>
+        </div>
+        <div class="flows" style="margin-top:12px">
+          <div class="flow"><h3><span class="k">сейчас</span>Всё через Frood</h3><div class="steps"><span class="chip you">:443</span><span class="ar">→</span><span class="chip k">Caddy из Frood: frood apply переписывает его конфиг</span><span class="ar">→</span><span class="chip">/frood</span><span class="chip">/pages</span><span class="chip">/cockpit</span></div><p class="note">Упал или переустанавливается Frood — не открывается ничего.</p></div>
+          <div class="flow"><h3><span class="k">предлагаю</span>Общий Caddy сервера, у каждого свой файл</h3><div class="steps"><span class="chip you">:443</span><span class="ar">→</span><span class="chip k">Caddy в /srv/edge</span><span class="ar">→</span><span class="chip">paths/frood.caddy</span><span class="chip">paths/pages.caddy</span><span class="chip">paths/cockpit.caddy</span><span class="chip">sites/&lt;свой домен&gt;.caddy</span></div><p class="note">Сломанный файл одного проекта не трогает остальные: Caddy оставляет прежний конфиг.</p></div>
+        </div>
+        <div class="rv-list" style="margin-top:16px">
+          <div class="rv" data-id="impl16_V1" data-kind="decision" data-label="V1 Общий прокси сервера">
+            <div class="txt"><span class="id">V1</span><h3>Прокси принадлежит серверу, не Frood. Отдельный репозиторий <code>~/PetProjects/vps-gateway</code>: Caddy в <code>/srv/edge</code>; проект на своём домене кладёт файл в <code>sites/</code>, проект под путём на общем домене — в <code>paths/</code>. Готовое решение — сам Caddy; в репозитории только раскладка, установщик, подхват файлов и короткая команда <code>edge</code>: добавить проект, проверить, показать список</h3><p class="why">Сам <code>caddy --watch</code> следит только за главным файлом: файлы через <code>import</code> он, по сообщениям сообщества, не видит. Поэтому подхват делает systemd: он смотрит на папки и вызывает <code>caddy reload</code>. Если новый конфиг неверный, Caddy оставляет прежний. Файлы pages и cockpit поначалу положу я, перенеся их из <code>frood-routes.caddy</code>. Потом их проекты забирают файлы себе. Traefik, caddy-docker-proxy, Coolify и Dokploy смотрел; почему нет — в заметке, §2.</p></div><div class="ctl"></div>
+          </div>
+          <div class="rv" data-id="impl16_V2" data-kind="decision" data-label="V2 Frood за чужим прокси">
+            <div class="txt"><span class="id">V2</span><h3>Frood умеет жить за чужим прокси: <code>deploy.proxy: { external: /srv/edge/paths/frood.caddy }</code>. Свой Caddy он тогда не запускает, а при <code>frood apply</code> пишет только свой файл маршрутов: путь Frood и адреса <code>/.well-known</code> в корне домена для OAuth. Без <code>external</code> — как сейчас: на пустом сервере Frood приносит свой Caddy</h3><p class="why">Нужен выпуск 0.1.10. Переезд: общий прокси готов, но не запущен → <code>frood apply</code> с <code>external</code> → Caddy из Frood уходит, общий сразу занимает 80/443. Простой — секунды. Сертификаты перенесу из тома Caddy, чтобы не выпускать заново. Откат — прежний <code>frood.yaml</code> и <code>frood apply</code>. Каждое действие на сервере — с вашего разрешения.</p></div><div class="ctl"></div>
+          </div>
+        </div>
+        <div class="rv-list" style="margin-top:16px">
+          <div class="rv q" data-id="impl16_QV1" data-kind="question" data-label="QV1 Как запускать общий Caddy">
+            <div class="txt"><span class="id">QV1</span><h3>Как запускать общий Caddy: (а) пакет caddy из официального репозитория Debian как служба systemd; (б) контейнер Docker с сетью хоста?</h3><p class="affects">Я предлагаю (а): вход сервера не зависит от Docker. Если Docker встанет или его обновят, pages, которые работают под systemd, продолжат открываться. Обновления приходят через apt.</p></div><div class="ctl"></div>
+          </div>
+          <div class="rv q" data-id="impl16_QV2" data-kind="question" data-label="QV2 Где репозиторий vps-gateway">
+            <div class="txt"><span class="id">QV2</span><h3>Где держать <code>vps-gateway</code>: (а) приватный репозиторий на GitHub; (б) только на этом Mac, без GitHub; (в) публичный на GitHub?</h3><p class="affects">Я предлагаю (а). В репозитории раскладка вашего сервера — домены, пути, адреса сервисов. Секретов нет: пароль pages остаётся в <code>/srv/claude-pages</code>.</p></div><div class="ctl"></div>
+          </div>
         </div>
       </section>
 
@@ -1741,7 +1769,7 @@ jobs:
             <tr><td class="k">22</td><td>После 0.1.4: вложения, сферы, подключения из консоли (Y1–Y3, QY1)</td><td>всё принято; QY1 — (б), по шагам; сделаны 0.1.5–0.1.7: сферы, вложения, источники и джобы из консоли; затем правила уведомлений и личные настройки</td></tr>
             <tr><td class="k">23</td><td>M9 «Первый час» (F1–F5, QF1–QF3)</td><td>принято; QF1 — (а), QF2 — (а), QF3 — (б); F3 — без шаблонов, значения встроены в сервер; сделано (0.1.9)</td></tr>
             <tr><td class="k">24</td><td>M10 «Хаб» (T1–T4, QT1–QT3)</td><td>принято с правками; QT2 — (в); QT1 — вопрос «зачем туннель»; замечание к T2 и ответ на QT3 — на подтверждение в раунде 25</td></tr>
-            <tr><td class="k">25</td><td>M10: зачем туннель (QT1 снова), как поняты T2 и QT3</td><td>на ревью</td></tr>
+            <tr><td class="k">25</td><td>M10: зачем туннель (QT1 снова), как поняты T2 и QT3; общий прокси сервера (V1–V2, QV1–QV2)</td><td>на ревью</td></tr>
           </tbody>
         </table></div>
         <p class="caption">Все отметки хранятся в странице и продублированы в docs/README.md.</p>
@@ -1846,7 +1874,7 @@ jobs:
 
 <div class="bar" role="region" aria-label="Итог ревью">
   <div class="bar-in">
-    <div class="tally"><span>Решения <b id="n-model">0</b>/2</span><span>Вопросы <b id="n-q">0</b>/1</span><span>Вердикт <b id="n-all">—</b></span></div>
+    <div class="tally"><span>Решения <b id="n-model">0</b>/4</span><span>Вопросы <b id="n-q">0</b>/3</span><span>Вердикт <b id="n-all">—</b></span></div>
     <div class="status" id="status" aria-live="polite">Подключаюсь к хранилищу страницы…</div>
     <button class="btn" id="copy" type="button">Скопировать ответ</button>
   </div>
@@ -2009,7 +2037,7 @@ jobs:
   }
 
   function compose(){
-    var lines = ["Ревью Frood, раунд 25: M10, уточнения"];
+    var lines = ["Ревью Frood, раунд 25: M10, уточнения; общий прокси сервера"];
     var o = state.impl16_overall || {};
     lines.push("Общее по раунду 25: " + (o.verdict ? LABEL[o.verdict] : "без вердикта") + (o.comment ? ". " + o.comment.trim() : ""));
     items.forEach(function(el){
