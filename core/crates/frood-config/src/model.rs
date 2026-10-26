@@ -391,6 +391,14 @@ pub enum Provider {
         #[serde(default = "default_sign_in_channel")]
         channel: String,
     },
+    /// Sign-in with a passkey — a fingerprint, Face ID or a security key (docs/28 §2), for the
+    /// addresses in `auth.allow` only. The first passkey comes through a one-time link
+    /// (`frood passkey`, or the console after another sign-in). Needs `server.public_url`.
+    Passkey {
+        id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        label: Option<String>,
+    },
     /// Development only: type an email address. Allowed only on a loopback address without
     /// `server.public_url`.
     Dev {
@@ -406,6 +414,7 @@ impl Provider {
             Self::Oidc { id, .. }
             | Self::Local { id, .. }
             | Self::Telegram { id, .. }
+            | Self::Passkey { id, .. }
             | Self::Dev { id, .. } => id,
         }
     }
@@ -415,6 +424,7 @@ impl Provider {
             Self::Oidc { label, id, .. }
             | Self::Local { label, id }
             | Self::Telegram { label, id, .. }
+            | Self::Passkey { label, id }
             | Self::Dev { label, id } => label.as_deref().unwrap_or(id),
         }
     }

@@ -50,6 +50,8 @@ auth:
   #    id: local
   #  - kind: telegram        # a "Sign in" button in your linked Telegram; only the addresses in allow
   #    id: telegram
+  #  - kind: passkey         # fingerprint or Face ID; the first one through `frood passkey`; needs public_url
+  #    id: passkey
   #  - kind: dev             # development only: type an email; local servers only
   #    id: dev
 

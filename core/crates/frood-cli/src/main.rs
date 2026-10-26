@@ -100,6 +100,13 @@ enum Command {
         #[command(subcommand)]
         command: TokenCommand,
     },
+    /// Print a one-time link that adds a passkey (fingerprint, Face ID): open it on the device
+    /// that will sign in.
+    Passkey {
+        /// Whose passkey, one of auth.allow. Default: the only address there.
+        #[arg(long)]
+        email: Option<String>,
+    },
     /// Send the memory your assistants keep on this computer (Claude Code, Codex, OpenClaw,
     /// Hermes, a folder of Markdown) to Frood. It shows what it found and asks once.
     Import {
@@ -324,6 +331,7 @@ async fn main() -> ExitCode {
             )
             .await
         }
+        Command::Passkey { email } => token::passkey_link(&paths, email.as_deref()).await,
         Command::Token { command } => match command {
             TokenCommand::Create {
                 email,

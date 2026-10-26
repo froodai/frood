@@ -175,6 +175,20 @@ async fn welcome(paths: &Paths, answers: &Answers) -> anyhow::Result<()> {
             println!("              then sign in with the button the bot sends");
         }
     }
+    let passkeys = loaded
+        .config
+        .auth
+        .providers
+        .iter()
+        .any(|p| matches!(p, frood_config::Provider::Passkey { .. }));
+    if passkeys {
+        let (url, _) = auth.passkey_link(user).await?;
+        println!(
+            "Passkey:      open {url} within {} minutes on the device you sign in from",
+            frood_auth::PASSKEY_LINK_MINUTES
+        );
+        println!("              (`frood passkey` makes another link)");
+    }
     if answers.model.is_none() {
         println!(
             "\nNotes are kept but not read into knowledge until a model is named: add a key in the console or in frood.yaml."

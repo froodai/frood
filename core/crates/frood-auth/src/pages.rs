@@ -18,7 +18,7 @@ pub(crate) fn escape(value: &str) -> String {
 /// `no-referrer` browsers send `Origin: null` on form posts, and every sign-in is refused.)
 const REFERRER_POLICY: &str = "same-origin";
 
-fn page(title: &str, body: &str) -> Html<String> {
+pub(crate) fn page(title: &str, body: &str) -> Html<String> {
     page_with(title, "", body)
 }
 
@@ -36,7 +36,7 @@ fn page_with(title: &str, head: &str, body: &str) -> Html<String> {
          .btn{{display:block;width:100%;text-align:center;background:var(--accent);color:var(--on-accent);border:0;border-radius:8px;padding:10px;font:600 15px system-ui;cursor:pointer;text-decoration:none;margin-top:10px}}\
          .btn.secondary{{background:transparent;color:var(--ink);border:1px solid var(--rule)}}\
          label{{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-top:1px solid var(--rule)}}\
-         input[type=email]{{width:100%;padding:9px;border:1px solid var(--rule);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit}}\
+         input[type=email],input[type=text]{{width:100%;padding:9px;border:1px solid var(--rule);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit}}\
          code{{font-size:13px}}.code{{font:600 34px/1.2 ui-monospace,monospace;letter-spacing:.2em;text-align:center;margin:16px 0;font-variant-numeric:tabular-nums}}</style></head><body><main><div class=\"card\">{body}</div></main></body></html>"
     ))
 }

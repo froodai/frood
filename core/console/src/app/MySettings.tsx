@@ -1,5 +1,6 @@
 // A person's own settings (docs/15 §3): time zone, quiet hours, the push limit, reminders of due
-// dates, and their accounts in channels (Telegram), linked with a one-time code.
+// dates, their accounts in channels (Telegram), linked with a one-time code, and their passkeys
+// (docs/28 §2), added through a one-time link.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Copy, ExternalLink } from "lucide-react";
@@ -25,6 +26,8 @@ type Mine = {
   channels: { channel: string; links: Link[]; start_url: string | null }[];
 };
 type Code = { code: string; channel: string; expires_at: string };
+type Passkey = { id: string; label: string | null; created_at: string; last_used_at: string | null };
+type PasskeyLink = { url: string; expires_at: string };
 
 const here = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 const zones: string[] = typeof Intl.supportedValuesOf === "function" ? Intl.supportedValuesOf("timeZone") : [];
@@ -38,6 +41,7 @@ export function MySettings() {
     <div className="flex flex-col gap-6">
       <PersonalForm key={JSON.stringify({ ...mine.data, channels: [] })} mine={mine.data} />
       <Channels channels={mine.data.channels} />
+      <Passkeys />
     </div>
   );
 }
@@ -257,6 +261,88 @@ function Channels({ channels }: { channels: Mine["channels"] }) {
           )}
         </div>
       ))}
+    </section>
+  );
+}
+
+function Passkeys() {
+  const { t, ago } = useI18n();
+  const client = useQueryClient();
+  const keys = useQuery({ queryKey: ["my-passkeys"], queryFn: () => api<{ on: boolean; passkeys: Passkey[] }>("/v1/me/passkeys") });
+  const list = keys.data?.passkeys ?? [];
+  // The link shown, with how many passkeys there were before it.
+  const [link, setLink] = useState<(PasskeyLink & { before: number }) | null>(null);
+  const failed = (err: Error) => toast.error(t("inbox.failed", { error: err.message }));
+  const add = useMutation({
+    mutationFn: () => api<PasskeyLink>("/v1/me/passkeys/links", { method: "POST" }),
+    onSuccess: (l) => setLink({ ...l, before: list.length }),
+    onError: failed,
+  });
+  // While the link waits to be opened, look for the passkey it adds.
+  useEffect(() => {
+    if (!link) return;
+    const timer = setInterval(() => client.invalidateQueries({ queryKey: ["my-passkeys"] }), 3000);
+    const expired = setTimeout(() => setLink(null), new Date(link.expires_at).getTime() - Date.now());
+    return () => {
+      clearInterval(timer);
+      clearTimeout(expired);
+    };
+  }, [link, client]);
+  useEffect(() => {
+    if (link && list.length > link.before) {
+      toast.success(t("me.passkeyDone"));
+      setLink(null);
+    }
+  });
+  const remove = useMutation({
+    mutationFn: (id: string) => api(`/v1/me/passkeys/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    onSuccess: () => {
+      toast.success(t("me.passkeyRemoved"));
+      client.invalidateQueries({ queryKey: ["my-passkeys"] });
+    },
+    onError: failed,
+  });
+  if (!keys.data?.on) return null;
+
+  return (
+    <section className="flex flex-col gap-3 border-t pt-5">
+      <h3 className="font-medium">{t("me.passkeys")}</h3>
+      <span className="text-xs text-muted-foreground">{t("me.passkeysHint")}</span>
+      {list.length === 0 && <p className="text-muted-foreground">{t("me.passkeysNone")}</p>}
+      {list.map((k) => (
+        <span key={k.id} className="flex flex-wrap items-center gap-2">
+          <span>{k.label ?? t("me.passkeyUnnamed")}</span>
+          <span className="text-xs text-muted-foreground">
+            {k.last_used_at ? t("me.passkeyUsed", { when: ago(k.last_used_at) }) : t("me.passkeyAdded", { when: ago(k.created_at) })}
+          </span>
+          <Button type="button" size="sm" variant="ghost" className="ms-auto h-7 px-2 text-xs" disabled={remove.isPending} onClick={() => remove.mutate(k.id)}>
+            {t("me.passkeyRemove")}
+          </Button>
+        </span>
+      ))}
+      {link ? (
+        <div className="flex flex-col gap-2 rounded-md bg-secondary p-3">
+          <span className="flex flex-wrap items-center gap-2">
+            <Button asChild>
+              <a href={link.url} target="_blank" rel="noreferrer">
+                <ExternalLink className="size-4" /> {t("me.passkeyOpen")}
+              </a>
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => navigator.clipboard.writeText(link.url).then(() => toast.success(t("me.copied")), failed)}
+            >
+              <Copy className="size-3.5" /> {t("me.passkeyCopy")}
+            </Button>
+          </span>
+          <span className="text-xs text-muted-foreground">{t("me.passkeyThen")}</span>
+        </div>
+      ) : (
+        <Button type="button" size="sm" variant="outline" className="self-start" disabled={add.isPending} onClick={() => add.mutate()}>
+          {list.length ? t("me.passkeyAnother") : t("me.passkeyAdd")}
+        </Button>
+      )}
     </section>
   );
 }

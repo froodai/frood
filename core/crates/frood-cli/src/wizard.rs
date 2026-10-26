@@ -452,20 +452,18 @@ pub fn config_text(
     }
     if let Some(email) = &answers.email {
         text = text.replacen("  allow: []", &format!("  allow: [{email}]"), 1);
-        // A laptop signs in on this computer; a server with the bot, with a button in Telegram
-        // (docs/28 §2); a server without it, through an OIDC provider added by hand.
-        let provider = match (&answers.public_url, &answers.telegram) {
-            (None, _) => Some("{ kind: local, id: local, label: On this computer }"),
-            (Some(_), Some(_)) => Some("{ kind: telegram, id: telegram, label: Telegram }"),
-            (Some(_), None) => None,
+        // A laptop signs in on this computer; a server with a passkey, and with a button in
+        // Telegram when there is a bot (docs/28 §2). Google or another OIDC only by hand.
+        let providers: &[&str] = match (&answers.public_url, &answers.telegram) {
+            (None, _) => &["{ kind: local, id: local, label: On this computer }"],
+            (Some(_), Some(_)) => &[
+                "{ kind: telegram, id: telegram, label: Telegram }",
+                "{ kind: passkey, id: passkey, label: Passkey }",
+            ],
+            (Some(_), None) => &["{ kind: passkey, id: passkey, label: Passkey }"],
         };
-        if let Some(provider) = provider {
-            text = text.replacen(
-                "  providers: []",
-                &format!("  providers:\n    - {provider}"),
-                1,
-            );
-        }
+        let listed: String = providers.iter().map(|p| format!("\n    - {p}")).collect();
+        text = text.replacen("  providers: []", &format!("  providers:{listed}"), 1);
     }
     let version = env!("CARGO_PKG_VERSION");
     let mut out = vec![String::new(), "# Written by frood init.".to_owned()];
@@ -712,8 +710,11 @@ mod tests {
             Some("https://mem.example.com")
         );
         assert!(
-            config.auth.providers.is_empty(),
-            "a server without the bot signs in through OIDC"
+            matches!(
+                config.auth.providers.as_slice(),
+                [frood_config::Provider::Passkey { .. }]
+            ),
+            "a server without the bot signs in with a passkey, never through Google by default"
         );
         let with_bot = Answers {
             telegram: Some(("123:abc".into(), "my_frood_bot".into())),
@@ -726,9 +727,12 @@ mod tests {
         assert!(
             matches!(
                 config.auth.providers.as_slice(),
-                [frood_config::Provider::Telegram { .. }]
+                [
+                    frood_config::Provider::Telegram { .. },
+                    frood_config::Provider::Passkey { .. }
+                ]
             ),
-            "a server with the bot signs in with a button in Telegram"
+            "a server with the bot signs in with a button in Telegram or a passkey"
         );
     }
 }

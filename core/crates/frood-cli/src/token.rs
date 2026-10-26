@@ -40,6 +40,24 @@ pub async fn create(
     Ok(())
 }
 
+/// A one-time link that adds a passkey for a person in auth.allow (docs/28 §2).
+pub async fn passkey_link(paths: &Paths, email: Option<&str>) -> anyhow::Result<()> {
+    let auth = auth(paths).await?;
+    let email = match (email, auth.settings().allow.as_slice()) {
+        (Some(email), _) => email.trim().to_lowercase(),
+        (None, [only]) => only.clone(),
+        _ => anyhow::bail!("whose passkey? --email you@example.com"),
+    };
+    let user = auth.user_id_by_email(&email, true).await?;
+    let (url, _) = auth.passkey_link(user).await?;
+    eprintln!(
+        "open it within {} minutes on the device that will sign in as {email}",
+        frood_auth::PASSKEY_LINK_MINUTES
+    );
+    println!("{url}");
+    Ok(())
+}
+
 pub async fn list(paths: &Paths, email: &str) -> anyhow::Result<()> {
     let auth = auth(paths).await?;
     let user = auth.user_id_by_email(email, false).await?;

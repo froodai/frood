@@ -31,8 +31,8 @@ frood init --dir ~/frood
 a folder for backups, when the morning digest comes — each with an answer by default, then
 starts Frood and prints the lines that connect Claude Code and Codex. On this computer you sign
 in to the console without a password. A server with its own address
-(`frood init --public-url https://…`) signs you in with a button the bot sends to your
-Telegram, or through Google or another OIDC provider.
+(`frood init --public-url https://…`) signs you in with a passkey (fingerprint, Face ID) or a
+button the bot sends to your Telegram; Google or another OIDC provider can be added by hand.
 
 ## Quick start (development)
 
