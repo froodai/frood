@@ -80,6 +80,23 @@ jobs:
           path: core/console/playwright-report
 
   # Step 6 of the MVP scenario (docs/24, E1): backup, restore check, delete, restore.
+  integrations:
+    # Frood as Hermes' and OpenClaw's memory (docs/28 §3), against a fake Frood.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - run: pip install pytest==9.0.3 && python -m pytest integrations/hermes/tests
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: integrations/openclaw/package-lock.json
+      - run: npm ci --no-audit --no-fund && npm run check && npm test && npm run build
+        working-directory: integrations/openclaw
+
   backup-restore:
     runs-on: ubuntu-latest
     steps:
