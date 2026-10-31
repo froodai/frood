@@ -1,0 +1,7 @@
+name: frood
+version: 0.1.11
+description: "Frood — your memory with sources and history: recall before each turn, search and remember tools, Hermes' own memory mirrored as not-verified notes."
+hooks:
+  - on_turn_start
+  - queue_prefetch
+  - on_memory_write

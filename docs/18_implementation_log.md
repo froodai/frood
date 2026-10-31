@@ -656,3 +656,22 @@ Claude Code и другие локальные клиенты ничего из 
   - тест мастера: ноутбук с Tailscale и с Cloudflare;
   - `docker compose config` принимает файл для установки с Tailscale.
 - **Не проверено вживую:** Funnel и Cloudflare с настоящими ключами — для этого нужны аккаунт Tailscale или Cloudflare.
+
+### M10, шаг 3: память Frood для Hermes и OpenClaw (T3) (31.10)
+
+- **Hermes** (`integrations/hermes`): провайдер памяти `frood` на стандартной библиотеке Python, без зависимостей.
+  - Поиск во Frood запускается в начале хода в фоне. Перед ответом Hermes получает блок «What Frood knows» с id `[frood:…]` и пометкой «not verified»; ждёт его не дольше трёх секунд.
+  - Инструменты `frood_search` и `frood_remember`.
+  - То, что Hermes пишет в свою встроенную память (add, replace), уходит во Frood заметкой с пометкой «из памяти Hermes · не проверено». Удаления остаются в Hermes. Подагенты, cron и сброс памяти только читают.
+  - Ходы целиком не пишутся. Если Frood недоступен, ходы идут без него; после трёх ошибок подряд Frood не трогается две минуты.
+  - Адрес и токен — через `hermes memory setup`: токен в `.env` Hermes, адрес в `frood.json`.
+- **OpenClaw** (`integrations/openclaw`): плагин памяти `frood` (`kind: memory`) на TypeScript.
+  - Хук `before_prompt_build` ищет во Frood по запросу человека (`currentUserMessage`) и добавляет найденное в начало промпта.
+  - Инструменты `memory_search`, `memory_get` (по id `[frood:…]`), `memory_add` — заметка с пометкой «из памяти OpenClaw · не проверено».
+  - Включается слотом `plugins.slots.memory: frood`. Хуку нужен `hooks.allowConversationAccess`, без него работают только инструменты.
+- **Токен** плагина — личный, с правами чтения, заметок и предложений, без права решать (`frood token create … --scopes knowledge:read,knowledge:capture,knowledge:propose`).
+- **Проверка:**
+  - Hermes: 7 тестов против поддельного Frood, модули Hermes подменены по образцу его исходника. Сверка с настоящим базовым классом `MemoryProvider` — по чтению исходника: все четыре абстрактных метода есть, сигнатуры совпадают. Запустить код Hermes здесь не дали.
+  - OpenClaw: 5 тестов против поддельного Frood. Типы проверены по настоящему SDK OpenClaw 2026.10.4, только по `.d.ts`; проверка нашла и исправила два расхождения: схема параметров TypeBox и обязательный `details` у результата.
+  - CI: задача `integrations` — pytest, проверка типов, vitest, сборка.
+- **Не проверено вживую:** в работающих Hermes и OpenClaw плагины не запускались. Публикация в каталогах (ClawHub, плагины Hermes) — когда скажете.

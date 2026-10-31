@@ -51,5 +51,5 @@ With `--server host` the server runs on your machine; `--server container` runs 
 ## License
 
 The core (`core/`) is licensed under the GNU Affero General Public License v3.0
-(`AGPL-3.0-only`). Contracts, SDKs and official modules are licensed under Apache-2.0
+(`AGPL-3.0-only`). Contracts, SDKs, official modules and integrations (`integrations/`) are licensed under Apache-2.0
 so that third-party modules can use any license. Contributions require a CLA.
