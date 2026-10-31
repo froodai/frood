@@ -134,7 +134,7 @@ pub fn write_env_files(
     Ok(())
 }
 
-fn write_private(path: &Path, text: &str) -> anyhow::Result<()> {
+pub(crate) fn write_private(path: &Path, text: &str) -> anyhow::Result<()> {
     std::fs::write(path, text).with_context(|| format!("cannot write {}", path.display()))?;
     #[cfg(unix)]
     {

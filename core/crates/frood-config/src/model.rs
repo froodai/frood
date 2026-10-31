@@ -263,6 +263,29 @@ pub struct Deploy {
     /// The HTTPS front (Caddy) that runs when `server.public_url` is set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proxy: Option<Proxy>,
+    /// A tunnel instead of open ports (docs/28 §1): cloud clients reach a laptop or a home
+    /// server at `server.public_url` without a domain of one's own or a router to configure.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tunnel: Option<Tunnel>,
+}
+
+/// Who carries `server.public_url` to this machine. The tunnel runs next to the server and
+/// reaches it on 127.0.0.1; TLS ends at the tunnel, so Frood runs no Caddy.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "uses", rename_all = "lowercase", deny_unknown_fields)]
+pub enum Tunnel {
+    /// Tailscale Funnel: a lasting `https://<machine>.<tailnet>.ts.net` on any plan, the free
+    /// one included. The machine's name is the first label of `server.public_url`.
+    Tailscale {
+        /// An auth key from the Tailscale admin console (not ephemeral).
+        auth_key: String,
+    },
+    /// A named Cloudflare Tunnel for a domain in Cloudflare; its public hostname is set in the
+    /// Cloudflare dashboard, with the service `http://127.0.0.1:<port>`.
+    Cloudflare {
+        /// The tunnel's token from the Cloudflare dashboard.
+        token: String,
+    },
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -289,6 +312,7 @@ impl Default for Deploy {
             build: None,
             postgres_port: default_postgres_port(),
             proxy: None,
+            tunnel: None,
         }
     }
 }
@@ -994,6 +1018,18 @@ pub(crate) const RESERVED_SECTIONS: &[(&str, &str)] = &[
 ];
 
 impl Config {
+    /// Frood runs its own Caddy on 80/443: a public address, and neither a proxy of the
+    /// server in front nor a tunnel.
+    pub fn own_https_front(&self) -> bool {
+        self.server.public_url.is_some()
+            && self.deploy.tunnel.is_none()
+            && self
+                .deploy
+                .proxy
+                .as_ref()
+                .is_none_or(|p| p.external.is_none())
+    }
+
     pub(crate) fn reserved_present(&self) -> Vec<&'static str> {
         let present = [
             ("runtimes", self.runtimes.is_some()),

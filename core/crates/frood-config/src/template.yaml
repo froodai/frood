@@ -26,6 +26,10 @@ __IMAGE_OR_BUILD__  postgres_port: __PG_PORT__
   # With server.public_url Frood runs Caddy on 80/443. When the server has its own proxy in front,
   # Frood writes only its routes into that proxy's file instead:
   # proxy: { external: /srv/edge/paths/frood.caddy }
+  # Claude in the browser and ChatGPT on a laptop or a home server, without a domain or an open
+  # port (server.public_url is then the tunnel's address):
+  # tunnel: { uses: tailscale, auth_key: '${secret:TAILSCALE_AUTH_KEY}' }     # https://frood.<tailnet>.ts.net
+  # tunnel: { uses: cloudflare, token: '${secret:CLOUDFLARE_TUNNEL_TOKEN}' }  # a domain in Cloudflare
 
 # Spheres of life knowledge is sorted into (docs/26 §3): a label for reading and filters.
 # Without this section: tech, business and personal; `spheres: []` turns them off.
