@@ -67,6 +67,18 @@ pub struct Answers {
     pub digest_at: Option<String>,
     /// The language the bot speaks.
     pub language: String,
+    /// A tunnel for this computer's address, when Claude in the browser or ChatGPT should reach
+    /// it (docs/28 §1); `public_url` is then the tunnel's address.
+    pub tunnel: Option<TunnelAnswer>,
+}
+
+/// The tunnel's kind and its secret.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TunnelAnswer {
+    /// An auth key from the Tailscale admin console.
+    Tailscale(String),
+    /// A named tunnel's token from the Cloudflare dashboard.
+    Cloudflare(String),
 }
 
 impl Answers {
@@ -151,6 +163,10 @@ pub async fn ask(mut answers: Answers) -> anyhow::Result<Answers> {
         }
     } else {
         answers.public_url = None;
+        answers.tunnel = ask_tunnel()?;
+        if answers.tunnel.is_some() {
+            answers.public_url = Some(tunnel_address(answers.tunnel.as_ref())?);
+        }
     }
 
     loop {
@@ -304,6 +320,80 @@ fn confirm(question: &str, default: bool) -> anyhow::Result<bool> {
         "" => default,
         a => a.starts_with('y'),
     })
+}
+
+/// Claude in the browser and ChatGPT call Frood from their clouds: this computer needs an
+/// address on the internet, which a tunnel gives without a domain or an open port.
+fn ask_tunnel() -> anyhow::Result<Option<TunnelAnswer>> {
+    let way = choose(
+        "Connect Claude in the browser or ChatGPT? They need an address on the internet \
+         (Claude Code, Codex and Telegram work without one)",
+        &[
+            "no",
+            "yes, through Tailscale: free, an address like https://frood.<your-tailnet>.ts.net",
+            "yes, through Cloudflare: a domain of your own in Cloudflare",
+        ],
+        0,
+    )?;
+    Ok(match way {
+        1 => secret(
+            "Tailscale auth key (admin console → Settings → Keys; not ephemeral)",
+            None,
+        )?
+        .map(TunnelAnswer::Tailscale),
+        2 => secret(
+            "Cloudflare tunnel token (Zero Trust → Networks → Tunnels → create a tunnel)",
+            None,
+        )?
+        .map(TunnelAnswer::Cloudflare),
+        _ => None,
+    })
+}
+
+/// The tunnel's address: for Tailscale the tailnet's name comes from the Tailscale app on this
+/// computer when there is one.
+fn tunnel_address(tunnel: Option<&TunnelAnswer>) -> anyhow::Result<String> {
+    let suggested = match tunnel {
+        Some(TunnelAnswer::Tailscale(_)) => Some(
+            tailnet_suffix().map_or("https://frood.<tailnet>.ts.net".to_owned(), |suffix| {
+                format!("https://frood.{suffix}")
+            }),
+        ),
+        _ => None,
+    };
+    loop {
+        let url = input("Its address", suggested.as_deref())?;
+        let url = url.trim_end_matches('/').to_owned();
+        let tailscale = matches!(tunnel, Some(TunnelAnswer::Tailscale(_)));
+        if url.starts_with("https://")
+            && !url.contains('<')
+            && (!tailscale || url.ends_with(".ts.net"))
+        {
+            return Ok(url);
+        }
+        println!(
+            "  {}",
+            if tailscale {
+                "https://<machine>.<tailnet>.ts.net; the tailnet's name is on the DNS page of the admin console"
+            } else {
+                "an https:// address on your domain, e.g. https://mem.example.com"
+            }
+        );
+    }
+}
+
+/// `tail1234.ts.net` from the Tailscale app on this computer, if it is installed and signed in.
+fn tailnet_suffix() -> Option<String> {
+    let out = std::process::Command::new("tailscale")
+        .args(["status", "--json"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())?;
+    let status: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
+    status["MagicDNSSuffix"]
+        .as_str()
+        .filter(|s| s.ends_with(".ts.net"))
+        .map(str::to_owned)
 }
 
 fn choose(question: &str, options: &[&str], default: usize) -> anyhow::Result<usize> {
@@ -465,6 +555,17 @@ pub fn config_text(
         let listed: String = providers.iter().map(|p| format!("\n    - {p}")).collect();
         text = text.replacen("  providers: []", &format!("  providers:{listed}"), 1);
     }
+    if let Some(tunnel) = &answers.tunnel {
+        let line = match tunnel {
+            TunnelAnswer::Tailscale(_) => {
+                "  tunnel: { uses: tailscale, auth_key: '${secret:TAILSCALE_AUTH_KEY}' }"
+            }
+            TunnelAnswer::Cloudflare(_) => {
+                "  tunnel: { uses: cloudflare, token: '${secret:CLOUDFLARE_TUNNEL_TOKEN}' }"
+            }
+        };
+        text = text.replacen("deploy:\n", &format!("deploy:\n{line}\n"), 1);
+    }
     let version = env!("CARGO_PKG_VERSION");
     let mut out = vec![String::new(), "# Written by frood init.".to_owned()];
     if let Some(model) = &answers.model {
@@ -550,6 +651,15 @@ pub fn secrets(answers: &Answers) -> Vec<(String, String)> {
     }
     if let Some((token, _)) = &answers.telegram {
         out.push(("TELEGRAM_BOT_TOKEN".to_owned(), token.clone()));
+    }
+    match &answers.tunnel {
+        Some(TunnelAnswer::Tailscale(key)) => {
+            out.push(("TAILSCALE_AUTH_KEY".to_owned(), key.clone()));
+        }
+        Some(TunnelAnswer::Cloudflare(token)) => {
+            out.push(("CLOUDFLARE_TUNNEL_TOKEN".to_owned(), token.clone()));
+        }
+        None => {}
     }
     if answers.backups.is_some() {
         out.push((
@@ -733,6 +843,58 @@ mod tests {
                 ]
             ),
             "a server with the bot signs in with a button in Telegram or a passkey"
+        );
+    }
+
+    #[test]
+    fn a_laptop_with_a_tunnel_gets_its_address_and_no_sign_in_on_this_computer() {
+        let bare = template();
+        let laptop = Answers {
+            public_url: Some("https://frood.tail1234.ts.net".into()),
+            email: Some("alice@example.com".into()),
+            tunnel: Some(TunnelAnswer::Tailscale("tskey-auth-x".into())),
+            ..Answers::default()
+        };
+        let laptop_secrets = secrets(&laptop);
+        assert_eq!(
+            laptop_secrets,
+            [("TAILSCALE_AUTH_KEY".to_owned(), "tskey-auth-x".to_owned())]
+        );
+        let text = config_text(&bare, "personal", &laptop, None);
+        assert!(
+            !text.contains("tskey"),
+            "the key goes to the secrets file only"
+        );
+        let config = load(&text, &laptop_secrets);
+        assert_eq!(
+            config.deploy.tunnel,
+            Some(frood_config::Tunnel::Tailscale {
+                auth_key: "tskey-auth-x".into()
+            })
+        );
+        assert!(!config.own_https_front());
+        assert!(
+            matches!(
+                config.auth.providers.as_slice(),
+                [frood_config::Provider::Passkey { .. }]
+            ),
+            "reachable from the internet, so no sign-in on this computer"
+        );
+        let cloudflare = Answers {
+            public_url: Some("https://mem.example.com".into()),
+            tunnel: Some(TunnelAnswer::Cloudflare("eyJ".into())),
+            ..laptop
+        };
+        let cloudflare_secrets = secrets(&cloudflare);
+        let config = load(
+            &config_text(&bare, "personal", &cloudflare, None),
+            &cloudflare_secrets,
+        );
+        assert_eq!(
+            config.deploy.tunnel,
+            Some(frood_config::Tunnel::Cloudflare {
+                token: "eyJ".into()
+            })
         );
     }
 }

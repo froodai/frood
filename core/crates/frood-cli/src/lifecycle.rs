@@ -187,6 +187,23 @@ pub(crate) fn write_deploy(paths: &Paths, loaded: &Loaded) -> anyhow::Result<Pat
     ) {
         write_external_routes(&file, &routes)?;
     }
+    if let Some(tunnel) = &loaded.config.deploy.tunnel {
+        modules::write_private(
+            &deploy_dir.join(compose::TUNNEL_ENV),
+            &compose::tunnel_env(tunnel),
+        )?;
+        if matches!(tunnel, frood_config::Tunnel::Tailscale { .. }) {
+            // A folder, not a file: Tailscale sees changes to a mounted folder only.
+            let dir = deploy_dir.join("tailscale");
+            std::fs::create_dir_all(&dir)
+                .with_context(|| format!("cannot create {}", dir.display()))?;
+            std::fs::write(
+                dir.join("serve.json"),
+                compose::tailscale_serve_config(loaded),
+            )
+            .with_context(|| format!("cannot write {}", dir.display()))?;
+        }
+    }
     Ok(compose_path)
 }
 
@@ -313,7 +330,30 @@ pub async fn apply(paths: &Paths, render_only: bool) -> anyhow::Result<()> {
             );
         }
     }
+    if let Some(hint) = tunnel_hint(&loaded) {
+        println!("{hint}");
+    }
     Ok(())
+}
+
+/// What the tunnel's own side needs before the address answers.
+fn tunnel_hint(loaded: &Loaded) -> Option<String> {
+    let url = loaded.config.server.public_url.as_deref()?;
+    let port = compose::listen_port(loaded);
+    Some(match loaded.config.deploy.tunnel.as_ref()? {
+        frood_config::Tunnel::Tailscale { .. } => format!(
+            "{url} answers through Tailscale Funnel within a minute or two. Funnel needs HTTPS \
+             certificates on for the tailnet (admin console → DNS) and the `funnel` attribute in \
+             its access controls (new tailnets have it); `docker compose -p {} logs tunnel` shows \
+             what Tailscale says.",
+            compose::project_name(loaded)
+        ),
+        frood_config::Tunnel::Cloudflare { .. } => format!(
+            "{url} answers through the Cloudflare Tunnel once the tunnel's public hostname for it \
+             points at the service http://127.0.0.1:{port} (Cloudflare dashboard → Zero Trust → \
+             Networks → Tunnels)."
+        ),
+    })
 }
 
 pub async fn export(paths: &Paths, dir: &std::path::Path) -> anyhow::Result<()> {
@@ -430,12 +470,18 @@ fn print_summary(loaded: &Loaded) {
     println!("listen: {}", config.server.listen);
     if let Some(url) = &config.server.public_url {
         println!("public url: {url}");
-        match compose::proxy_external(loaded) {
-            Some(file) => println!(
+        match (&config.deploy.tunnel, compose::proxy_external(loaded)) {
+            (Some(frood_config::Tunnel::Tailscale { .. }), _) => {
+                println!("way in: Tailscale Funnel, no open ports")
+            }
+            (Some(frood_config::Tunnel::Cloudflare { .. }), _) => {
+                println!("way in: Cloudflare Tunnel, no open ports")
+            }
+            (None, Some(file)) => println!(
                 "proxy: the server's own, in front; Frood writes its routes to {}",
                 file.display()
             ),
-            None => println!("proxy: Frood's Caddy on ports 80 and 443"),
+            (None, None) => println!("proxy: Frood's Caddy on ports 80 and 443"),
         }
     }
     if !loaded.secrets_used.is_empty() {

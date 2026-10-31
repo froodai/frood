@@ -13,6 +13,13 @@ pub const POSTGRES_IMAGE: &str = "pgvector/pgvector:pg18-trixie";
 /// The HTTPS front (E2): takes a certificate for `server.public_url` and proxies to the server.
 pub const CADDY_IMAGE: &str = "caddy:2.10";
 
+/// Tunnels (docs/28 §1): Tailscale Funnel, a named Cloudflare Tunnel.
+pub const TAILSCALE_IMAGE: &str = "tailscale/tailscale:v1.104.1";
+pub const CLOUDFLARED_IMAGE: &str = "cloudflare/cloudflared:2026.10.1";
+
+/// The tunnel's secret (`TS_AUTHKEY` or `TUNNEL_TOKEN`) in `.frood/deploy`, readable only here.
+pub const TUNNEL_ENV: &str = "tunnel.env";
+
 /// The files folder on this machine, when files go to a folder (docs/26 §2).
 pub fn objects_folder(loaded: &Loaded) -> Option<std::path::PathBuf> {
     match &loaded.config.storage.objects {
@@ -206,7 +213,14 @@ pub fn render(
         }
     }
 
-    if loaded.config.server.public_url.is_some() && proxy_external(loaded).is_none() {
+    if let Some(tunnel) = &loaded.config.deploy.tunnel {
+        out.push_str(&tunnel_service(loaded, tunnel, deploy_dir));
+        if matches!(tunnel, frood_config::Tunnel::Tailscale { .. }) {
+            volumes.push("tailscale-state".to_owned());
+        }
+    }
+
+    if loaded.config.own_https_front() {
         // Only Caddy faces the internet: the server, the database and the modules stay inside
         // (or on 127.0.0.1).
         let https = public_port(loaded);
@@ -280,6 +294,86 @@ pub fn proxy_routes(loaded: &Loaded) -> Option<std::path::PathBuf> {
     Some(host_path(&loaded.base_dir.join(routes)))
 }
 
+/// The tunnel next to the server. Funnel proxies only to 127.0.0.1, so the tunnel shares the
+/// server's network: the server container's, or the machine's when the server runs on it.
+fn tunnel_service(loaded: &Loaded, tunnel: &frood_config::Tunnel, deploy_dir: &Path) -> String {
+    let network = match loaded.config.deploy.server {
+        ServerPlacement::Container => "service:frood",
+        ServerPlacement::Host => "host",
+    };
+    let depends = match loaded.config.deploy.server {
+        ServerPlacement::Container => "    depends_on:\n      - frood\n",
+        ServerPlacement::Host => "",
+    };
+    let env_file = quote(&deploy_dir.join(TUNNEL_ENV).display().to_string());
+    match tunnel {
+        frood_config::Tunnel::Tailscale { .. } => {
+            let machine = public_url(loaded)
+                .and_then(|u| {
+                    u.host_str()
+                        .map(|h| h.split('.').next().unwrap_or(h).to_owned())
+                })
+                .unwrap_or_else(|| loaded.config.installation.name.clone());
+            format!(
+                "  tunnel:\n\
+                 \x20   image: {image}\n\
+                 \x20   restart: unless-stopped\n\
+                 \x20   network_mode: {network}\n\
+                 \x20   environment:\n\
+                 \x20     TS_HOSTNAME: {machine}\n\
+                 \x20     TS_STATE_DIR: /var/lib/tailscale\n\
+                 \x20     TS_AUTH_ONCE: \"true\"\n\
+                 \x20     TS_SERVE_CONFIG: /config/serve.json\n\
+                 \x20   env_file:\n\
+                 \x20     - {env_file}\n\
+                 \x20   volumes:\n\
+                 \x20     - \"tailscale-state:/var/lib/tailscale\"\n\
+                 \x20     - {config}\n\
+                 {depends}",
+                image = quote(TAILSCALE_IMAGE),
+                network = quote(network),
+                machine = quote(&machine),
+                config = quote(&format!(
+                    "{}:/config:ro",
+                    deploy_dir.join("tailscale").display()
+                )),
+            )
+        }
+        frood_config::Tunnel::Cloudflare { .. } => format!(
+            "  tunnel:\n\
+             \x20   image: {image}\n\
+             \x20   restart: unless-stopped\n\
+             \x20   network_mode: {network}\n\
+             \x20   command: [\"tunnel\", \"--no-autoupdate\", \"run\"]\n\
+             \x20   env_file:\n\
+             \x20     - {env_file}\n\
+             {depends}",
+            image = quote(CLOUDFLARED_IMAGE),
+            network = quote(network),
+        ),
+    }
+}
+
+/// Tailscale's Serve config: HTTPS on 443 for the machine's name, open to the internet
+/// (Funnel), proxied to the server. The container puts its name in for `${TS_CERT_DOMAIN}`.
+pub fn tailscale_serve_config(loaded: &Loaded) -> String {
+    let site = "${TS_CERT_DOMAIN}:443";
+    serde_json::to_string_pretty(&serde_json::json!({
+        "TCP": { "443": { "HTTPS": true } },
+        "Web": { site: { "Handlers": { "/": { "Proxy": format!("http://127.0.0.1:{}", listen_port(loaded)) } } } },
+        "AllowFunnel": { site: true },
+    }))
+    .expect("JSON serializes")
+}
+
+/// The tunnel's secret as an env file.
+pub fn tunnel_env(tunnel: &frood_config::Tunnel) -> String {
+    match tunnel {
+        frood_config::Tunnel::Tailscale { auth_key } => format!("TS_AUTHKEY={auth_key}\n"),
+        frood_config::Tunnel::Cloudflare { token } => format!("TUNNEL_TOKEN={token}\n"),
+    }
+}
+
 /// `deploy.proxy.external` as an absolute path on this machine: the file of the server's own
 /// proxy that Frood writes its routes into.
 pub fn proxy_external(loaded: &Loaded) -> Option<std::path::PathBuf> {
@@ -311,7 +405,7 @@ fn routes(base: &str, upstream: &str) -> String {
 /// The Caddyfile of the HTTPS front, for `server.public_url`, when Frood runs its own. With a
 /// path such as `/frood` the rest of the site is free for `deploy.proxy.routes`.
 pub fn caddyfile(loaded: &Loaded) -> Option<String> {
-    if proxy_external(loaded).is_some() {
+    if !loaded.config.own_https_front() {
         return None;
     }
     let public = public_url(loaded)?;
@@ -593,6 +687,76 @@ mod tests {
             )
             .find("caddy")
             .is_none()
+        );
+    }
+
+    #[test]
+    fn a_tunnel_shares_the_servers_network_and_replaces_caddy() {
+        let mut host = loaded(ServerPlacement::Host);
+        let mut loaded = loaded(ServerPlacement::Container);
+        loaded.config.server.public_url = Some("https://frood.tail1234.ts.net".into());
+        loaded.config.deploy.tunnel = Some(frood_config::Tunnel::Tailscale {
+            auth_key: "tskey-auth-x".into(),
+        });
+        let out = render(
+            &loaded,
+            Path::new("/x/frood.yaml"),
+            Path::new("/x/s"),
+            Path::new("/x/d"),
+        );
+        let parsed: serde_json::Value = serde_yaml_ng::from_str(&out).unwrap();
+        let services = &parsed["services"];
+        assert!(services.get("caddy").is_none(), "{out}");
+        assert!(caddyfile(&loaded).is_none());
+        let tunnel = &services["tunnel"];
+        assert_eq!(tunnel["image"], TAILSCALE_IMAGE);
+        assert_eq!(tunnel["network_mode"], "service:frood");
+        assert_eq!(tunnel["environment"]["TS_HOSTNAME"], "frood");
+        assert_eq!(tunnel["environment"]["TS_AUTH_ONCE"], "true");
+        assert_eq!(tunnel["env_file"][0], "/x/d/tunnel.env");
+        assert_eq!(tunnel["volumes"][1], "/x/d/tailscale:/config:ro");
+        assert!(parsed["volumes"].get("tailscale-state").is_some());
+        assert!(
+            !out.contains("tskey"),
+            "the key stays out of the compose file"
+        );
+        assert_eq!(
+            tunnel_env(loaded.config.deploy.tunnel.as_ref().unwrap()),
+            "TS_AUTHKEY=tskey-auth-x\n"
+        );
+        let serve: serde_json::Value =
+            serde_json::from_str(&tailscale_serve_config(&loaded)).unwrap();
+        assert_eq!(serve["TCP"]["443"]["HTTPS"], true);
+        assert_eq!(
+            serve["Web"]["${TS_CERT_DOMAIN}:443"]["Handlers"]["/"]["Proxy"],
+            "http://127.0.0.1:8080"
+        );
+        assert_eq!(serve["AllowFunnel"]["${TS_CERT_DOMAIN}:443"], true);
+
+        // Cloudflare, with the server on this machine: the machine's network.
+        host.config.server.public_url = Some("https://mem.example.com".into());
+        host.config.deploy.tunnel = Some(frood_config::Tunnel::Cloudflare {
+            token: "eyJ".into(),
+        });
+        let out = render(
+            &host,
+            Path::new("/x/frood.yaml"),
+            Path::new("/x/s"),
+            Path::new("/x/d"),
+        );
+        let parsed: serde_json::Value = serde_yaml_ng::from_str(&out).unwrap();
+        let tunnel = &parsed["services"]["tunnel"];
+        assert_eq!(tunnel["image"], CLOUDFLARED_IMAGE);
+        assert_eq!(tunnel["network_mode"], "host");
+        assert_eq!(
+            tunnel["command"],
+            serde_json::json!(["tunnel", "--no-autoupdate", "run"])
+        );
+        assert!(tunnel.get("depends_on").is_none());
+        assert!(parsed["services"].get("caddy").is_none());
+        assert_eq!(
+            tunnel_env(host.config.deploy.tunnel.as_ref().unwrap()),
+            "TUNNEL_TOKEN=eyJ\n"
         );
     }
 

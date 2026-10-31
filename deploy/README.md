@@ -61,6 +61,35 @@ the file may import files next to it.
 Caddy after an edit. A sign-in provider's redirect address follows the path:
 `https://203-0-113-7.sslip.io/frood/oauth/callback/google`.
 
+### A tunnel instead of open ports
+
+A laptop or a home server has no address on the internet, yet Claude in the browser and ChatGPT
+call Frood from their clouds. A tunnel gives it a lasting HTTPS address without a domain of one's
+own or a port opened on the router:
+
+```yaml
+server:
+  public_url: https://frood.tail1234.ts.net   # the tunnel's address
+deploy:
+  tunnel: { uses: tailscale, auth_key: '${secret:TAILSCALE_AUTH_KEY}' }
+```
+
+- **Tailscale Funnel** (free plans too): an auth key from the admin console (Settings → Keys,
+  not ephemeral). The machine is named after the first label of `public_url`; the tailnet's name
+  is on the DNS page. Funnel needs HTTPS certificates on for the tailnet and the `funnel` attribute
+  in its access controls (new tailnets have it).
+- **Cloudflare Tunnel** for a domain in Cloudflare: `tunnel: { uses: cloudflare, token: … }` with
+  the token of a named tunnel (Zero Trust → Networks → Tunnels); its public hostname is
+  `public_url`'s host, with the service `http://127.0.0.1:8080`. Quick tunnels
+  (`trycloudflare.com`) are not offered: their address changes on every start, and it is the
+  OAuth issuer, so connected clients would break.
+
+The tunnel runs next to the server in its network and reaches it on 127.0.0.1; TLS ends at the
+tunnel, so Frood runs no Caddy and needs no ports. Frood answers at the root of the address. The
+secret goes to `.frood/deploy/tunnel.env` (readable only by the owner), not into the compose file.
+With a public address, sign-in on this computer is off: sign in with a button in Telegram or a
+passkey. `frood init` asks about it when Frood runs on this computer.
+
 ### Behind the server's own proxy
 
 When several apps share the server and none of them should own its HTTPS front, the server runs

@@ -16,6 +16,7 @@ pub use model::{
     Backup, BackupKeep, BackupTarget, BeforeNotify, Budget, Config, Deploy, Detectors, Embeddings,
     Installation, Job, ModelProvider, Module, Objects, OnExpire, Policies, Provider, Proxy,
     Reminder, Search, Server, ServerPlacement, SituationMatch, Source, Sphere, Storage, Trigger,
+    Tunnel,
 };
 pub use model::{BUILT_IN_SPHERES, default_reminders};
 
@@ -163,6 +164,7 @@ fn validate(config: &Config) -> Result<(), ConfigError> {
             _ => {}
         }
     }
+    validate_tunnel(config, &mut problems);
     if config.storage.uses != "postgres" {
         problems.push(format!(
             "storage.uses {:?} is not available yet; only `postgres` exists",
@@ -336,6 +338,59 @@ fn backup_warnings(config: &Config) -> Vec<String> {
         );
     }
     out
+}
+
+/// A tunnel serves Frood at the root of `server.public_url`, on 443, and replaces any proxy.
+fn validate_tunnel(config: &Config, problems: &mut Vec<String>) {
+    let Some(tunnel) = &config.deploy.tunnel else {
+        return;
+    };
+    let url = config
+        .server
+        .public_url
+        .as_deref()
+        .and_then(|u| url::Url::parse(u).ok());
+    let Some(url) = url else {
+        problems.push(
+            "deploy.tunnel needs server.public_url: the address the tunnel carries to this machine"
+                .to_owned(),
+        );
+        return;
+    };
+    if !url.path().trim_end_matches('/').is_empty() || url.port().is_some_and(|p| p != 443) {
+        problems.push(format!(
+            "server.public_url {url}: through a tunnel Frood answers at the root of its address, on 443"
+        ));
+    }
+    if config.deploy.proxy.is_some() {
+        problems.push(
+            "deploy.tunnel and deploy.proxy do not go together: the tunnel is the way in"
+                .to_owned(),
+        );
+    }
+    let host = url.host_str().unwrap_or_default();
+    match tunnel {
+        Tunnel::Tailscale { auth_key } => {
+            let machine = host.split('.').next().unwrap_or_default();
+            if !host.ends_with(".ts.net") || host.split('.').count() != 4 {
+                problems.push(format!(
+                    "server.public_url {url}: with Tailscale it is https://<machine>.<tailnet>.ts.net, as the admin console shows it"
+                ));
+            } else if !is_valid_name(machine) {
+                problems.push(format!(
+                    "server.public_url {url}: the machine name {machine:?} must be lowercase letters, digits or dashes"
+                ));
+            }
+            if auth_key.trim().is_empty() {
+                problems.push("deploy.tunnel: Tailscale needs an auth_key".to_owned());
+            }
+        }
+        Tunnel::Cloudflare { token } => {
+            if token.trim().is_empty() {
+                problems.push("deploy.tunnel: Cloudflare needs the tunnel's token".to_owned());
+            }
+        }
+    }
 }
 
 fn validate_auth(config: &Config, problems: &mut Vec<String>) {
@@ -1409,6 +1464,80 @@ jobs:
             }
             other => panic!("expected Invalid, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_tunnel_carries_the_root_of_its_address() {
+        let with = |url: &str, tunnel: &str| {
+            template_for(ServerPlacement::Container)
+                .replace(
+                    "  listen: \"0.0.0.0:8080\"\n",
+                    &format!("  listen: \"0.0.0.0:8080\"\n  public_url: {url}\n"),
+                )
+                .replace("deploy:\n", &format!("deploy:\n  tunnel: {tunnel}\n"))
+        };
+        let tailscale = "{ uses: tailscale, auth_key: tskey-auth-x }";
+        let loaded = parse(
+            &with("https://frood.tail1234.ts.net", tailscale),
+            &secrets(),
+        )
+        .unwrap();
+        assert_eq!(
+            loaded.config.deploy.tunnel,
+            Some(Tunnel::Tailscale {
+                auth_key: "tskey-auth-x".into()
+            })
+        );
+        assert!(!loaded.config.own_https_front());
+        parse(
+            &with(
+                "https://mem.example.com",
+                "{ uses: cloudflare, token: eyJ }",
+            ),
+            &secrets(),
+        )
+        .unwrap();
+        let refused = |text: &str, says: &str| match parse(text, &secrets()) {
+            Err(ConfigError::Invalid(problems)) => {
+                assert!(
+                    problems.iter().any(|p| p.contains(says)),
+                    "{says}: {problems:?}"
+                );
+            }
+            other => panic!("expected Invalid, got {other:?}"),
+        };
+        refused(
+            &with("https://frood.tail1234.ts.net/frood", tailscale),
+            "at the root",
+        );
+        refused(
+            &with("https://mem.example.com", tailscale),
+            "<machine>.<tailnet>.ts.net",
+        );
+        refused(
+            &with(
+                "https://frood.tail1234.ts.net",
+                "{ uses: tailscale, auth_key: \"\" }",
+            ),
+            "needs an auth_key",
+        );
+        refused(
+            &with(
+                "https://mem.example.com",
+                "{ uses: cloudflare, token: \"\" }",
+            ),
+            "the tunnel's token",
+        );
+        refused(
+            &with("https://frood.tail1234.ts.net", tailscale)
+                .replace("deploy:\n", "deploy:\n  proxy: { external: frood.caddy }\n"),
+            "do not go together",
+        );
+        refused(
+            &template_for(ServerPlacement::Container)
+                .replace("deploy:\n", &format!("deploy:\n  tunnel: {tailscale}\n")),
+            "deploy.tunnel needs server.public_url",
+        );
     }
 
     #[test]
