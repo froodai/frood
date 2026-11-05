@@ -71,6 +71,7 @@
 - 2026-10-26 — раунд 25 принят: туннель Tailscale Funnel (QT1 — а), порядок T2 → T1 → T3 → T4, вход через Google — подключаемая возможность, не обязательная. Общий прокси сервера — отдельный приватный репозиторий `vps-gateway`, Caddy как служба systemd; во Frood — `deploy.proxy.external`.
 - 2026-10-26 — выпуск 0.1.10: вход через Telegram, `deploy.proxy.external`. Сервер переехал за общий прокси: Frood — один из проектов за ним.
 - 2026-10-31 — выпуск 0.1.11 (passkey). Сделаны T1 — туннель Tailscale Funnel или Cloudflare — и T3 — память Frood для Hermes и OpenClaw (`integrations/`). Дальше T4 — OpenClaw как канал.
+- 2026-11-05 — T4 сделан: модуль `notify-openclaw`, записи Inbox и сводка в разговоре OpenClaw, ответы цифрой. M10 «Хаб» закрыт.
 
 ## Журнал решений
 

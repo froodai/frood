@@ -1,0 +1,20 @@
+name: notify-openclaw
+version: 0.1.11
+description: Inbox items and the digest in the OpenClaw conversation a person chooses (WhatsApp, iMessage, Signal and the rest), through the Gateway of OpenClaw. Text only, with numbered choices; a reply with the number, or yes or no, acts as that person. A person links a conversation by sending `frood <code>` in it. Only the owner's messages count.
+license: Apache-2.0
+provides:
+  - notify.send@1
+  - notify.update@1
+frood_api: [channels:act]
+config:
+  type: object
+  required: [gateway]
+  properties:
+    gateway: { type: string, description: "The OpenClaw Gateway's WebSocket address, e.g. ws://host.docker.internal:18789" }
+    language: { type: string, enum: [en, zh, es, hi, ar, fr, pt, ru], description: "Language of the messages, default en" }
+permissions:
+  egress: []
+  secrets: [OPENCLAW_GATEWAY_TOKEN]
+runtime:
+  form: container
+  health: /healthz
