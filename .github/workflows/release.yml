@@ -39,6 +39,7 @@ jobs:
           - { name: frood, context: core }
           - { name: stt-openai, context: modules/stt-openai }
           - { name: telegram, context: modules/telegram }
+          - { name: notify-openclaw, context: modules/notify-openclaw }
           - { name: runtime-docker, context: modules/runtime-docker }
           - { name: backup-restic, context: modules/backup-restic }
           - { name: agent-claude-code, context: modules/runtime-docker/images/agent-claude-code }

@@ -9,6 +9,7 @@ module's service token in both directions. Apache-2.0.
 |---|---|---|
 | [stt-openai](stt-openai) | `media.transcribe@1` through OpenAI or a server with the same API (model named in `config.model`); converts OGG/Opus voice messages with ffmpeg | `OPENAI_API_KEY` |
 | [telegram](telegram) | Quick capture from a Telegram bot: text, voice, files; `/link <code>` links your account | `TELEGRAM_BOT_TOKEN` |
+| [notify-openclaw](notify-openclaw) | The Inbox and the digest in an OpenClaw conversation (WhatsApp, iMessage, Signal…): text with numbered choices, a reply with the number decides | an OpenClaw Gateway, `OPENCLAW_GATEWAY_TOKEN` |
 | [runtime-docker](runtime-docker) | `agents.execute@1`: runs Claude Code or Codex for agent jobs, one container per turn, a volume per run for its sessions | `host_docker: true` (the host's Docker, root on that machine) |
 | [backup-restic](backup-restic) | `backup.target@1`: the installation into restic repositories (a folder, S3, B2, SFTP, REST), and a restore check into a temporary database | the targets in `backup`; `volumes` for a folder target |
 
@@ -28,6 +29,29 @@ modules:
 
 Then `frood apply`, and `frood link telegram --email you@example.com` gives the code to send
 to the bot.
+
+### OpenClaw
+
+```yaml
+modules:
+  openclaw:
+    image: ghcr.io/froodai/notify-openclaw:<version>
+    secrets: [OPENCLAW_GATEWAY_TOKEN]
+    config: { gateway: 'ws://host.docker.internal:18789', language: ru }
+```
+
+The module starts `openclaw mcp serve` and connects to the OpenClaw Gateway, so the Gateway must
+be reachable from the container. A Gateway that listens only on 127.0.0.1 of a Linux machine is
+not: give it an address the container can reach, or a `wss://` one. `frood link openclaw --email
+you@example.com` gives a code; send `frood <code>` in the conversation where you want the Inbox,
+which also gives it the route OpenClaw needs to write there. Only the conversation owner's
+messages count: a reply decides for the person linked, and in a group nobody else can.
+
+OpenClaw's conversations carry text only, with no buttons and no edits. So items arrive with
+numbered choices, a reply with the number (or yes, or no, where it is clear) takes one, and what
+is decided elsewhere comes as a new message. The agent sees these replies too, as any message
+in the conversation. Which items wait for a reply is kept in memory: after a restart of the
+module, answer those in the console. Events that come while the Gateway is away are not seen.
 
 ### Agents
 
