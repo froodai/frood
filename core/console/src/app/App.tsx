@@ -1,11 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "next-themes";
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { createBrowserRouter, Navigate, RouterProvider } from "react-router";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { I18nProvider, useI18n } from "@/i18n";
-import { BASE, finishSignIn, signIn } from "@/lib/frood";
+import { BASE, finishSignIn, MINI_APP, signIn } from "@/lib/frood";
+import { tg } from "@/mini/telegram";
 import { Automations } from "@/pages/Automations";
 import { Inbox } from "@/pages/Inbox";
 import { Knowledge } from "@/pages/Knowledge";
@@ -18,7 +19,12 @@ const queries = new QueryClient({
   defaultOptions: { queries: { staleTime: 15_000, retry: 1 } },
 });
 
-const router = createBrowserRouter(
+/** The Telegram Mini App (docs/32) is its own bundle, loaded only under `/admin/m/`. */
+const MiniApp = lazy(() => import("@/mini/MiniApp"));
+
+const router = MINI_APP
+  ? null
+  : createBrowserRouter(
   [
     {
       element: <Shell />,
@@ -64,13 +70,20 @@ function SignedIn({ children }: { children: React.ReactNode }) {
 
 export function App() {
   return (
-    <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+    // In Telegram, the theme is the person's Telegram theme.
+    <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange forcedTheme={MINI_APP ? tg()?.colorScheme : undefined}>
       <I18nProvider>
         <QueryClientProvider client={queries}>
           <TooltipProvider delayDuration={300}>
-            <SignedIn>
-              <RouterProvider router={router} />
-            </SignedIn>
+            {router ? (
+              <SignedIn>
+                <RouterProvider router={router} />
+              </SignedIn>
+            ) : (
+              <Suspense fallback={null}>
+                <MiniApp />
+              </Suspense>
+            )}
             <Toaster position="bottom-center" />
           </TooltipProvider>
         </QueryClientProvider>

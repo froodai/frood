@@ -132,7 +132,7 @@ export function Knowledge() {
 }
 
 /** What held when (current knowledge by valid time), then what was corrected in the record. */
-function History({ id }: { id: string }) {
+export function History({ id }: { id: string }) {
   const { t, date, ago } = useI18n();
   const history = useQuery({ queryKey: ["history", id], queryFn: () => api<Assertion[]>(`/v1/assertions/${id}/history`) });
   const move = useMove(id);

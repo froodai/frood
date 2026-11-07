@@ -785,6 +785,7 @@ mod tests {
         withdrawn: Vec<Value>,
         attached: Vec<Value>,
         about: Vec<Value>,
+        menu: Vec<Value>,
     }
 
     /// A form or JSON body as one object; a file as its type and text.
@@ -854,6 +855,10 @@ mod tests {
                 { "text": "Docs freeze on Nov 10", "valid_from": "2026-10-03T12:00:00Z", "unverified": true },
                 { "text": "Release 2.4 on Nov 14", "valid_from": "2026-10-01T12:00:00Z" }
             ])) }))
+            .route("/botTOKEN/setChatMenuButton", post(|State(w): State<Shared>, Json(b): Json<Value>| async move {
+                w.lock().unwrap().menu.push(b);
+                Json(json!({ "ok": true, "result": true }))
+            }))
             .route("/botTOKEN/getMe", post(|| async { Json(json!({ "ok": true, "result": { "id": 7, "is_bot": true, "username": "frood_test_bot" } })) }))
             .route("/v1/channels/telegram/about", axum::routing::put(|State(w): State<Shared>, headers: HeaderMap, Json(b): Json<Value>| async move {
                 assert_eq!(headers["authorization"], "Bearer module-token");
@@ -964,7 +969,22 @@ mod tests {
         bot(&url, Lang::En).announce().await;
         assert_eq!(
             world.lock().unwrap().about,
-            [json!({ "start_url": "https://t.me/frood_test_bot?start=" })]
+            [json!({ "start_url": "https://t.me/frood_test_bot?start=", "bot_id": 7 })]
+        );
+        // Without a public address there is no Mini App, so no menu button.
+        assert!(world.lock().unwrap().menu.is_empty());
+
+        // With one, the menu button next to the input opens the Mini App (docs/32 M1).
+        let mut public = bot(&url, Lang::En);
+        public.console = Arc::new(tokio::sync::OnceCell::new_with(Some(Some(
+            "https://frood.example/admin/".to_owned(),
+        ))));
+        public.announce().await;
+        assert_eq!(
+            world.lock().unwrap().menu,
+            [
+                json!({ "menu_button": { "type": "web_app", "text": "Frood", "web_app": { "url": "https://frood.example/admin/m/" } } })
+            ]
         );
     }
 

@@ -311,3 +311,55 @@ test("notifications from the console: how urgent, the push fuse, reminders, and 
   await expect(page.getByText("Your settings are saved")).toBeVisible();
   await expect(sheet.getByLabel("From")).toHaveValue("22:30");
 });
+
+test("the Telegram Mini App: the Inbox one card at a time, search, knowledge with its sources", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  // Telegram signs the launch data with its own key, which a test cannot: the page gets the
+  // throwaway server's token as its session, and a stand-in for Telegram's script.
+  const token = (await import("node:fs")).readFileSync(new URL(".token", import.meta.url), "utf8").split("\n")[0].trim();
+  await page.addInitScript((access) => {
+    sessionStorage.setItem("mini_tokens", JSON.stringify({ access, scope: "knowledge:read knowledge:capture knowledge:propose knowledge:decide" }));
+    const calls: string[] = [];
+    (window as unknown as { calls: string[] }).calls = calls;
+    const button = (name: string): unknown =>
+      new Proxy({}, { get: (_, key) => (arg?: unknown) => (calls.push(`${name}.${String(key)}${typeof arg === "string" ? `:${arg}` : ""}`), button(name)) });
+    (window as unknown as { Telegram: unknown }).Telegram = {
+      WebApp: {
+        initData: "e2e",
+        colorScheme: "light",
+        themeParams: { button_color: "#2481cc", button_text_color: "#ffffff" },
+        ready: () => calls.push("ready"),
+        expand: () => {},
+        onEvent: () => {},
+        openLink: (url: string) => calls.push(`openLink:${url}`),
+        MainButton: button("Main"),
+        BackButton: button("Back"),
+        HapticFeedback: button("Haptic"),
+      },
+    };
+  }, token);
+  const calls = () => page.evaluate(() => (window as unknown as { calls: string[] }).calls);
+
+  await page.goto("/admin/m/");
+  await expect(page.getByText(/Waiting for you/)).toBeVisible();
+  expect(await calls()).toContain("ready");
+  // Telegram's colours: its button colour is the console's accent.
+  expect(await page.evaluate(() => document.documentElement.style.getPropertyValue("--primary"))).toBe("#2481cc");
+
+  // A card: the main button accepts, Telegram's back button returns.
+  // The earlier tests leave this new fact waiting.
+  await page.getByRole("button", { name: /ATL-142: a finished session/ }).click();
+  await expect(page.getByText(/\d+ of \d+/)).toBeVisible();
+  expect(await calls()).toEqual(expect.arrayContaining(["Main.setText:Accept", "Main.show", "Back.show"]));
+  await expect(page.getByRole("button", { name: "Accept", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Later" }).click();
+  await expect(page.getByText("Postponed for a day")).toBeVisible();
+
+  // Search, then the knowledge card with its history and where it comes from.
+  await page.goto("/admin/m/search?q=Atlas%20release");
+  await page.getByRole("button", { name: /Atlas release on/ }).first().click();
+  await expect(page.getByText("History")).toBeVisible();
+  const sources = page.getByRole("heading", { name: "Sources" });
+  await expect(sources).toBeVisible();
+  await expect(page.getByText(/^Note · /).first()).toBeVisible();
+});

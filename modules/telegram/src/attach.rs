@@ -128,7 +128,7 @@ mod tests {
     #[test]
     fn a_card_names_its_item_in_its_buttons() {
         let card = json!({ "inline_keyboard": [[{ "text": "Принять", "callback_data": "i:0199-item:0" }],
-                                                [{ "text": "Подробнее", "url": "https://frood.example/admin/inbox/0199-item" }]] });
+                                                [{ "text": "Открыть в Frood", "web_app": { "url": "https://frood.example/admin/m/inbox/0199-item" } }]] });
         assert_eq!(item_in_buttons(Some(&card)).as_deref(), Some("0199-item"));
         let decided = json!({ "inline_keyboard": [[{ "text": "Отменить", "callback_data": "u:0199-item" }]] });
         assert_eq!(

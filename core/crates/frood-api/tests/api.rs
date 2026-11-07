@@ -244,6 +244,26 @@ async fn ledger_routes_end_to_end() {
     )
     .await;
     assert_eq!(history.as_array().unwrap().len(), 3);
+    // Every version cites the same note: one source, without its full text.
+    let (status, sources, _) = call(
+        &app,
+        "GET",
+        &format!("/v1/assertions/{id}/sources"),
+        reader,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let sources = sources.as_array().unwrap();
+    assert_eq!(sources.len(), 1, "{sources:?}");
+    assert_eq!(sources[0]["source_id"], captured["source"]["id"]);
+    assert_eq!(sources[0]["kind"], "note");
+    assert_eq!(sources[0]["withdrawn"], false);
+    assert!(sources[0].get("content").is_none());
+    assert_eq!(
+        sources[0]["excerpt"], "agreed with Olya: release 2.4 on Nov 14",
+        "a note without a quote shows its start"
+    );
 
     // The competing proposal was built on version 1: accepting it now is a conflict.
     let competing_path = format!(

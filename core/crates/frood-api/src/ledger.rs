@@ -24,6 +24,7 @@ pub fn routes() -> Router<AppState> {
         .route("/v1/assertions", get(list_assertions))
         .route("/v1/assertions/{id}", get(assertion))
         .route("/v1/assertions/{id}/history", get(history))
+        .route("/v1/assertions/{id}/sources", get(sources_of))
         .route("/v1/assertions/{id}/sphere", put(set_sphere))
         .route("/v1/assertions/{id}/verify", post(verify))
         .route("/v1/spheres", get(spheres))
@@ -223,6 +224,72 @@ async fn history(
     Path(id): Path<Uuid>,
 ) -> ApiResult<Vec<AssertionVersion>> {
     Ok(Json(state.ledger.history(id).await?))
+}
+
+/// Where knowledge comes from, for its card (docs/32 QM1): the sources behind any of its
+/// versions, newest first, with the quotes that back it and without the sources' full text.
+async fn sources_of(
+    State(state): State<AppState>,
+    _caller: Caller<Read>,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Vec<serde_json::Value>> {
+    let mut ids: Vec<Uuid> = Vec::new();
+    for version in state.ledger.history(id).await? {
+        for evidence in version.evidence {
+            if !ids.contains(&evidence) {
+                ids.push(evidence);
+            }
+        }
+    }
+    let evidence = state.ledger.evidence(&ids).await?;
+    let mut sources: Vec<(Source, Vec<String>)> = Vec::new();
+    for e in evidence {
+        let quote = e.quote.filter(|q| !q.trim().is_empty());
+        if let Some((_, quotes)) = sources.iter_mut().find(|(s, _)| s.id == e.source_id) {
+            quotes.extend(quote.filter(|q| !quotes.contains(q)));
+            continue;
+        }
+        let source = state.ledger.source(e.source_id).await?;
+        sources.push((source, quote.into_iter().collect()));
+    }
+    sources.sort_by_key(|s| std::cmp::Reverse(s.0.captured_at));
+    Ok(Json(
+        sources
+            .into_iter()
+            .map(|(s, quotes)| {
+                serde_json::json!({
+                    "source_id": s.id,
+                    "kind": s.kind,
+                    "origin": s.origin,
+                    "uri": s.uri,
+                    "title": s.title,
+                    "said_at": s.said_at,
+                    "captured_at": s.captured_at,
+                    "captured_by": s.captured_by,
+                    "withdrawn": s.withdrawn_at.is_some(),
+                    // Without a quote, the start of what the source says (a note is all quote).
+                    "excerpt": quotes.is_empty().then(|| excerpt(s.content.as_deref())).flatten(),
+                    "quotes": quotes,
+                })
+            })
+            .collect(),
+    ))
+}
+
+fn excerpt(content: Option<&str>) -> Option<String> {
+    const CHARS: usize = 280;
+    let text = content?.trim();
+    if text.is_empty() {
+        return None;
+    }
+    Some(if text.chars().count() > CHARS {
+        format!(
+            "{}…",
+            text.chars().take(CHARS).collect::<String>().trim_end()
+        )
+    } else {
+        text.to_owned()
+    })
 }
 
 /// `GET /v1/assertions?kind=&sphere=&entity=&status=&text=&valid_at=&as_of=&limit=&after=&slot.<name>.<op>=`

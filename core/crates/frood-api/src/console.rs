@@ -25,17 +25,25 @@ const POLICY: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'u
                       img-src 'self' data:; font-src 'self'; connect-src 'self'; \
                       base-uri 'self'; frame-ancestors 'none'";
 
+/// The Mini App (docs/32, under `/admin/m/`) also loads Telegram's script, and Telegram's web
+/// client shows it in a frame.
+const MINI_APP_POLICY: &str = "default-src 'self'; script-src 'self' https://telegram.org; \
+                               style-src 'self' 'unsafe-inline'; img-src 'self' data:; \
+                               font-src 'self'; connect-src 'self'; base-uri 'self'; \
+                               frame-ancestors https://web.telegram.org";
+
 pub fn routes() -> Router<AppState> {
     Router::new()
         // Relative, so that it stays under a proxy's path such as `/frood`.
         .route("/admin", get(|| async { Redirect::permanent("admin/") }))
-        .route("/admin/", get(page))
+        .route("/admin/", get(|state| page(state, false)))
         .route("/admin/{*path}", get(file))
 }
 
 async fn file(state: State<AppState>, Path(path): Path<String>) -> Response {
     let Some(built) = Built::get(&path) else {
-        return page(state).await;
+        let mini_app = path == "m" || path.starts_with("m/");
+        return page(state, mini_app).await;
     };
     // Vite names built files by their content: they never change under the same name.
     let cache = if path.starts_with("assets/") {
@@ -54,7 +62,7 @@ async fn file(state: State<AppState>, Path(path): Path<String>) -> Response {
         .into_response()
 }
 
-async fn page(State(state): State<AppState>) -> Response {
+async fn page(State(state): State<AppState>, mini_app: bool) -> Response {
     let base = &state.auth.settings().base_path;
     let (html, policy) = match Built::get("index.html") {
         Some(index) => (
@@ -65,7 +73,7 @@ async fn page(State(state): State<AppState>) -> Response {
                     attribute(base)
                 ),
             ),
-            POLICY,
+            if mini_app { MINI_APP_POLICY } else { POLICY },
         ),
         None => (
             LEGACY.to_owned(),

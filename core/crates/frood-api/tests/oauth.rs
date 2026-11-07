@@ -1377,3 +1377,187 @@ async fn a_person_adds_a_passkey_and_signs_in_with_it() {
     let gone = send(&app, ask(&tx, "alice@example.com")).await;
     assert_eq!(gone.status, StatusCode::FORBIDDEN, "{}", gone.text());
 }
+
+/// Launch data as Telegram signs it for the bot `bot_id`, with a key of the test's own.
+fn launch_data(telegram_id: i64, bot_id: i64, key: &ed25519_dalek::SigningKey) -> String {
+    use ed25519_dalek::Signer;
+    let auth_date = chrono::Utc::now().timestamp().to_string();
+    let user = format!(r#"{{"id":{telegram_id},"first_name":"Alice","language_code":"ru"}}"#);
+    let mut pairs = vec![
+        ("auth_date", auth_date.as_str()),
+        ("chat_type", "sender"),
+        ("user", user.as_str()),
+    ];
+    pairs.sort();
+    let check = std::iter::once(format!("{bot_id}:WebAppData"))
+        .chain(pairs.iter().map(|(k, v)| format!("{k}={v}")))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let signature = URL_SAFE_NO_PAD.encode(key.sign(check.as_bytes()).to_bytes());
+    url::form_urlencoded::Serializer::new(String::new())
+        .extend_pairs(&pairs)
+        .append_pair("hash", "0000")
+        .append_pair("signature", &signature)
+        .finish()
+}
+
+async fn post_json(app: &Router, path: &str, body: Value, token: Option<&str>) -> Reply {
+    let mut request = Request::post(path).header(header::CONTENT_TYPE, "application/json");
+    if let Some(token) = token {
+        request = request.header(header::AUTHORIZATION, format!("Bearer {token}"));
+    }
+    send(app, request.body(Body::from(body.to_string())).unwrap()).await
+}
+
+#[tokio::test]
+async fn a_person_opens_the_mini_app_from_telegram() {
+    let Some(url) = frood_store::testing::database_url() else {
+        return;
+    };
+    let pool = frood_store::testing::fresh_database(&url, "oauth_mini_app")
+        .await
+        .expect("test database");
+    let raw = "version: 1\ninstallation: {name: home}\nserver: {public_url: 'https://frood.example.com'}\n\
+               storage: {uses: postgres, url: 'postgres://unused', objects: {uses: database}}\n\
+               deploy: {server: host}\njobs:\n  extract: { enabled: false }\n\
+               auth:\n  allow: [alice@example.com]\n";
+    let config = frood_config::parse(
+        raw,
+        &frood_config::Secrets::from_pairs(Vec::<(String, String)>::new()),
+    )
+    .expect("config")
+    .config;
+    // Telegram's own key cannot sign in a test: the server checks with the test's key.
+    let telegram = ed25519_dalek::SigningKey::from_bytes(&[7; 32]);
+    let mut settings = AuthSettings::from_config(&config);
+    settings.telegram_key = telegram.verifying_key().to_bytes();
+    let mut assembly =
+        frood_api::assemble(&config, std::path::Path::new("."), pool.clone(), |_| None);
+    let auth = Auth::new(pool.clone(), settings);
+    assembly.state.auth = auth.clone();
+    let app = router(assembly.state);
+    auth.register_service_token(
+        "telegram",
+        "tg-token",
+        &["knowledge:read".to_owned(), "channels:act".to_owned()],
+    )
+    .await
+    .unwrap();
+    let alice = auth
+        .user_id_by_email("alice@example.com", true)
+        .await
+        .unwrap();
+    let mallory = auth
+        .user_id_by_email("mallory@example.com", true)
+        .await
+        .unwrap();
+    for (external_id, user) in [("42", alice), ("44", mallory)] {
+        frood_store::sqlx::query(
+            "INSERT INTO channel_links (channel, external_id, user_id) VALUES ('telegram', $1, $2)",
+        )
+        .bind(external_id)
+        .bind(user)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    // Before the bot says its id, nothing signs in.
+    let open = |id: i64, bot: i64| launch_data(id, bot, &telegram);
+    let reply = post_json(
+        &app,
+        "/oauth/telegram",
+        json!({ "init_data": open(42, 7) }),
+        None,
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::UNAUTHORIZED, "{}", reply.text());
+
+    // The bot says its id along with where it opens.
+    let reply = send(
+        &app,
+        Request::put("/v1/channels/telegram/about")
+            .header(header::AUTHORIZATION, "Bearer tg-token")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({ "start_url": "https://t.me/frood_bot?start=", "bot_id": 7 }).to_string(),
+            ))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::NO_CONTENT, "{}", reply.text());
+
+    // Alice opens the Mini App: a short session that reads, writes and decides.
+    let reply = post_json(
+        &app,
+        "/oauth/telegram",
+        json!({ "init_data": open(42, 7) }),
+        None,
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.text());
+    assert_eq!(reply.header(header::CACHE_CONTROL), "no-store");
+    let session = reply.json();
+    assert_eq!(
+        session["scope"],
+        "knowledge:read knowledge:capture knowledge:propose knowledge:decide"
+    );
+    assert!(session.get("refresh_token").is_none(), "{session}");
+    let token = session["access_token"].as_str().unwrap();
+    let inbox = send(
+        &app,
+        Request::get("/v1/inbox")
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(inbox.status, StatusCode::OK, "{}", inbox.text());
+    // Nothing of the installation: linking another account needs `admin`.
+    let reply = post_json(
+        &app,
+        "/v1/channels/telegram/link-codes",
+        json!({}),
+        Some(token),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::FORBIDDEN, "{}", reply.text());
+
+    // Not linked, signed for another bot, or a person no longer allowed: refused.
+    for (data, why) in [
+        (open(43, 7), "not linked"),
+        (open(42, 8), "not signed"),
+        (open(44, 7), "not allowed"),
+    ] {
+        let reply = post_json(&app, "/oauth/telegram", json!({ "init_data": data }), None).await;
+        assert_eq!(
+            reply.status,
+            StatusCode::UNAUTHORIZED,
+            "{why}: {}",
+            reply.text()
+        );
+        assert!(
+            reply.json()["detail"].as_str().unwrap().contains(why),
+            "{why}: {}",
+            reply.text()
+        );
+    }
+
+    // The Mini App's page may load Telegram's script and be framed by Telegram's web client;
+    // the console stays as strict as before.
+    let page = get_with(&app, "/admin/m/inbox", None).await;
+    let console = get_with(&app, "/admin/inbox", None).await;
+    if page.header(header::CONTENT_TYPE).starts_with("text/html")
+        && page.text().contains("frood-base")
+    {
+        let policy = page.header(header::CONTENT_SECURITY_POLICY);
+        assert!(policy.contains("https://telegram.org"), "{policy}");
+        assert!(
+            policy.contains("frame-ancestors https://web.telegram.org"),
+            "{policy}"
+        );
+        let policy = console.header(header::CONTENT_SECURITY_POLICY);
+        assert!(policy.contains("frame-ancestors 'none'"), "{policy}");
+        assert!(!policy.contains("telegram.org"), "{policy}");
+    }
+}

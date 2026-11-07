@@ -20,11 +20,11 @@ import { headline, kindOf, type Origin, originOf, proposal, sphereOf, summary, T
 import type { Change, InboxEntry, QuestionContent } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-type Act = { action: string; alternative?: string; answer?: string; sphere?: string };
+export type Act = { action: string; alternative?: string; answer?: string; sphere?: string; unverified?: boolean };
 const ORIGINS: Origin[] = ["agent", "extract", "person"];
 
 /** Decides at once on screen; the server catches up, and a failure puts the items back. */
-function useAct() {
+export function useAct() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: ({ ids, act }: { ids: string[]; act: Act }) =>
@@ -42,7 +42,7 @@ function useAct() {
   });
 }
 
-function useUndo() {
+export function useUndo() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (ids: string[]) => Promise.all(ids.map((id) => api(`/v1/inbox/${id}/undo`, { method: "POST" }))),
@@ -403,7 +403,24 @@ function Fold({ text }: { text: string }) {
   );
 }
 
-function Detail({ entry, busy, onAct }: { entry: InboxEntry; busy: boolean; onAct: (act: Act) => void }) {
+/**
+ * One item in full with its actions. The Mini App (docs/32) shows no key hints and puts the
+ * accept button outside, as Telegram's main button: `accept` then holds what it does (with the
+ * sphere the person picked), or null when the item has no single accept.
+ */
+export function Detail({
+  entry,
+  busy,
+  onAct,
+  keys = true,
+  accept,
+}: {
+  entry: InboxEntry;
+  busy: boolean;
+  onAct: (act: Act) => void;
+  keys?: boolean;
+  accept?: { current: (() => void) | null };
+}) {
   const { t, ago } = useI18n();
   const originLabel = useOriginLabel();
   const [answer, setAnswer] = useState("");
@@ -419,6 +436,8 @@ function Detail({ entry, busy, onAct }: { entry: InboxEntry; busy: boolean; onAc
   const [sphere, setSphere] = useState<string | null>(proposed);
   const movable = !!p && has("accept") && !!k && p.alternatives[0]?.changes[0]?.sphere_before === undefined;
   const into = sphere !== proposed ? { sphere: sphere ?? "none" } : {};
+  const single = !!p && !several && has("accept");
+  if (accept) accept.current = single ? () => onAct({ action: "accept", ...into }) : null;
 
   return (
     <div className="flex min-h-full flex-col">
@@ -507,19 +526,19 @@ function Detail({ entry, busy, onAct }: { entry: InboxEntry; busy: boolean; onAc
 
       <div className="sticky bottom-0 flex flex-col gap-2 border-t bg-card/95 p-4 backdrop-blur">
         <div className="flex flex-wrap gap-2">
-          {p && !several && has("accept") && (
+          {single && !accept && (
             <Button disabled={busy} onClick={() => onAct({ action: "accept", ...into })}>
-              {t("inbox.accept")} <kbd dir="ltr" className="font-mono text-[11px] opacity-70">A</kbd>
+              {t("inbox.accept")} {keys && <kbd dir="ltr" className="font-mono text-[11px] opacity-70">A</kbd>}
             </Button>
           )}
           {has("reject") && (
             <Button variant="outline" disabled={busy} onClick={() => onAct({ action: "reject" })}>
-              {t("inbox.keep")} <kbd dir="ltr" className="font-mono text-[11px] text-muted-foreground">O</kbd>
+              {t("inbox.keep")} {keys && <kbd dir="ltr" className="font-mono text-[11px] text-muted-foreground">O</kbd>}
             </Button>
           )}
           {has("defer") && (
             <Button variant="outline" disabled={busy} onClick={() => onAct({ action: "defer" })}>
-              {t("inbox.defer")} <kbd dir="ltr" className="font-mono text-[11px] text-muted-foreground">S</kbd>
+              {t("inbox.defer")} {keys && <kbd dir="ltr" className="font-mono text-[11px] text-muted-foreground">S</kbd>}
             </Button>
           )}
           {(
