@@ -1,6 +1,6 @@
 {
   "name": "@froodai/openclaw-frood",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "description": "Frood as OpenClaw's memory: what Frood knows before each turn, and memory tools over your knowledge with sources and history.",
   "license": "Apache-2.0",
   "type": "module",

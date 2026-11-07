@@ -1,5 +1,5 @@
 name: frood
-version: 0.1.12
+version: 0.1.13
 description: "Frood — your memory with sources and history: recall before each turn, search and remember tools, Hermes' own memory mirrored as not-verified notes."
 hooks:
   - on_turn_start
