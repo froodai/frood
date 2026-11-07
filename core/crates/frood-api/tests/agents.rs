@@ -436,8 +436,24 @@ async fn agent_asks_waits_resumes_and_proposes() {
     assert_eq!(now["status"], "running", "{now}");
     assert_eq!(now["pending_messages"], json!([]), "delivered");
 
-    // It proposes. New knowledge from an ordinary source is taken at once, marked not verified
-    // (QF3); a change waits for a person, and the agent cannot decide it.
+    // It proposes. New knowledge from an ordinary source, with the address of the original,
+    // is taken at once, marked not verified (QF3); without the address nobody can open it to
+    // check, so it waits (docs/31 D2); a change waits for a person, and the agent cannot
+    // decide it.
+    let unlinked = text(
+        &tool(
+            &app,
+            &fresh,
+            "propose_change",
+            json!({
+                "operations": [{ "op": "create", "assertion": { "kind": "fact", "text": "Стенд обновляют по средам", "modality": "reported" } }],
+                "rationale": "Said in #release",
+                "source_text": "стенд обновляем по средам",
+            }),
+        )
+        .await,
+    );
+    assert_eq!(unlinked["state"], "open", "{unlinked}");
     let found = text(
         &tool(
             &app,
@@ -447,6 +463,7 @@ async fn agent_asks_waits_resumes_and_proposes() {
                 "operations": [{ "op": "create", "assertion": { "kind": "decision", "text": "Релизы по четвергам", "modality": "agreed" } }],
                 "rationale": "Agreed in #release at 18:02",
                 "source_text": "давай так и сделаем: релизы по четвергам",
+                "source_uri": "https://chat.example/release/p1762707720",
             }),
         )
         .await,

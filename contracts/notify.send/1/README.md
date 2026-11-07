@@ -47,7 +47,7 @@ is appended). Optional; without it the console shows the code to send.
 → `{ "message_ref": "373739001:52" }`
 
 - `recipient.external_id` is the person's account in this channel, from the account link.
-- `item.item.kind` is `proposal`, `question`, `reminder`, `alert` or `digest`; `content` depends on
+- `item.item.kind` is `proposal`, `question`, `reminder`, `alert`, `digest` or `sign_in`; `content` depends on
   it:
   - `proposal`: `risk`, `author`, `rationale`, `quote` (the words it rests on), `alternatives`
     with `changes` (`kind`; `title`, a short headline, null for knowledge recorded without one;
@@ -62,9 +62,18 @@ is appended). Optional; without it the console shows the code to send.
   - `question`: `text`, `options`, `context`, `job`;
   - `reminder`: `assertion_id`, `text`, `due`, `step` (`before`, `today`, `overdue`);
   - `alert`: `run_id`, `job`, `error`;
-  - `digest`: `since`, `until`, `accepted` (`text`, `sphere`), `waiting` (`count`, `items` with
-    `what`, `kind`, `sphere`), `due_soon` (`text`, `due`, `sphere`), `failed_runs` (`job`, `error`);
-    a channel may group each list by sphere.
+  - `digest` (docs/31): `since`, `until`; `important` — what needs the person whatever its age
+    (`id`, `kind`, `why`: `conflict`, `question`, `due`, `failed`; `title`, `label`, `link`);
+    `accepted` and `waiting.new` — what is new, one line per issue or page (`ids`, `count`,
+    `kind`, `title` of at most 80 characters, `label` such as `AIRC-1808`, `link` to the
+    original or null, `sphere`); `waiting.count` and `waiting.older` (`count`, `since`) — what
+    waited longer, as one line; `due_soon` (`title`, `due`, `sphere`, and `why` — `due_today`,
+    `due_tomorrow`, `overdue` — when it is urgent); `accept_ids` — open findings a person may
+    accept at once as not verified (`POST /v1/inbox/{id}/act` with `"unverified": true`). When
+    an agent wrote the digest in plain words, `item.investigation.report` has its lines: show
+    them instead, labels as links. Buttons: go through what waits, accept the findings, less
+    often (`PUT /v1/channels/{channel}/links/{external_id}/digest` with `every`: `daily`,
+    `weekly` or `off`). A shown digest leaves the Inbox; no `notify.update` follows.
 - `item.item.investigation`, when present, carries an agent's `report` gathered before anyone was
   told: show it with the item.
 - `actions` are what the person may do; each becomes a button. Send the chosen one back as the

@@ -265,7 +265,8 @@ pub struct ProposeParams {
     /// used as evidence for assertions that name none.
     pub source_text: Option<String>,
     /// Address of the original source_text comes from (an issue, a pull request, a thread): pass
-    /// it whenever there is one, so a person can open the original.
+    /// it whenever there is one, so a person can open the original. An agent's new knowledge
+    /// without it waits for a person instead of being taken at once.
     pub source_uri: Option<String>,
     /// Name of that original, e.g. "AIRC-1808: Task view keeps loading".
     pub source_title: Option<String>,

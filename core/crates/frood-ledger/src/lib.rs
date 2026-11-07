@@ -626,6 +626,28 @@ impl Ledger {
     ) -> Result<ProposalContext> {
         let mut context = context.clone();
         let person = proposal.author.split('/').next().unwrap_or_default();
+        // An agent job's finding must say where it is (docs/31 D2); extraction reads the
+        // person's own notes, which have no address.
+        if person.starts_with("agent:") && person != "agent:extract" {
+            let evidence: Vec<Uuid> = proposal
+                .alternatives
+                .iter()
+                .flat_map(|a| &a.operations)
+                .filter_map(|op| match op {
+                    Operation::Create { assertion, .. }
+                    | Operation::Supersede { assertion, .. } => Some(assertion.evidence.clone()),
+                    _ => None,
+                })
+                .flatten()
+                .collect();
+            context.unlinked_finding = sqlx::query_scalar(
+                "SELECT count(*) = 0 OR bool_or(s.uri IS NULL OR s.uri !~ '^https?://') FROM evidence e \
+                 JOIN sources s ON s.id = e.source_id WHERE e.id = ANY($1)",
+            )
+            .bind(&evidence)
+            .fetch_one(&self.pool)
+            .await?;
+        }
         let [only] = proposal.alternatives.as_slice() else {
             return Ok(context);
         };
@@ -662,6 +684,13 @@ impl Ledger {
     /// What a policy took without a person's check — an agent's finding in an ordinary source
     /// (QF3), imported memory (QF2) — is marked not verified: answers say so, and a person's
     /// check takes the mark off.
+    /// What an accepted proposal created stays marked not verified: a person took it without a
+    /// check (the digest's "accept all as not verified", docs/31 D4).
+    pub async fn keep_unverified(&self, proposal_id: Uuid, reason: &str) -> Result<()> {
+        let proposal = self.proposal(proposal_id).await?;
+        self.mark_unverified(&proposal, reason).await
+    }
+
     async fn mark_unverified(&self, proposal: &Proposal, reason: &str) -> Result<()> {
         let created: Vec<Uuid> = sqlx::query_scalar(
             "SELECT assertion_id FROM assertion_versions WHERE proposal_id = $1 AND version = 1",

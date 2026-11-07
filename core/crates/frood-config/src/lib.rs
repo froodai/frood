@@ -862,6 +862,13 @@ fn validate_attention(config: &Config, problems: &mut Vec<String>) {
         ));
     }
     for (email, person) in &attention.people {
+        if let Some(every) = &person.digest
+            && !["daily", "weekly", "off"].contains(&every.as_str())
+        {
+            problems.push(format!(
+                "attention.people.{email}: digest {every:?} is daily, weekly or off"
+            ));
+        }
         if let Some(reminders) = &person.reminders {
             validate_reminders(
                 &format!("attention.people.{email}.reminders"),

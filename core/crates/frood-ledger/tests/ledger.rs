@@ -1556,7 +1556,46 @@ async fn own_changes_are_taken_and_agents_findings_marked_not_verified() {
     assert_eq!(changed.state, ProposalState::Accepted);
     assert_eq!(changed.verdicts[0].decided_by, "policy:own-change");
 
-    // An agent's new finding: taken, but marked not verified.
+    // An agent's new finding with the address of the original: taken, but marked not
+    // verified. Without an address nobody can open it to check, so it waits (docs/31 D2).
+    let unlinked = ledger
+        .open_proposal(
+            &agent(),
+            proposal(
+                Risk::New,
+                vec![],
+                vec![Operation::Create {
+                    key: None,
+                    assertion: commitment(
+                        "Stand on Wednesdays",
+                        "2026-11-11",
+                        day(2026, 10, 3),
+                        note,
+                    ),
+                }],
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(unlinked.state, ProposalState::Open);
+    let linked = ledger
+        .capture_source(
+            &agent(),
+            NewSource {
+                kind: "issue".into(),
+                origin: "capture".into(),
+                uri: Some("https://tracker.example/issue/DOC-7".into()),
+                title: Some("DOC-7: docs freeze".into()),
+                content: "docs freeze on Nov 10".into(),
+                said_at: None,
+                metadata: json!({}),
+            },
+        )
+        .await
+        .unwrap()
+        .source
+        .evidence[0]
+        .id;
     let found = ledger
         .open_proposal(
             &agent(),
@@ -1565,7 +1604,7 @@ async fn own_changes_are_taken_and_agents_findings_marked_not_verified() {
                 vec![],
                 vec![Operation::Create {
                     key: None,
-                    assertion: commitment("Docs freeze", "2026-11-10", day(2026, 10, 3), note),
+                    assertion: commitment("Docs freeze", "2026-11-10", day(2026, 10, 3), linked),
                 }],
             ),
         )

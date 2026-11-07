@@ -14,7 +14,7 @@ const ANTHROPIC_URL: &str = "https://api.anthropic.com";
 const OPENAI_URL: &str = "https://api.openai.com";
 const TELEGRAM_URL: &str = "https://api.telegram.org";
 /// When the digest runs unless asked otherwise: the server's own default (docs/27 §3).
-pub const DIGEST_AT: &str = "08:30";
+pub const DIGEST_AT: &str = "10:00";
 /// Languages the Telegram bot speaks.
 const BOT_LANGUAGES: [&str; 8] = ["en", "ru", "es", "fr", "pt", "zh", "hi", "ar"];
 
@@ -63,7 +63,7 @@ pub struct Answers {
     pub voice: bool,
     /// A folder for backups (an external disk, say).
     pub backups: Option<PathBuf>,
-    /// Weekdays at this time, when not 08:30.
+    /// Weekdays at this time, when not 10:00.
     pub digest_at: Option<String>,
     /// The language the bot speaks.
     pub language: String,

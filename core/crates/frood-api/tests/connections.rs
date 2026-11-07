@@ -500,7 +500,7 @@ async fn jobs_change_from_the_console() {
     let digest = setting(&listed, "digest");
     assert_eq!(digest["from"], "default");
     assert_eq!(digest["running"], true);
-    assert_eq!(digest["schedules"][0]["schedule"], "30 8 * * 1-5");
+    assert_eq!(digest["schedules"][0]["schedule"], "0 10 * * 1-5");
     assert_eq!(setting(&listed, "transcribe")["from"], "config");
     assert_eq!(setting(&listed, "extract")["on_events"], true);
     assert!(running("digest"));

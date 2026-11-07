@@ -199,7 +199,13 @@ pub(crate) fn text(shown: &Value, w: &Words, spheres: &Spheres) -> String {
                 lines.push(esc(&short(error, 400)));
             }
         }
-        "digest" => lines.push(digest_text(content, w, spheres)),
+        "digest" => {
+            let written = item
+                .pointer("/investigation/report")
+                .and_then(Value::as_str);
+            lines.push(digest_text(content, w, spheres, written));
+            return lines.join("\n");
+        }
         "sign_in" => {
             lines.push(format!("<b>{}</b>", esc(w.sign_in_title)));
             lines.push(format!(
@@ -271,93 +277,176 @@ fn detector_text(c: &Value, w: &Words) -> String {
 }
 
 /// A digest (`GET /v1/digest` or a `digest` item) as text, each section by sphere.
-pub(crate) fn digest_text(digest: &Value, w: &Words, spheres: &Spheres) -> String {
-    let mut lines = vec![format!("<b>{}</b>", esc(w.digest))];
-    // A few short lines per section; the rest is a count, the console or /inbox has it all.
-    let list = |title: String,
-                items: Vec<(Option<String>, String)>,
-                total: usize,
-                lines: &mut Vec<String>| {
-        if items.is_empty() {
-            return;
-        }
-        lines.push(format!("\n<b>{title}</b>"));
-        let shown = items.iter().take(DIGEST_ITEMS).cloned().collect();
-        lines.extend(spheres.grouped(shown, w));
-        if total > DIGEST_ITEMS.min(items.len()) {
-            lines.push(format!(
-                "<i>{}</i>",
-                esc(&w
-                    .more
-                    .replace("{n}", &(total - DIGEST_ITEMS.min(items.len())).to_string()))
-            ));
-        }
+/// A label as a link to the original when there is one.
+fn labelled(label: Option<&str>, link: Option<&str>) -> Option<String> {
+    let label = label?;
+    Some(match link {
+        Some(link) => format!("<a href=\"{}\">{}</a>", esc(link), esc(label)),
+        None => esc(label),
+    })
+}
+
+/// "AIRC-1808 — title (3)", the label a link to the original.
+fn digest_line(entry: &Value) -> String {
+    let title = esc(&short(entry["title"].as_str().unwrap_or("?"), DIGEST_CHARS));
+    let count = entry["count"].as_u64().unwrap_or(1);
+    let more = if count > 1 {
+        format!(" ({count})")
+    } else {
+        String::new()
     };
-    let sphere = |v: &Value| v["sphere"].as_str().map(str::to_owned);
-    // Each accepted item is {text, sphere}; a core before spheres sent plain strings.
-    let accepted: Vec<(Option<String>, String)> = digest["accepted"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|a| {
-            let text = a.as_str().or_else(|| a["text"].as_str())?;
-            Some((sphere(a), esc(&short(text, DIGEST_CHARS))))
-        })
-        .collect();
-    let accepted_total = accepted.len();
-    list(esc(w.digest_accepted), accepted, accepted_total, &mut lines);
-    let waiting: Vec<(Option<String>, String)> = digest["waiting"]["items"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|i| {
-            let what = i["what"].as_str()?;
-            Some((sphere(i), esc(&short(what, DIGEST_CHARS))))
-        })
-        .collect();
-    let count = digest["waiting"]["count"].as_u64().unwrap_or(0) as usize;
-    if count > 0 {
-        list(
-            format!("{} ({count})", esc(w.digest_waiting)),
-            waiting,
-            count,
-            &mut lines,
-        );
+    match labelled(entry["label"].as_str(), entry["link"].as_str()) {
+        Some(label) => format!("{label} — {title}{more}"),
+        None => format!("{title}{more}"),
     }
-    let due: Vec<(Option<String>, String)> = digest["due_soon"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .map(|d| {
-            let line = format!(
-                "<b>{}</b> — {}",
-                esc(d["due"].as_str().unwrap_or("?")),
-                esc(&short(d["text"].as_str().unwrap_or("?"), DIGEST_CHARS))
-            );
-            (sphere(d), line)
+}
+
+/// The digest (docs/31): what needs the person now, what is new, and how many waited longer.
+/// When an agent wrote it in plain words (the item's investigation report), that text goes
+/// instead, its labels turned into links.
+pub(crate) fn digest_text(
+    digest: &Value,
+    w: &Words,
+    spheres: &Spheres,
+    written: Option<&str>,
+) -> String {
+    let mut lines = vec![format!("<b>{}</b>", esc(w.digest))];
+    let entries = |key: &str| -> Vec<Value> {
+        digest
+            .pointer(key)
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+    };
+    if let Some(written) = written.map(str::trim).filter(|t| !t.is_empty()) {
+        // The agent's words, with each label it kept made a link again.
+        let mut links: Vec<(String, String)> = Vec::new();
+        for key in ["/important", "/accepted", "/waiting/new"] {
+            for entry in entries(key) {
+                if let (Some(label), Some(link)) = (entry["label"].as_str(), entry["link"].as_str())
+                {
+                    links.push((
+                        esc(label),
+                        format!("<a href=\"{}\">{}</a>", esc(link), esc(label)),
+                    ));
+                }
+            }
+        }
+        for line in written
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .take(14)
+        {
+            let mut line = esc(&short(line, 160));
+            if let Some((label, link)) = links
+                .iter()
+                .find(|(label, _)| line.starts_with(label.as_str()))
+            {
+                line = line.replacen(label.as_str(), link, 1);
+            }
+            lines.push(line);
+        }
+        return lines.join("\n");
+    }
+    let tag = |why: &str| match why {
+        "conflict" => w.tag_conflict,
+        "question" => w.tag_question,
+        "due" => w.tag_due,
+        "due_today" => w.tag_today,
+        "due_tomorrow" => w.tag_tomorrow,
+        "overdue" => w.tag_overdue,
+        "failed" => w.tag_failed,
+        _ => "",
+    };
+    let mut important: Vec<String> = entries("/important")
+        .iter()
+        .map(|i| {
+            format!(
+                "• <i>{}</i> · {}",
+                esc(tag(i["why"].as_str().unwrap_or_default())),
+                digest_line(i)
+            )
         })
         .collect();
-    let due_total = due.len();
-    list(esc(w.digest_due), due, due_total, &mut lines);
-    let failed: Vec<(Option<String>, String)> = digest["failed_runs"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .map(|r| {
-            let line = format!(
-                "{}: {}",
-                esc(r["job"].as_str().unwrap_or("?")),
-                esc(&short(r["error"].as_str().unwrap_or("?"), DIGEST_CHARS))
-            );
-            (None, line)
-        })
+    important.extend(
+        entries("/due_soon")
+            .iter()
+            .filter(|d| d.get("why").is_some())
+            .map(|d| {
+                format!(
+                    "• <i>{}</i> · {}",
+                    esc(tag(d["why"].as_str().unwrap_or_default())),
+                    digest_line(d)
+                )
+            }),
+    );
+    if !important.is_empty() {
+        lines.push(format!("\n<b>{}</b>", esc(w.digest_important)));
+        lines.extend(important.into_iter().take(DIGEST_ITEMS * 2));
+    }
+    let sphere = |v: &Value| v["sphere"].as_str().map(str::to_owned);
+    let fresh: Vec<(Option<String>, String)> = entries("/accepted")
+        .iter()
+        .chain(entries("/waiting/new").iter())
+        .map(|e| (sphere(e), digest_line(e)))
         .collect();
-    let failed_total = failed.len();
-    list(esc(w.digest_failed), failed, failed_total, &mut lines);
+    if !fresh.is_empty() {
+        lines.push(format!("\n<b>{}</b>", esc(w.digest_new)));
+        lines.extend(spheres.grouped(fresh.into_iter().take(DIGEST_ITEMS * 2).collect(), w));
+    }
+    let older = digest["waiting"]["older"]["count"].as_u64().unwrap_or(0);
+    if older > 0 {
+        let date = digest["waiting"]["older"]["since"]
+            .as_str()
+            .and_then(|s| s.get(..10))
+            .and_then(chrono_like_date)
+            .unwrap_or_default();
+        lines.push(format!(
+            "\n{}",
+            esc(&w
+                .digest_older
+                .replace("{n}", &older.to_string())
+                .replace("{date}", &date))
+        ));
+    }
     if lines.len() == 1 {
         lines.push(esc(w.digest_nothing));
     }
     lines.join("\n")
+}
+
+/// "2026-10-20" as "20.10".
+fn chrono_like_date(iso: &str) -> Option<String> {
+    let mut parts = iso.split('-');
+    let (_, month, day) = (parts.next()?, parts.next()?, parts.next()?);
+    Some(format!("{day}.{month}"))
+}
+
+/// The digest's buttons: go through what waits, accept the findings as not verified, less often.
+pub(crate) fn digest_keyboard(shown: &Value, w: &Words) -> Value {
+    let id = shown["item"]["id"].as_str().unwrap_or_default();
+    let digest = &shown["content"];
+    let mut rows = Vec::new();
+    let waiting = digest["waiting"]["count"].as_u64().unwrap_or(0);
+    if waiting > 0 {
+        rows.push(json!([{ "text": w.review.replace("{n}", &waiting.to_string()), "callback_data": format!("g:r:{id}") }]));
+    }
+    let findings = digest["accept_ids"].as_array().map_or(0, Vec::len);
+    if findings > 0 {
+        rows.push(json!([{ "text": w.accept_unverified.replace("{n}", &findings.to_string()), "callback_data": format!("g:a:{id}") }]));
+    }
+    rows.push(json!([{ "text": w.less_often, "callback_data": format!("g:l:{id}") }]));
+    json!({ "inline_keyboard": rows })
+}
+
+/// How often the digest comes: three buttons in place of the digest's own.
+pub(crate) fn every_keyboard(id: &str, w: &Words) -> Value {
+    json!({ "inline_keyboard": [
+        [{ "text": w.every_daily, "callback_data": format!("g:e:daily:{id}") }],
+        [{ "text": w.every_weekly, "callback_data": format!("g:e:weekly:{id}") }],
+        [{ "text": w.every_off, "callback_data": format!("g:e:off:{id}") }],
+    ] })
 }
 
 /// How many lines a digest section shows, and how long each may be.
@@ -396,6 +485,9 @@ fn resolution(resolution: &Value, w: &Words) -> String {
 /// One row per button; callback data names the item and the action's index. A link to the
 /// item in the console comes last when the installation has a public address.
 pub(crate) fn keyboard(shown: &Value, w: &Words, console: Option<&str>) -> Value {
+    if shown["item"]["kind"] == "digest" {
+        return digest_keyboard(shown, w);
+    }
     let id = shown["item"]["id"].as_str().unwrap_or_default();
     let several = shown["actions"]
         .as_array()
@@ -534,6 +626,16 @@ impl Bot {
         let data = query["data"].as_str().unwrap_or_default();
         let chat = query.pointer("/message/chat/id").and_then(Value::as_i64);
         let message_id = query.pointer("/message/message_id").and_then(Value::as_i64);
+        if let Some(rest) = data.strip_prefix("g:") {
+            let said = self.digest_button(rest, &from, chat.zip(message_id)).await;
+            let _ = self
+                .telegram(
+                    "answerCallbackQuery",
+                    json!({ "callback_query_id": query_id, "text": said }),
+                )
+                .await;
+            return;
+        }
         let mut parts = data.split(':');
         let (kind, item_id, index) = (parts.next(), parts.next(), parts.next());
         let answer = |text: String| {
@@ -656,6 +758,101 @@ impl Bot {
     }
 }
 
+impl Bot {
+    /// A digest button (docs/31 D4): `r:<id>` goes through what waits, `a:<id>` accepts the
+    /// findings as not verified, `l:<id>` offers how often, `e:<every>:<id>` sets it.
+    async fn digest_button(&self, data: &str, from: &str, at: Option<(i64, i64)>) -> String {
+        let w = self.lang.words();
+        let t = self.lang.texts();
+        let parts: Vec<&str> = data.split(':').collect();
+        let set_markup = |markup: Value| {
+            let bot = self.clone();
+            async move {
+                if let Some((chat, message_id)) = at {
+                    let _ = bot
+                        .telegram(
+                            "editMessageReplyMarkup",
+                            json!({ "chat_id": chat, "message_id": message_id, "reply_markup": markup }),
+                        )
+                        .await;
+                }
+            }
+        };
+        match parts.as_slice() {
+            ["r", _] => {
+                if let Some((chat, _)) = at {
+                    self.inbox(chat).await;
+                }
+                w.ok.to_owned()
+            }
+            ["a", id] => {
+                let Some(shown) = self.inbox_item(id).await else {
+                    return t.batch_gone.to_owned();
+                };
+                let mut accepted = 0;
+                for finding in shown["content"]["accept_ids"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                {
+                    let Some(finding) = finding.as_str() else {
+                        continue;
+                    };
+                    let done = self
+                        .frood(
+                            self.http
+                                .post(format!("{}/v1/inbox/{finding}/act", self.frood)),
+                        )
+                        .json(
+                            &json!({ "action": "accept", "unverified": true, "external_id": from }),
+                        )
+                        .send()
+                        .await
+                        .is_ok_and(|r| r.status().is_success());
+                    if done {
+                        accepted += 1;
+                    }
+                }
+                let mut left = shown.clone();
+                left["content"]["accept_ids"] = json!([]);
+                set_markup(digest_keyboard(&left, w)).await;
+                w.accepted_unverified.replace("{n}", &accepted.to_string())
+            }
+            ["l", id] => {
+                set_markup(every_keyboard(id, w)).await;
+                w.less_often.to_owned()
+            }
+            ["e", every @ ("daily" | "weekly" | "off"), id] => {
+                let set = self
+                    .frood(self.http.put(format!(
+                        "{}/v1/channels/{}/links/{from}/digest",
+                        self.frood, self.channel
+                    )))
+                    .json(&json!({ "every": every }))
+                    .send()
+                    .await;
+                if let Some(shown) = self.inbox_item(id).await {
+                    set_markup(digest_keyboard(&shown, w)).await;
+                }
+                match set {
+                    Ok(r) if r.status().is_success() => match *every {
+                        "weekly" => w.every_set_weekly,
+                        "off" => w.every_set_off,
+                        _ => w.every_set_daily,
+                    }
+                    .to_owned(),
+                    Ok(r) => {
+                        let body: Value = r.json().await.unwrap_or(Value::Null);
+                        short(body["detail"].as_str().unwrap_or("?"), 190)
+                    }
+                    Err(err) => short(&err.to_string(), 190),
+                }
+            }
+            _ => w.already.to_owned(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -774,25 +971,64 @@ mod tests {
     }
 
     #[test]
-    fn a_digest_lists_what_is_new() {
+    fn a_digest_says_what_needs_you_what_is_new_and_counts_the_rest() {
         let w = Lang::Ru.words();
         let digest = json!({
-            "accepted": [{ "text": "Релиз 2.4 — 28 ноября", "sphere": "business" }],
-            "waiting": { "count": 1, "items": [{ "kind": "question", "what": "Решение или обсуждение?" }] },
-            "due_soon": [{ "text": "Сдать отчёт", "due": "2026-11-14" }],
-            "failed_runs": []
+            "important": [{ "id": "q1", "kind": "question", "why": "question", "title": "Решение или обсуждение?", "label": null, "link": null }],
+            "accepted": [{ "title": "Релиз 2.4 — 28 ноября", "count": 1 }],
+            "waiting": {
+                "count": 13,
+                "new": [{ "title": "сессия с длинной историей грузится 22 минуты", "label": "AIRC-1808", "link": "https://yt.example/issue/AIRC-1808", "count": 3 }],
+                "older": { "count": 11, "since": "2026-10-20T08:00:00Z" }
+            },
+            "due_soon": [{ "title": "Сдать отчёт", "due": "2026-11-07", "why": "due_today" }, { "title": "Позже", "due": "2026-11-12" }],
+            "accept_ids": ["p1", "p2"]
         });
         assert_eq!(
-            digest_text(&digest, w, &Spheres::default()),
-            "<b>📋 Что нового</b>\n\n<b>Принято</b>\n• Релиз 2.4 — 28 ноября\n\n<b>Ждёт вашего решения (1)</b>\n• Решение или обсуждение?\n\n<b>Скоро сроки</b>\n• <b>2026-11-14</b> — Сдать отчёт"
+            digest_text(&digest, w, &Spheres::default(), None),
+            "<b>📋 Что нового</b>\n\n<b>Нужно вам сейчас</b>\n• <i>вопрос</i> · Решение или обсуждение?\n• <i>сегодня</i> · Сдать отчёт\n\n<b>Новое</b>\n• Релиз 2.4 — 28 ноября\n• <a href=\"https://yt.example/issue/AIRC-1808\">AIRC-1808</a> — сессия с длинной историей грузится 22 минуты (3)\n\n⏳ 11 ждут вашего решения с 20.10"
         );
+        // Nothing to say: the core sends no digest, and a bare one says so.
         assert_eq!(
             digest_text(
                 &json!({ "waiting": { "count": 0 } }),
                 w,
-                &Spheres::default()
+                &Spheres::default(),
+                None
             ),
             "<b>📋 Что нового</b>\nНичего нового."
+        );
+        // Written by the agent: its lines, the labels made links again.
+        let written = "AIRC-1808 — долгая загрузка старой сессии: три находки\nЕщё 11 ждут решения с 20 октября";
+        assert_eq!(
+            digest_text(&digest, w, &Spheres::default(), Some(written)),
+            "<b>📋 Что нового</b>\n<a href=\"https://yt.example/issue/AIRC-1808\">AIRC-1808</a> — долгая загрузка старой сессии: три находки\nЕщё 11 ждут решения с 20 октября"
+        );
+        // Its buttons: go through the 13, accept the 2 findings, less often.
+        let shown = json!({ "item": { "id": "d1", "kind": "digest" }, "content": digest, "actions": [{ "action": "seen" }] });
+        let buttons = keyboard(&shown, w, None);
+        let rows: Vec<(&str, &str)> = buttons["inline_keyboard"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| {
+                (
+                    r[0]["text"].as_str().unwrap(),
+                    r[0]["callback_data"].as_str().unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                ("Разобрать (13)", "g:r:d1"),
+                ("Принять 2 как непроверенные", "g:a:d1"),
+                ("Реже", "g:l:d1")
+            ]
+        );
+        assert_eq!(
+            every_keyboard("d1", w)["inline_keyboard"][1][0]["callback_data"],
+            "g:e:weekly:d1"
         );
     }
 
@@ -834,15 +1070,14 @@ mod tests {
         );
 
         let digest = json!({
-            "accepted": [{ "text": "Билеты на праздники", "sphere": "personal" },
-                         { "text": "Релиз 2.4 — 28 ноября", "sphere": "business" }],
+            "accepted": [{ "title": "Билеты на праздники", "sphere": "personal" },
+                         { "title": "Релиз 2.4 — 28 ноября", "sphere": "business" }],
             "waiting": { "count": 0 },
-            "due_soon": [],
-            "failed_runs": []
+            "due_soon": []
         });
         assert_eq!(
-            digest_text(&digest, w, &spheres),
-            "<b>📋 Что нового</b>\n\n<b>Принято</b>\n<i>💼 Работа · бизнес</i>\n• Релиз 2.4 — 28 ноября\n<i>🏠 Личное</i>\n• Билеты на праздники"
+            digest_text(&digest, w, &spheres, None),
+            "<b>📋 Что нового</b>\n\n<b>Новое</b>\n<i>💼 Работа · бизнес</i>\n• Релиз 2.4 — 28 ноября\n<i>🏠 Личное</i>\n• Билеты на праздники"
         );
     }
 

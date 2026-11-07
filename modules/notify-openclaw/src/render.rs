@@ -126,47 +126,104 @@ fn reminder(content: &Value, w: &Words, lines: &mut Vec<String>) {
     lines.push(content["text"].as_str().unwrap_or_default().to_owned());
 }
 
-fn digest(content: &Value, w: &Words, lines: &mut Vec<String>) {
+/// "AIRC-1808 — title (3) https://…": a chat turns the address into a link.
+fn digest_line(entry: &Value) -> String {
+    let title = short(entry["title"].as_str().unwrap_or("?"), 110);
+    let count = entry["count"].as_u64().unwrap_or(1);
+    let mut line = match entry["label"].as_str() {
+        Some(label) => format!("{label} — {title}"),
+        None => title,
+    };
+    if count > 1 {
+        line.push_str(&format!(" ({count})"));
+    }
+    if let Some(link) = entry["link"].as_str() {
+        line.push_str(&format!(" {link}"));
+    }
+    line
+}
+
+/// The digest (docs/31): what needs the person now, what is new, how many waited longer. When
+/// an agent wrote it in plain words, that text goes instead.
+fn digest(content: &Value, written: Option<&str>, w: &Words, lines: &mut Vec<String>) {
     lines.push(w.digest.to_owned());
-    let list = |key: &str| content[key].as_array().cloned().unwrap_or_default();
-    let accepted = list("accepted");
-    let waiting = content["waiting"]["items"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
-    let due = list("due_soon");
-    let failed = list("failed_runs");
-    if accepted.is_empty() && waiting.is_empty() && due.is_empty() && failed.is_empty() {
+    if let Some(written) = written.map(str::trim).filter(|t| !t.is_empty()) {
+        lines.extend(
+            written
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty())
+                .take(14)
+                .map(|l| short(l, 160)),
+        );
+        return;
+    }
+    let entries = |key: &str| -> Vec<Value> {
+        content
+            .pointer(key)
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+    };
+    let tag = |why: &str| match why {
+        "conflict" => w.tag_conflict,
+        "question" => w.tag_question,
+        "due" => w.tag_due,
+        "due_today" => w.tag_today,
+        "due_tomorrow" => w.tag_tomorrow,
+        "overdue" => w.tag_overdue,
+        "failed" => w.tag_failed,
+        _ => "",
+    };
+    let important: Vec<String> = entries("/important")
+        .iter()
+        .chain(
+            entries("/due_soon")
+                .iter()
+                .filter(|d| d.get("why").is_some()),
+        )
+        .map(|i| {
+            format!(
+                "- {} · {}",
+                tag(i["why"].as_str().unwrap_or_default()),
+                digest_line(i)
+            )
+        })
+        .collect();
+    let fresh: Vec<String> = entries("/accepted")
+        .iter()
+        .chain(entries("/waiting/new").iter())
+        .map(|e| format!("- {}", digest_line(e)))
+        .collect();
+    let older = content["waiting"]["older"]["count"].as_u64().unwrap_or(0);
+    if important.is_empty() && fresh.is_empty() && older == 0 {
         lines.push(w.digest_nothing.to_owned());
         return;
     }
-    let mut part = |title: &str, items: Vec<String>| {
-        if !items.is_empty() {
-            lines.push(format!("{title}:"));
-            lines.extend(items.into_iter().map(|i| format!("- {}", short(&i, 160))));
-        }
-    };
-    let field = |items: &[Value], key: &str| -> Vec<String> {
-        items
-            .iter()
-            .filter_map(|i| i[key].as_str().map(str::to_owned))
-            .collect()
-    };
-    part(w.digest_accepted, field(&accepted, "text"));
-    part(w.digest_waiting, field(&waiting, "what"));
-    part(
-        w.digest_due,
-        due.iter()
+    if !important.is_empty() {
+        lines.push(format!("{}:", w.digest_important));
+        lines.extend(important.into_iter().take(10));
+    }
+    if !fresh.is_empty() {
+        lines.push(format!("{}:", w.digest_new));
+        lines.extend(fresh.into_iter().take(10));
+    }
+    if older > 0 {
+        let date = content["waiting"]["older"]["since"]
+            .as_str()
+            .and_then(|s| s.get(..10))
             .map(|d| {
-                format!(
-                    "{} ({})",
-                    d["text"].as_str().unwrap_or("?"),
-                    d["due"].as_str().unwrap_or("?")
-                )
+                let mut parts = d.split('-').skip(1);
+                let (month, day) = (parts.next().unwrap_or("?"), parts.next().unwrap_or("?"));
+                format!("{day}.{month}")
             })
-            .collect(),
-    );
-    part(w.digest_failed, field(&failed, "job"));
+            .unwrap_or_default();
+        lines.push(
+            w.digest_older
+                .replace("{n}", &older.to_string())
+                .replace("{date}", &date),
+        );
+    }
 }
 
 /// The message of a shown item (`{item, content, actions}`).
@@ -197,7 +254,13 @@ pub(crate) fn text(shown: &Value, console: Option<&str>, w: &Words) -> String {
                 lines.push(short(error, 400));
             }
         }
-        "digest" => digest(content, w, &mut lines),
+        "digest" => {
+            let written = item
+                .pointer("/investigation/report")
+                .and_then(Value::as_str);
+            digest(content, written, w, &mut lines);
+            return lines.join("\n");
+        }
         "sign_in" => {
             lines.push(w.sign_in_title.to_owned());
             lines.push(format!(
@@ -384,30 +447,48 @@ mod tests {
     }
 
     #[test]
-    fn a_digest_lists_what_is_new_and_asks_for_nothing() {
+    fn a_digest_lists_what_needs_you_and_what_is_new_and_asks_for_nothing() {
         let w = Lang::En.words();
         let shown = json!({
             "item": { "id": "d", "kind": "digest", "state": "open" },
             "content": {
-                "accepted": [{ "text": "Release moved to Nov 28" }],
-                "waiting": { "count": 1, "items": [{ "what": "A decision or a discussion?" }] },
-                "due_soon": [{ "text": "Send the report", "due": "2026-11-14" }],
-                "failed_runs": []
+                "important": [{ "why": "question", "title": "A decision or a discussion?" }],
+                "accepted": [{ "title": "Release moved to Nov 28", "count": 1 }],
+                "waiting": {
+                    "count": 12,
+                    "new": [{ "title": "old session loads for 22 minutes", "label": "AIRC-1808", "link": "https://yt.example/issue/AIRC-1808", "count": 3 }],
+                    "older": { "count": 11, "since": "2026-10-20T08:00:00Z" }
+                },
+                "due_soon": [{ "title": "Send the report", "due": "2026-11-14" }]
             },
             "actions": [{ "action": "seen" }]
         });
         let message = text(&shown, None, w);
-        assert!(message.contains("- Release moved to Nov 28"), "{message}");
         assert!(
-            message.contains("- A decision or a discussion?"),
+            message.contains("- question · A decision or a discussion?"),
+            "{message}"
+        );
+        assert!(message.contains("- Release moved to Nov 28"), "{message}");
+        assert!(message.contains("- AIRC-1808 — old session loads for 22 minutes (3) https://yt.example/issue/AIRC-1808"), "{message}");
+        assert!(
+            message.contains("11 have waited for your decision since 20.10"),
             "{message}"
         );
         assert!(
-            message.contains("- Send the report (2026-11-14)"),
-            "{message}"
+            !message.contains("Send the report"),
+            "not urgent: {message}"
         );
         assert!(!message.contains(w.reply_hint), "{message}");
         assert!(choices(&shown).is_empty());
+        let mut written = shown.clone();
+        written["item"]["investigation"] = json!({ "state": "done", "report": "AIRC-1808 — the old session loads slowly\n11 more wait" });
+        assert_eq!(
+            text(&written, None, w),
+            format!(
+                "{}\nAIRC-1808 — the old session loads slowly\n11 more wait",
+                w.digest
+            )
+        );
     }
 
     #[test]

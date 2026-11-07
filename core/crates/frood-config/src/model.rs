@@ -956,6 +956,9 @@ pub struct AttentionPerson {
     /// This person's reminders of due dates, instead of `attention.reminders`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reminders: Option<Vec<Reminder>>,
+    /// How often the morning digest comes (docs/31): `daily` (the default), `weekly` or `off`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub digest: Option<String>,
 }
 
 /// Which situations a rule matches.
