@@ -185,7 +185,8 @@ pub(crate) struct Words {
     pub(crate) ok: &'static str,
     pub(crate) digest: &'static str,
     pub(crate) digest_nothing: &'static str,
-    pub(crate) details: &'static str,
+    /// The Mini App (docs/32): the item, or the digest's list, on a screen inside Telegram.
+    pub(crate) open_in_frood: &'static str,
     /// A link to where the knowledge comes from (an issue, a thread).
     pub(crate) original: &'static str,
     /// Kinds of knowledge, in the order of `KINDS`.
@@ -694,7 +695,7 @@ const EN_WORDS: Words = Words {
     ok: "Done",
     digest: "📋 What is new",
     digest_nothing: "Nothing new.",
-    details: "Details",
+    open_in_frood: "Open in Frood",
     original: "Open the original",
     kinds: [
         "Decision",
@@ -796,7 +797,7 @@ const ZH_WORDS: Words = Words {
     ok: "完成",
     digest: "📋 新内容",
     digest_nothing: "没有新内容。",
-    details: "详情",
+    open_in_frood: "在 Frood 中打开",
     original: "打开原文",
     kinds: [
         "决定",
@@ -898,7 +899,7 @@ const ES_WORDS: Words = Words {
     ok: "Hecho",
     digest: "📋 Novedades",
     digest_nothing: "Nada nuevo.",
-    details: "Detalles",
+    open_in_frood: "Abrir en Frood",
     original: "Abrir el original",
     kinds: [
         "Decisión",
@@ -1000,7 +1001,7 @@ const HI_WORDS: Words = Words {
     ok: "हो गया",
     digest: "📋 क्या नया है",
     digest_nothing: "कुछ नया नहीं।",
-    details: "विवरण",
+    open_in_frood: "Frood में खोलें",
     original: "मूल खोलें",
     kinds: [
         "फ़ैसला",
@@ -1102,7 +1103,7 @@ const AR_WORDS: Words = Words {
     ok: "تم",
     digest: "📋 ما الجديد",
     digest_nothing: "لا جديد.",
-    details: "التفاصيل",
+    open_in_frood: "افتح في Frood",
     original: "فتح الأصل",
     kinds: [
         "قرار",
@@ -1204,7 +1205,7 @@ const FR_WORDS: Words = Words {
     ok: "Fait",
     digest: "📋 Nouveautés",
     digest_nothing: "Rien de nouveau.",
-    details: "Détails",
+    open_in_frood: "Ouvrir dans Frood",
     original: "Ouvrir l'original",
     kinds: [
         "Décision",
@@ -1306,7 +1307,7 @@ const PT_WORDS: Words = Words {
     ok: "Feito",
     digest: "📋 Novidades",
     digest_nothing: "Nada de novo.",
-    details: "Detalhes",
+    open_in_frood: "Abrir no Frood",
     original: "Abrir o original",
     kinds: [
         "Decisão",
@@ -1408,7 +1409,7 @@ const RU_WORDS: Words = Words {
     ok: "Готово",
     digest: "📋 Что нового",
     digest_nothing: "Ничего нового.",
-    details: "Подробнее",
+    open_in_frood: "Открыть в Frood",
     original: "Открыть оригинал",
     kinds: [
         "Решение",

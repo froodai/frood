@@ -39,16 +39,18 @@ impl Bot {
     }
 
     /// Tells Frood where the bot opens with a link code, so the console can link an account
-    /// in one tap: `https://t.me/<bot>?start=<code>` sends `/start <code>`.
+    /// in one tap (`https://t.me/<bot>?start=<code>` sends `/start <code>`), and the bot's id,
+    /// over which Telegram signs the Mini App's launch data (docs/32 M2). With a public address
+    /// the menu button next to the input opens the Mini App.
     pub(crate) async fn announce(&self) {
-        let username = match self.telegram("getMe", json!({})).await {
-            Ok(me) => me["username"].as_str().map(str::to_owned),
+        let me = match self.telegram("getMe", json!({})).await {
+            Ok(me) => me,
             Err(err) => {
                 tracing::warn!(error = %err, "cannot ask Telegram for the bot's name");
-                None
+                return;
             }
         };
-        let Some(username) = username else {
+        let Some(username) = me["username"].as_str() else {
             return;
         };
         let response = self
@@ -56,9 +58,19 @@ impl Bot {
                 self.http
                     .put(format!("{}/v1/channels/{}/about", self.frood, self.channel)),
             )
-            .json(&json!({ "start_url": format!("https://t.me/{username}?start=") }))
+            .json(&json!({ "start_url": format!("https://t.me/{username}?start="), "bot_id": me["id"] }))
             .send()
             .await;
+        if let Some(home) = self
+            .console_url("")
+            .await
+            .and_then(|url| crate::notify::mini_app(url.trim_end_matches("inbox/")))
+        {
+            let button = json!({ "menu_button": { "type": "web_app", "text": "Frood", "web_app": { "url": home } } });
+            if let Err(err) = self.telegram("setChatMenuButton", button).await {
+                tracing::warn!(error = %err, "cannot set the Mini App's menu button");
+            }
+        }
         match response {
             Ok(r) if r.status().is_success() => {}
             // Frood before 0.1.8 has no such address; linking by `/link CODE` still works.

@@ -48,6 +48,7 @@ pub fn routes(auth: Auth) -> Router {
         )
         .route("/oauth/login/{provider}/wait", get(sign_in_wait))
         .merge(crate::passkey::routes())
+        .merge(crate::mini_app::routes())
         .route("/oauth/callback/{provider}", get(provider_callback))
         .route("/oauth/consent", get(consent_page).post(consent_submit))
         .route("/oauth/token", post(token))

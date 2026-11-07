@@ -9,6 +9,8 @@
 mod channels;
 mod clients;
 pub use clients::ADMIN_CLIENT;
+mod mini_app;
+pub use mini_app::{MINI_APP_CLIENT, MINI_APP_SCOPES, MiniAppSession};
 mod oidc;
 mod pages;
 mod passkey;
@@ -198,6 +200,8 @@ pub struct AuthSettings {
     pub providers: Vec<frood_config::Provider>,
     pub access_ttl: Duration,
     pub refresh_ttl: Duration,
+    /// Telegram's Ed25519 key that signs Mini App launch data (docs/32 M2); tests use their own.
+    pub telegram_key: [u8; 32],
 }
 
 impl AuthSettings {
@@ -233,6 +237,7 @@ impl AuthSettings {
             providers: config.auth.providers.clone(),
             access_ttl: Duration::from_secs(u64::from(config.auth.access_token_minutes) * 60),
             refresh_ttl: Duration::from_secs(u64::from(config.auth.refresh_token_days) * 86_400),
+            telegram_key: mini_app::telegram_key(),
         }
     }
 

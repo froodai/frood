@@ -105,10 +105,14 @@ async fn ask_sign_in(
 struct About {
     /// Where the channel opens with a link code appended; https only.
     start_url: Option<String>,
+    /// The Telegram bot's id: Mini App launch data is signed over it (docs/32 M2).
+    #[serde(default)]
+    bot_id: Option<i64>,
 }
 
 /// The channel's module says where it opens with a link code, so the console can link an
-/// account in one tap (Telegram: `https://t.me/<bot>?start=`).
+/// account in one tap (Telegram: `https://t.me/<bot>?start=`), and, for Telegram, the bot's id
+/// for the Mini App's sign-in.
 async fn about(
     State(state): State<AppState>,
     caller: Caller<ChannelsAct>,
@@ -129,6 +133,11 @@ async fn about(
     state
         .auth
         .set_channel_start_url(&channel, start_url.as_deref())
+        .await
+        .map_err(|err| auth_error(&state.auth, Resource::Api, err))?;
+    state
+        .auth
+        .set_channel_bot_id(&channel, about.bot_id)
         .await
         .map_err(|err| auth_error(&state.auth, Resource::Api, err))?;
     Ok(StatusCode::NO_CONTENT)

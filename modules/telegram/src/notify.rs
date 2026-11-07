@@ -423,8 +423,18 @@ fn chrono_like_date(iso: &str) -> Option<String> {
     Some(format!("{day}.{month}"))
 }
 
-/// The digest's buttons: go through what waits, accept the findings as not verified, less often.
-pub(crate) fn digest_keyboard(shown: &Value, w: &Words) -> Value {
+/// The Mini App's page for a console address (docs/32): the console's mobile view lives under
+/// `m/`. Telegram opens only https pages, and the core gives console links only then (M3).
+pub(crate) fn mini_app(console: &str) -> Option<String> {
+    let at = console.rfind("/admin/")? + "/admin/".len();
+    console
+        .starts_with("https://")
+        .then(|| format!("{}m/{}", &console[..at], &console[at..]))
+}
+
+/// The digest's buttons: go through what waits, accept the findings as not verified, less
+/// often, and the list on the Mini App's screen.
+pub(crate) fn digest_keyboard(shown: &Value, w: &Words, console: Option<&str>) -> Value {
     let id = shown["item"]["id"].as_str().unwrap_or_default();
     let digest = &shown["content"];
     let mut rows = Vec::new();
@@ -437,6 +447,12 @@ pub(crate) fn digest_keyboard(shown: &Value, w: &Words) -> Value {
         rows.push(json!([{ "text": w.accept_unverified.replace("{n}", &findings.to_string()), "callback_data": format!("g:a:{id}") }]));
     }
     rows.push(json!([{ "text": w.less_often, "callback_data": format!("g:l:{id}") }]));
+    if let Some(home) = console
+        .and_then(|c| c.rfind("/admin/").map(|at| &c[..at + 7]))
+        .and_then(mini_app)
+    {
+        rows.push(json!([{ "text": w.open_in_frood, "web_app": { "url": home } }]));
+    }
     json!({ "inline_keyboard": rows })
 }
 
@@ -482,11 +498,11 @@ fn resolution(resolution: &Value, w: &Words) -> String {
     }
 }
 
-/// One row per button; callback data names the item and the action's index. A link to the
-/// item in the console comes last when the installation has a public address.
+/// One row per button; callback data names the item and the action's index. The item on the
+/// Mini App's screen comes last when the installation has a public address (docs/32 QM3).
 pub(crate) fn keyboard(shown: &Value, w: &Words, console: Option<&str>) -> Value {
     if shown["item"]["kind"] == "digest" {
-        return digest_keyboard(shown, w);
+        return digest_keyboard(shown, w, console);
     }
     let id = shown["item"]["id"].as_str().unwrap_or_default();
     let several = shown["actions"]
@@ -526,13 +542,13 @@ pub(crate) fn keyboard(shown: &Value, w: &Words, console: Option<&str>) -> Value
         .collect();
     let mut rows = rows;
     // Links: the original the knowledge comes from (the core keeps only web addresses), and
-    // the item in the console.
+    // the item in the Mini App.
     let mut links = Vec::new();
     if let Some(uri) = shown["content"]["origin"]["uri"].as_str() {
         links.push(json!({ "text": w.original, "url": uri }));
     }
-    if let Some(url) = console {
-        links.push(json!({ "text": w.details, "url": url }));
+    if let Some(url) = console.and_then(mini_app) {
+        links.push(json!({ "text": w.open_in_frood, "web_app": { "url": url } }));
     }
     if !links.is_empty() {
         rows.push(Value::Array(links));
@@ -815,7 +831,8 @@ impl Bot {
                 }
                 let mut left = shown.clone();
                 left["content"]["accept_ids"] = json!([]);
-                set_markup(digest_keyboard(&left, w)).await;
+                let console = self.console_url(id).await;
+                set_markup(digest_keyboard(&left, w, console.as_deref())).await;
                 w.accepted_unverified.replace("{n}", &accepted.to_string())
             }
             ["l", id] => {
@@ -832,7 +849,8 @@ impl Bot {
                     .send()
                     .await;
                 if let Some(shown) = self.inbox_item(id).await {
-                    set_markup(digest_keyboard(&shown, w)).await;
+                    let console = self.console_url(id).await;
+                    set_markup(digest_keyboard(&shown, w, console.as_deref())).await;
                 }
                 match set {
                     Ok(r) if r.status().is_success() => match *every {
@@ -923,9 +941,32 @@ mod tests {
             json!({ "inline_keyboard": [
                 [{ "text": "Принять", "callback_data": "i:0199-item:0" }],
                 [{ "text": "Открыть оригинал", "url": "https://youtrack.example/issue/AIRC-1808" },
-                 { "text": "Подробнее", "url": "https://frood.example/admin/inbox/0199-item" }]
+                 { "text": "Открыть в Frood", "web_app": { "url": "https://frood.example/admin/m/inbox/0199-item" } }]
             ] })
         );
+    }
+
+    #[test]
+    fn the_mini_app_opens_the_item_or_the_list() {
+        assert_eq!(
+            mini_app("https://frood.example/frood/admin/inbox/0199").as_deref(),
+            Some("https://frood.example/frood/admin/m/inbox/0199")
+        );
+        assert_eq!(
+            mini_app("https://frood.example/admin/").as_deref(),
+            Some("https://frood.example/admin/m/")
+        );
+        // Telegram opens only https pages.
+        assert_eq!(mini_app("http://127.0.0.1:8080/admin/inbox/1"), None);
+        let w = Lang::Ru.words();
+        let digest = json!({ "item": { "id": "d1", "kind": "digest" }, "content": { "waiting": { "count": 0 } } });
+        let rows = digest_keyboard(&digest, w, Some("https://frood.example/admin/inbox/d1"));
+        assert_eq!(
+            rows["inline_keyboard"].as_array().unwrap().last().unwrap(),
+            &json!([{ "text": "Открыть в Frood", "web_app": { "url": "https://frood.example/admin/m/" } }])
+        );
+        let rows = digest_keyboard(&digest, w, None);
+        assert_eq!(rows["inline_keyboard"].as_array().unwrap().len(), 1);
     }
 
     #[test]

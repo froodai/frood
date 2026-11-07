@@ -1,8 +1,13 @@
 // Talking to the Frood server: where it lives, signing in (OAuth with PKCE as the client
-// `frood-admin`) and calling the API with the token.
+// `frood-admin`, or Telegram's launch data in the Mini App) and calling the API with the token.
 
 /** The server's path behind a proxy (`/frood`), or empty at the root; the server puts it in. */
 export const BASE = document.querySelector<HTMLMetaElement>('meta[name="frood-base"]')?.content ?? "";
+
+/** The Mini App (docs/32) lives under `/admin/m/` and signs in with Telegram's launch data. */
+export const MINI_APP = location.pathname === `${BASE}/admin/m` || location.pathname.startsWith(`${BASE}/admin/m/`);
+/** The Mini App's short session is kept apart from the console's. */
+const TOKENS = MINI_APP ? "mini_tokens" : "tokens";
 
 const CLIENT = "frood-admin";
 const SCOPES = "knowledge:read knowledge:capture knowledge:propose knowledge:decide journal:read admin";
@@ -41,7 +46,26 @@ const b64url = (bytes: ArrayBuffer | Uint8Array) =>
 
 function tokens(): Tokens | null {
   if (DEV_TOKEN) return { access: DEV_TOKEN };
-  return JSON.parse(store.getItem("tokens") ?? "null") as Tokens | null;
+  return JSON.parse(store.getItem(TOKENS) ?? "null") as Tokens | null;
+}
+
+/**
+ * The Mini App's sign-in: Telegram's signed launch data for a short session that reads, writes
+ * and decides (docs/32 M2, QM2). Fails with the server's reason, e.g. an account not linked.
+ */
+export async function telegramSignIn(): Promise<Tokens> {
+  const initData = window.Telegram?.WebApp?.initData;
+  if (!initData) throw new ApiError(401, "no-telegram", "open the Mini App from the Telegram chat");
+  const r = await fetch(`${BASE}/oauth/telegram`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ init_data: initData }),
+  });
+  const body = (await r.json().catch(() => ({}))) as { access_token?: string; scope?: string; type?: string; detail?: string };
+  if (!r.ok || !body.access_token) throw new ApiError(r.status, body.type ?? "", body.detail ?? `HTTP ${r.status}`);
+  const saved = { access: body.access_token, scope: body.scope };
+  store.setItem(TOKENS, JSON.stringify(saved));
+  return saved;
 }
 
 /** Leaves for the sign-in page; comes back to the console's root, then to `returnTo`. */
@@ -79,7 +103,7 @@ async function tokenRequest(params: Record<string, string>): Promise<Tokens> {
   if (!r.ok) throw new Error(`token: ${r.status}`);
   const t = (await r.json()) as { access_token: string; refresh_token?: string; scope?: string };
   const saved = { access: t.access_token, refresh: t.refresh_token, scope: t.scope };
-  store.setItem("tokens", JSON.stringify(saved));
+  store.setItem(TOKENS, JSON.stringify(saved));
   return saved;
 }
 
@@ -119,7 +143,7 @@ type Init = Omit<RequestInit, "body"> & { json?: unknown; form?: FormData; blob?
 /** Calls the API; signs in again when the token is gone, refreshes it when it expired. */
 export async function api<T>(path: string, init: Init = {}): Promise<T> {
   let t = tokens();
-  if (!t) return signIn();
+  if (!t) t = MINI_APP ? await telegramSignIn() : await signIn();
   const { json, form, blob, ...rest } = init;
   const call = (access: string) =>
     fetch(BASE + path, {
@@ -132,17 +156,23 @@ export async function api<T>(path: string, init: Init = {}): Promise<T> {
       body: json !== undefined ? JSON.stringify(json) : form,
     });
   let r = await call(t.access);
+  if (r.status === 401 && MINI_APP) {
+    // The short session ended; Telegram's launch data opens a new one while it is fresh.
+    store.removeItem(TOKENS);
+    t = await telegramSignIn();
+    r = await call(t.access);
+  }
   if (r.status === 401 && t.refresh) {
     try {
       t = await tokenRequest({ grant_type: "refresh_token", refresh_token: t.refresh });
       r = await call(t.access);
     } catch {
-      store.removeItem("tokens");
+      store.removeItem(TOKENS);
       return signIn();
     }
   }
-  if (r.status === 401 && !DEV_TOKEN) {
-    store.removeItem("tokens");
+  if (r.status === 401 && !DEV_TOKEN && !MINI_APP) {
+    store.removeItem(TOKENS);
     return signIn();
   }
   if (blob && r.ok) return (await r.blob()) as T;
