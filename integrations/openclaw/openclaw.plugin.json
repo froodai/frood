@@ -2,7 +2,7 @@
   "id": "frood",
   "name": "Memory (Frood)",
   "description": "Frood as OpenClaw's memory: before each turn, what Frood knows about the message, with sources and a 'not verified' mark where no person has checked it; memory_search, memory_get and memory_add over Frood.",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "kind": "memory",
   "categories": ["memory"],
   "contracts": {
