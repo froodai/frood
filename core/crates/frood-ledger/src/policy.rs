@@ -39,6 +39,9 @@ pub struct ProposalContext {
     /// is marked not verified with this reason, and its changes to knowledge wait for a person
     /// — that is where memories disagree.
     pub mark_unverified: Option<String>,
+    /// An agent's proposal rests on a source with no address to open (docs/31 D2): a person
+    /// cannot check it, so it waits. The ledger fills it in.
+    pub unlinked_finding: bool,
 }
 
 /// Which policy, if any, accepts the proposal, and which alternative it takes.
@@ -130,6 +133,7 @@ pub(crate) fn evaluate(
     // verified; changes, conflicts and merges wait for a person.
     if config.accept_agent_findings
         && proposal.author.starts_with("agent:")
+        && !context.unlinked_finding
         && proposal.risk == Risk::New
         && proposal.base.is_empty()
         && only.operations.iter().all(|op| match op {
@@ -243,6 +247,19 @@ mod tests {
             version: 1,
         });
         assert!(evaluate(&change, &config, &none()).is_none());
+        // A finding nobody can open waits for a person (docs/31 D2).
+        let unlinked = ProposalContext {
+            unlinked_finding: true,
+            ..ProposalContext::default()
+        };
+        assert!(
+            evaluate(
+                &proposal("agent:daily-sweep", Risk::New, vec![create()]),
+                &config,
+                &unlinked
+            )
+            .is_none()
+        );
         let off = PolicyConfig {
             accept_agent_findings: false,
             ..PolicyConfig::default()

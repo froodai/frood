@@ -241,7 +241,7 @@ impl Bot {
     }
 
     /// Sends what waits for the person as cards with buttons, the first few at once.
-    async fn inbox(&self, chat: i64) {
+    pub(crate) async fn inbox(&self, chat: i64) {
         let t = self.lang.texts();
         let w = self.lang.words();
         let inbox = match self.get("/v1/inbox?limit=200").await {

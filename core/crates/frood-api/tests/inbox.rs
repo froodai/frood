@@ -773,18 +773,16 @@ async fn digests_and_investigations() {
         "the investigator's failure is not an alert of its own"
     );
 
-    // What is new: the accepted fact, the conflict waiting.
+    // What is new: the accepted fact; the conflict needs Alice whatever its age (docs/31 D1).
     let (status, digest) = call(&app, get_json("/v1/digest", &pat)).await;
     assert_eq!(status, StatusCode::OK, "{digest}");
-    assert_eq!(
-        digest["accepted"],
-        json!([{ "text": "Релиз 2.4 — 14 ноября", "sphere": null }])
-    );
+    assert_eq!(digest["accepted"][0]["title"], "Релиз 2.4 — 14 ноября");
+    assert_eq!(digest["accepted"][0]["count"], 1);
     assert_eq!(digest["waiting"]["count"], 1);
-    assert_eq!(
-        digest["waiting"]["items"][0]["what"],
-        "Релиз 2.4 — 28 ноября"
-    );
+    assert_eq!(digest["important"][0]["why"], "conflict");
+    assert_eq!(digest["important"][0]["title"], "Релиз 2.4 — 28 ноября");
+    assert_eq!(digest["waiting"]["new"], json!([]));
+    assert_eq!(digest["waiting"]["older"]["count"], 0);
     // The digest job puts it into the Inbox and moves the checkpoint.
     dispatch.start_manual("digest", &json!({})).await.unwrap();
     dispatch.drain().await.unwrap();
@@ -793,11 +791,202 @@ async fn digests_and_investigations() {
     let sent = channel.lock().unwrap().sent[1].clone();
     assert_eq!(sent["item"]["item"]["kind"], "digest");
     assert_eq!(
-        sent["item"]["content"]["accepted"][0]["text"],
+        sent["item"]["content"]["accepted"][0]["title"],
         "Релиз 2.4 — 14 ноября"
+    );
+    // Shown, it leaves the Inbox, and its message keeps its buttons: no edit (docs/31 D5).
+    let digests = |dispatch: frood_dispatch::Dispatch| async move {
+        dispatch
+            .inbox(true, 50)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|i| i.kind == "digest")
+            .map(|i| i.state)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(digests(dispatch.clone()).await, ["resolved"]);
+    dispatch.deliver_once().await.unwrap();
+    assert!(
+        channel.lock().unwrap().updated.is_empty(),
+        "no edit of a digest"
     );
     let (_, again) = call(&app, get_json("/v1/digest", &pat)).await;
     assert_eq!(again["accepted"], json!([]), "since the last digest");
+    assert_eq!(
+        again["important"][0]["why"], "conflict",
+        "still needs Alice"
+    );
+
+    // Less often: the button sets weekly through the channel, and a digest a moment later
+    // does not come.
+    let auth = frood_auth::Auth::new(pool.clone(), frood_auth::AuthSettings::from_config(&config));
+    auth.register_service_token(
+        "telegram",
+        "tg-token",
+        &["knowledge:read".to_owned(), "channels:act".to_owned()],
+    )
+    .await
+    .unwrap();
+    let (status, set) = call(
+        &app,
+        Request::put("/v1/channels/telegram/links/42/digest")
+            .header(header::AUTHORIZATION, "Bearer tg-token")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(json!({ "every": "weekly" }).to_string()))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{set}");
+    // A save of the other settings (the console's form has no digest) keeps it.
+    dispatch
+        .change_personal(
+            &format!("user:{alice}"),
+            "alice@example.com",
+            frood_dispatch::attention::PersonalChange {
+                quiet_hours: Some("23:00-08:00".into()),
+                timezone: Some("Europe/Belgrade".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let settings = dispatch
+        .personal_settings("alice@example.com")
+        .await
+        .unwrap();
+    assert_eq!(settings.digest.value, "weekly");
+    assert_eq!(settings.quiet_hours.value, "23:00-08:00");
+    dispatch.reload_attention().await.unwrap();
+    dispatch.start_manual("digest", &json!({})).await.unwrap();
+    dispatch.drain().await.unwrap();
+    dispatch.inbox_pending().await.unwrap();
+    dispatch.deliver_once().await.unwrap();
+    assert_eq!(
+        channel.lock().unwrap().sent.len(),
+        2,
+        "weekly: not again today"
+    );
+}
+
+/// The digest in plain words (docs/31, QD2): with a `write-digest` job, the digest waits for
+/// the agent's text and goes with it; the chat shows that text.
+#[tokio::test]
+async fn an_agent_writes_the_digest_in_plain_words() {
+    let Some(url) = frood_store::testing::database_url() else {
+        eprintln!("FROOD_TEST_DATABASE_URL is not set; skipping");
+        return;
+    };
+    let pool = frood_store::testing::fresh_database(&url, "inbox_digest_writer")
+        .await
+        .expect("test database");
+    let channel = Shared::default();
+    let fake = fake_telegram(channel.clone()).await;
+    let config = config_with_jobs(
+        &fake,
+        "  digest: {}\n  write-digest:\n    runtime: telegram\n    agent: claude-code\n    model: m\n    account: claude\n    on_behalf_of: alice@example.com\n    budget: { max_usd: 0.1 }\n",
+        "accounts:\n  claude: { kind: subscription, provider: anthropic, owner: alice@example.com, secret: tok }\n",
+    );
+    let Setup {
+        dispatch, ledger, ..
+    } = setup(&config, pool.clone()).await;
+    let auth = frood_auth::Auth::new(pool.clone(), frood_auth::AuthSettings::from_config(&config));
+    let alice = auth
+        .user_id_by_email("alice@example.com", true)
+        .await
+        .unwrap();
+    sqlx_link(&pool, alice).await;
+    let actor = Actor::parse(&format!("user:{alice}")).unwrap();
+    let captured = ledger
+        .capture_source(
+            &actor,
+            NewSource {
+                kind: "note".into(),
+                origin: "capture".into(),
+                uri: None,
+                title: None,
+                content: "Релиз 2.4 — 14 ноября".into(),
+                said_at: None,
+                metadata: json!({}),
+            },
+        )
+        .await
+        .unwrap();
+    let evidence = captured.source.evidence[0].id;
+    let operations: Vec<Operation> = serde_json::from_value(json!([{ "op": "create", "assertion": {
+        "kind": "commitment", "text": "Релиз 2.4 — 14 ноября", "modality": "agreed", "evidence": [evidence] } }]))
+    .unwrap();
+    ledger
+        .open_proposal(
+            &actor,
+            NewProposal {
+                idempotency_key: None,
+                rationale: None,
+                risk: Risk::New,
+                confidence: None,
+                base: vec![],
+                operations: Some(operations),
+                alternatives: None,
+                evidence: vec![evidence],
+            },
+        )
+        .await
+        .unwrap();
+
+    dispatch.start_manual("digest", &json!({})).await.unwrap();
+    dispatch.drain().await.unwrap();
+    let digest = dispatch
+        .inbox(false, 10)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|i| i.kind == "digest")
+        .expect("a digest");
+    let writing = digest.investigation.clone().unwrap();
+    assert_eq!(writing["job"], "write-digest");
+    assert_eq!(writing["state"], "running");
+    assert_eq!(
+        dispatch.deliver_once().await.unwrap(),
+        0,
+        "waits for its writer"
+    );
+    // The writer gave the language people read in, and the digest it is to say.
+    let run_id: uuid::Uuid = writing["run_id"].as_str().unwrap().parse().unwrap();
+    let input: Value = frood_store::sqlx::query_scalar("SELECT input FROM runs WHERE id = $1")
+        .bind(run_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(input["language"], "en");
+    assert_eq!(
+        input["digest"]["accepted"][0]["title"],
+        "Релиз 2.4 — 14 ноября"
+    );
+
+    // It wrote; the digest goes now, with its words.
+    frood_store::sqlx::query("UPDATE runs SET output = $2 WHERE id = $1")
+        .bind(run_id)
+        .bind(json!({ "result": "Релиз 2.4 — 14 ноября: записано" }))
+        .execute(&pool)
+        .await
+        .unwrap();
+    ledger
+        .append_event(
+            "agent:write-digest",
+            "run.succeeded",
+            format!("run/{run_id}"),
+            json!({ "run_id": run_id, "job": "write-digest" }),
+        )
+        .await
+        .unwrap();
+    dispatch.inbox_pending().await.unwrap();
+    assert_eq!(dispatch.deliver_once().await.unwrap(), 1);
+    let sent = channel.lock().unwrap().sent.last().cloned().unwrap();
+    assert_eq!(sent["item"]["item"]["kind"], "digest");
+    assert_eq!(
+        sent["item"]["item"]["investigation"]["report"],
+        "Релиз 2.4 — 14 ноября: записано"
+    );
 }
 
 #[tokio::test]

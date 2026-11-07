@@ -28,6 +28,53 @@ pub fn routes() -> Router<AppState> {
         )
         .route("/v1/channels/{channel}/about", put(about))
         .route("/oauth/login/{provider}/ask", post(ask_sign_in))
+        .route(
+            "/v1/channels/{channel}/links/{external_id}/digest",
+            put(digest_every),
+        )
+}
+
+#[derive(Deserialize)]
+struct DigestEvery {
+    every: String,
+}
+
+/// A channel's "less often" button (docs/31 D4): how often the linked person's digest comes,
+/// daily, weekly or off. The rest of their settings stays as it is.
+async fn digest_every(
+    State(state): State<AppState>,
+    caller: Caller<ChannelsAct>,
+    Path((channel, external_id)): Path<(String, String)>,
+    Json(input): Json<DigestEvery>,
+) -> Result<Json<Value>, ApiError> {
+    own_channel(&caller, &channel)?;
+    if !["daily", "weekly", "off"].contains(&input.every.as_str()) {
+        return Err(ApiError::bad_request("every is daily, weekly or off"));
+    }
+    let user = state
+        .auth
+        .linked_user(&channel, &external_id)
+        .await
+        .map_err(|err| auth_error(&state.auth, Resource::Api, err))?
+        .ok_or_else(|| {
+            ApiError::new(
+                StatusCode::FORBIDDEN,
+                "not-linked",
+                format!("this {channel} account is not linked to a person"),
+            )
+        })?;
+    let email = state
+        .auth
+        .user_email(user)
+        .await
+        .map_err(|err| auth_error(&state.auth, Resource::Api, err))?;
+    let actor = format!("user:{user}/via/{channel}");
+    state
+        .dispatch
+        .set_digest_every(&actor, &email, &input.every)
+        .await
+        .map_err(crate::connections::connect_error)?;
+    Ok(Json(json!({ "every": input.every })))
 }
 
 /// Sign-in with a button in the person's channel (docs/28 §2): the auth side checks the

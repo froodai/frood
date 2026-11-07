@@ -66,6 +66,7 @@ pub(crate) fn merge(file: &Attention, console: &Attention) -> Attention {
             .or_else(|| mine.quiet_hours.clone());
         person.max_push_per_day = person.max_push_per_day.or(mine.max_push_per_day);
         person.reminders = person.reminders.take().or_else(|| mine.reminders.clone());
+        person.digest = person.digest.take().or_else(|| mine.digest.clone());
     }
     out
 }
@@ -178,6 +179,8 @@ pub struct PersonalSettings {
     pub max_push_per_day: Setting,
     /// Null: the installation's reminders (the default).
     pub reminders: Setting,
+    /// daily, weekly or off; null: daily.
+    pub digest: Setting,
 }
 
 /// A person's own settings, whole; a setting `frood.yaml` makes may be sent back as it is.
@@ -193,6 +196,9 @@ pub struct PersonalChange {
     /// None: the installation's reminders; empty: none.
     #[serde(default)]
     pub reminders: Option<Vec<Reminder>>,
+    /// daily, weekly or off; None leaves it as it is (the console's form does not show it).
+    #[serde(default)]
+    pub digest: Option<String>,
 }
 
 fn situation_name(kind: &str, risk: Option<&str>) -> String {
@@ -488,7 +494,36 @@ impl Dispatch {
                 default: json_of(&now.shared_reminders()),
                 from: from(in_file.reminders.is_some(), in_console.reminders.is_some()),
             },
+            digest: Setting {
+                value: json_of(&mine.digest),
+                default: json!("daily"),
+                from: from(in_file.digest.is_some(), in_console.digest.is_some()),
+            },
         })
+    }
+
+    /// How often a person's digest comes (`daily`, `weekly`, `off`), with the rest of their
+    /// settings as they are: what a channel's "less often" button changes.
+    pub async fn set_digest_every(
+        &self,
+        actor: &str,
+        email: &str,
+        every: &str,
+    ) -> Result<i64, ConnectError> {
+        let current = self.personal_settings(email).await?;
+        let kept = |s: &Setting| (s.from != "config").then(|| s.value.clone());
+        let change = PersonalChange {
+            timezone: kept(&current.timezone).and_then(|v| v.as_str().map(str::to_owned)),
+            quiet_hours: kept(&current.quiet_hours).and_then(|v| v.as_str().map(str::to_owned)),
+            max_push_per_day: kept(&current.max_push_per_day)
+                .and_then(|v| v.as_u64())
+                .and_then(|n| u32::try_from(n).ok()),
+            reminders: kept(&current.reminders)
+                .filter(|v| !v.is_null())
+                .and_then(|v| serde_json::from_value(v).ok()),
+            digest: Some(every.to_owned()),
+        };
+        self.change_personal(actor, email, change).await
     }
 
     /// Changes a person's own attention settings. Returns the revision.
@@ -534,6 +569,19 @@ impl Dispatch {
             }
             (Some(_), _) => {}
             (None, wanted) => mine.reminders = wanted,
+        }
+        let kept_digest = overlay
+            .attention
+            .people
+            .get(email)
+            .and_then(|p| p.digest.clone());
+        match (&file.digest, text(change.digest)) {
+            (Some(set), Some(wanted)) if *set != wanted => {
+                return Err(ConnectError::InConfig(place("digest")));
+            }
+            (Some(_), _) => {}
+            (None, Some(wanted)) => mine.digest = Some(wanted).filter(|w| w != "daily"),
+            (None, None) => mine.digest = kept_digest,
         }
         if mine == none {
             overlay.attention.people.remove(email);

@@ -146,6 +146,24 @@ pub(crate) async fn resolve(
 }
 
 /// An undone decision puts the item back: it needs a person again.
+/// Resolves an item whose messages need no edit: what was shown stays as it is (a digest).
+pub(crate) async fn close_quietly(pool: &PgPool, subject: &str) -> sqlx::Result<()> {
+    sqlx::query(
+        "UPDATE inbox_deliveries SET state = 'closed', updated_at = now() \
+         WHERE item_id = (SELECT id FROM inbox_items WHERE subject = $1)",
+    )
+    .bind(subject)
+    .execute(pool)
+    .await?;
+    resolve(
+        pool,
+        subject,
+        &json!({ "action": "delivered", "at": Utc::now() }),
+    )
+    .await
+    .map(|_| ())
+}
+
 async fn reopen(pool: &PgPool, subject: &str) -> sqlx::Result<()> {
     sqlx::query(
         "UPDATE inbox_items SET state = 'open', resolution = NULL, resolved_at = NULL, snoozed_until = NULL, \
@@ -308,6 +326,9 @@ pub struct Act {
     /// no sphere.
     #[serde(default)]
     pub sphere: Option<String>,
+    /// For accept: taken without a check, so it stays marked not verified (docs/31 D4).
+    #[serde(default)]
+    pub unverified: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -807,7 +828,7 @@ impl Dispatch {
     }
 
     /// The changes of a proposal as before → after texts, with the quote it rests on.
-    async fn proposal_content(&self, p: &Proposal) -> Value {
+    pub(crate) async fn proposal_content(&self, p: &Proposal) -> Value {
         let mut alternatives = Vec::new();
         for alternative in &p.alternatives {
             let mut changes = Vec::new();
@@ -1105,6 +1126,14 @@ impl Dispatch {
                             .map_err(db)?;
                     }
                     Ok(proposal) => {
+                        if act.unverified && proposal.state == ProposalState::Accepted {
+                            let reason = format!("accepted by {actor} without a check");
+                            self.ctx
+                                .ledger
+                                .keep_unverified(proposal.id, &reason)
+                                .await
+                                .map_err(|e| e.to_string())?;
+                        }
                         let mut resolution = resolution.clone();
                         resolution["state"] = json!(proposal.state);
                         resolve(pool, &item.subject, &resolution)
@@ -1323,6 +1352,7 @@ impl Dispatch {
         .await?;
         for row in &due {
             let item = item(row)?;
+            let mut delivered = false;
             let people = if item.for_users.is_empty() {
                 // Nobody in particular: everyone with a linked channel (B1).
                 sqlx::query_scalar::<_, Uuid>("SELECT DISTINCT user_id FROM channel_links")
@@ -1389,6 +1419,7 @@ impl Dispatch {
                             .execute(pool)
                             .await?;
                             done += 1;
+                            delivered = true;
                         }
                         Err(err) => {
                             tracing::warn!(item = %item.id, channel, error = %err, "could not show an Inbox item");
@@ -1406,6 +1437,11 @@ impl Dispatch {
                         }
                     }
                 }
+            }
+            // A digest is a message, not a decision: once shown, it leaves the Inbox, and its
+            // message keeps its buttons (docs/31 D5).
+            if delivered && item.kind == "digest" {
+                close_quietly(pool, &item.subject).await?;
             }
         }
         done += self.update_resolved().await?;

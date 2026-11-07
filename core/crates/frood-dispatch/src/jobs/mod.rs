@@ -69,10 +69,19 @@ const INVESTIGATE_BUILTIN: Builtin = Builtin {
     tools: &["frood"],
 };
 
+/// Instructions of the standard `write-digest`: the morning digest in plain words (docs/31).
+const WRITE_DIGEST: &str = include_str!("../../prompts/write-digest.md");
+
+const WRITE_DIGEST_BUILTIN: Builtin = Builtin {
+    instructions: WRITE_DIGEST,
+    tools: &[],
+};
+
 fn builtin(job: &str) -> Option<&'static Builtin> {
     match job {
         "daily-sweep" => Some(&DAILY_SWEEP_BUILTIN),
         "investigate" => Some(&INVESTIGATE_BUILTIN),
+        "write-digest" => Some(&WRITE_DIGEST_BUILTIN),
         _ => None,
     }
 }
@@ -132,7 +141,7 @@ fn schedule(cron: &str, timezone: Option<&str>) -> Trigger {
 /// weekday mornings in the installation's zone; backups every six hours, checked on Sundays.
 fn default_schedule(name: &str, timezone: Option<&str>) -> Vec<Trigger> {
     match name {
-        "digest" => vec![schedule("30 8 * * 1-5", timezone)],
+        "digest" => vec![schedule("0 10 * * 1-5", timezone)],
         "backup" => vec![schedule("0 */6 * * *", timezone)],
         "backup-verify" => vec![schedule("30 4 * * 0", timezone)],
         _ => Vec::new(),
@@ -196,6 +205,14 @@ fn standard() -> Vec<JobSpec> {
         },
         JobSpec {
             name: "investigate".into(),
+            uses: "agents.execute".into(),
+            task: Task::Agent,
+            triggers: vec![],
+            with: Map::new(),
+            agent: None,
+        },
+        JobSpec {
+            name: "write-digest".into(),
             uses: "agents.execute".into(),
             task: Task::Agent,
             triggers: vec![],
@@ -410,6 +427,7 @@ pub fn resolve(config: &Config, caps: &Capabilities<'_>) -> (Vec<JobSpec>, Vec<S
                 | "embed"
                 | "daily-sweep"
                 | "investigate"
+                | "write-digest"
                 | "digest"
                 | "backup"
                 | "backup-verify"
@@ -546,7 +564,7 @@ mod tests {
         );
         assert_eq!(
             jobs[0].triggers[0].schedule.as_deref(),
-            Some("30 8 * * 1-5")
+            Some("0 10 * * 1-5")
         );
         assert_eq!(jobs[0].triggers[0].timezone, None, "UTC without a zone");
         let mut zoned = config("");

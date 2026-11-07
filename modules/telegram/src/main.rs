@@ -285,7 +285,7 @@ impl Bot {
                 let answer = match response {
                     Ok(r) if r.status().is_success() => {
                         let digest: Value = r.json().await.unwrap_or(Value::Null);
-                        notify::digest_text(&digest, self.lang.words(), &self.spheres().await)
+                        notify::digest_text(&digest, self.lang.words(), &self.spheres().await, None)
                     }
                     Ok(r) if r.status() == StatusCode::FORBIDDEN => notify::esc(t.not_linked),
                     Ok(r) => {
