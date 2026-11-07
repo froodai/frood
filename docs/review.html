@@ -276,6 +276,24 @@ details.area[open] summary .tw{transform:rotate(90deg)}
 .btn:hover{filter:brightness(1.08)}
 #out{max-width:1200px;margin:10px auto 0;display:block;min-height:120px;font-family:var(--f-mono);font-size:12.5px}
 @media (prefers-reduced-motion: reduce){*{transition:none!important}}
+
+/* Round 27: a phone showing the Mini App */
+.phone{width:min(320px,100%);border:1px solid var(--rule-strong);border-radius:28px;background:var(--bg);padding:12px 10px 14px;box-shadow:0 1px 0 var(--rule)}
+.phone .bar{display:flex;align-items:center;justify-content:space-between;font-size:13px;color:var(--muted);padding:2px 6px 10px}
+.phone .bar b{color:var(--ink);font-size:15px}
+.phone .sec{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:10px 6px 6px}
+.phone .card{background:var(--surface);border:1px solid var(--rule);border-radius:14px;padding:12px;display:grid;gap:8px;margin-bottom:8px}
+.phone .card .tag{font-size:12px;color:var(--amber)}
+.phone .card .t{font-size:15px;line-height:1.35;color:var(--ink)}
+.phone .card .t a{color:var(--accent);font-family:var(--f-mono);font-size:13px;text-decoration:underline}
+.phone .card .q{font-size:13px;color:var(--muted);font-style:italic}
+.phone .acts{display:flex;gap:6px;flex-wrap:wrap}
+.phone .acts span{font-size:13px;border:1px solid var(--rule-strong);border-radius:10px;padding:6px 10px;color:var(--ink)}
+.phone .acts span.go{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.phone .older{font-size:13px;color:var(--muted);margin:8px 6px}
+.phone .main{margin-top:10px;background:var(--accent);color:var(--accent-ink);text-align:center;border-radius:12px;padding:11px;font-size:15px;font-weight:600}
+.mock-row{display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start}
+.mock-row .prose{flex:1 1 280px}
 </style>
 
 <div class="shell">
@@ -304,7 +322,7 @@ details.area[open] summary .tw{transform:rotate(90deg)}
     </header>
 
     <div class="tabs" role="tablist" aria-label="Этапы ревью">
-      <button class="tab" role="tab" id="t-now" data-tab="now" aria-controls="now" aria-selected="true">Сейчас на ревью <span class="n">8</span></button>
+      <button class="tab" role="tab" id="t-now" data-tab="now" aria-controls="now" aria-selected="true">Сейчас на ревью <span class="n">7</span></button>
       <button class="tab" role="tab" id="t-mvp" data-tab="mvp" aria-controls="mvp" aria-selected="false">План MVP</button>
       <button class="tab" role="tab" id="t-platform" data-tab="platform" aria-controls="platform" aria-selected="false">Платформа</button>
       <button class="tab" role="tab" id="t-notify" data-tab="notify" aria-controls="notify" aria-selected="false">Inbox и уведомления</button>
@@ -321,66 +339,72 @@ details.area[open] summary .tw{transform:rotate(90deg)}
       <section id="now-intro">
         <div class="sh"><h2>Что нужно от вас</h2></div>
         <div class="prose">
-          <p><b>Раунд 26 принят 07.11 с правками</b> — решения в <code>docs/31_digest.md</code> §3. Делаю новую сводку.</p>
-          <p>Раунд 26 — утренняя сводка в Telegram. Заметка — <code>docs/31_digest.md</code>.</p>
+          <p>Раунд 27 — Telegram Mini App. Заметка — <code>docs/32_telegram_mini_app.md</code>.</p>
           <ul>
-            <li><b>На решение</b> — D1–D5: как сводка будет выглядеть и что в ней можно сделать.</li>
-            <li><b>На выбор</b> — QD1–QD3: что делать со старыми находками, язык, когда присылать.</li>
+            <li><b>На решение</b> — M1–M4: что это, как входить, где работает, как выглядит.</li>
+            <li><b>На выбор</b> — QM1–QM3: что в первой версии, что можно из Mini App, что остаётся в чате.</li>
           </ul>
-          <p>M10 «Хаб» сделан, выпуск 0.1.12 собирается.</p>
+          <p>Новая сводка (раунд 26) уже на сервере, 0.1.13.</p>
         </div>
-        <div class="locked"><span class="caption">Принято:</span><span class="chip">MVP</span><span class="chip">Фазы 1–6</span><span class="chip">M0–M10</span><span class="chip">T1–T4</span><span class="chip">V1–V2</span></div>
+        <div class="locked"><span class="caption">Принято:</span><span class="chip">MVP</span><span class="chip">M0–M10</span><span class="chip">V1–V2</span><span class="chip">D1–D5</span><span class="chip">QD1–QD3</span></div>
       </section>
 
-      <section id="now-problem">
-        <div class="sh"><span class="tag ref">ваш отзыв</span><h2>Что не так — на сводках 5 и 6 ноября</h2></div>
-        <div class="prose">
-          <ul>
-            <li><b>Одно и то же каждый день.</b> Обе сводки — те же 11 пунктов «ждут решения». Это находки агентов от 20 октября, с приёмочного прогона. Они появились до правила «новые находки агента принимаются с пометкой «не проверено»», поэтому висят. Нового за день нет.</li>
-            <li><b>Сырой текст знаний.</b> Пункт — сама формулировка знания из тикета, целиком: технический язык, английский вперемешку с русским.</li>
-            <li><b>Повторы.</b> Одна находка — 2–3 пункта в разных словах: AIRC-1808 трижды, AIRC-1507/1551/1553 и JBAIP-1968 дважды. Её записали и разбор заметок, и ночной агент.</li>
-            <li><b>Ссылки не нажимаются.</b> Ночной агент сохранил источники без адреса тикета: номер есть, ссылки нет.</li>
-            <li><b>Решить нельзя.</b> Кнопок нет, только «откройте Inbox». И сама сводка остаётся в Inbox: там уже 10 сводок.</li>
-          </ul>
-        </div>
-        <div class="flows" style="margin-top:12px">
-          <div class="flow"><h3><span class="k">6 ноября</span>Так будет, когда нового нет</h3><div class="steps"><span class="chip">☀️ Frood · пятница, 6 ноября</span><span class="chip">Нового нет.</span><span class="chip">⏳ 11 ждут решения с 20 октября — YouTrack</span><span class="chip you">Разобрать</span><span class="chip you">Принять все как непроверенные</span><span class="chip you">Реже</span></div></div>
-          <div class="flow"><h3><span class="k">новое</span>Так — когда агент что-то нашёл</h3><div class="steps"><span class="chip">Новое — YouTrack, 2</span><span class="chip k">AIRC-1808 — сессия с длинной историей грузится 22 минуты (3 находки)</span><span class="chip k">JBAIP-1968 — когда в Codex появится веб-поиск (2 находки)</span><span class="chip">⏳ 9 ждут решения</span></div><p class="note">Номера тикетов нажимаются и открывают тикет.</p></div>
+      <section id="now-what">
+        <div class="sh"><span class="tag ref">ваша идея</span><h2>Что такое Mini App и как будет выглядеть</h2></div>
+        <div class="mock-row">
+          <div class="prose">
+            <p>Mini App — веб-страница, которая открывается кнопкой прямо в Telegram, на весь экран, не выходя из чата. Telegram сам передаёт ей, кто открыл, с подписью, которую Frood проверяет. Сообщения в чате остаются короткими, а разбирать и решать удобно на экране.</p>
+            <p>Справа — разбор того, что ждёт: карточка находки с меткой тикета-ссылкой, цитатой и кнопками; следующая карточка — смахиванием; внизу — большая кнопка Telegram для главного действия.</p>
+          </div>
+          <div class="phone" aria-label="Набросок экрана Mini App на телефоне">
+            <div class="bar"><span>‹ Назад</span><b>Frood</b><span>⋯</span></div>
+            <div class="sec">Нужно вам сейчас</div>
+            <div class="card">
+              <div class="tag">конфликт</div>
+              <div class="t"><a>AIRC-1808</a> — долгая загрузка старой сессии: 22 минуты</div>
+              <div class="q">«attach with session/resume instead of session/load»</div>
+              <div class="acts"><span class="go">Принять</span><span>Не то</span><span>Позже</span></div>
+            </div>
+            <div class="sec">Новое</div>
+            <div class="card">
+              <div class="t"><a>JBAIP-1968</a> — когда в Codex будет веб-поиск</div>
+              <div class="acts"><span class="go">Принять</span><span>Не то</span><span>Позже</span></div>
+            </div>
+            <div class="older">⏳ ещё 9 ждут с 20.10</div>
+            <div class="main">Принять все новые (2)</div>
+          </div>
         </div>
       </section>
 
       <section id="now-decisions">
-        <div class="sh"><span class="tag need">нужно ваше решение</span><h2>Новая сводка</h2></div>
+        <div class="sh"><span class="tag need">нужно ваше решение</span><h2>Mini App</h2></div>
         <div class="rv-list">
-          <div class="rv" data-id="impl17_D1" data-kind="decision" data-label="D1 Только о новом">
-            <div class="txt"><span class="id">D1</span><h3>Сводка — только о новом. Если за сутки ничего не появилось, сводки нет. Давно ждущее — одной строкой «11 ждут решения с 20 октября», с кнопкой «Разобрать»</h3><p class="why">Полный список старого больше не приходит каждый день.</p></div><div class="ctl"></div>
+          <div class="rv" data-id="impl18_M1" data-kind="decision" data-label="M1 Мобильный вид консоли">
+            <div class="txt"><span class="id">M1</span><h3>Mini App — мобильный вид консоли Frood: те же страницы «Сейчас», Inbox, «Знания», собранные под телефон. Открывается из бота кнопкой меню «Frood», кнопкой «Разобрать» в сводке и «Подробнее» под карточкой</h3><p class="why">Не новое приложение: одна консоль, два вида. Что в первой версии — QM1.</p></div><div class="ctl"></div>
           </div>
-          <div class="rv" data-id="impl17_D2" data-kind="decision" data-label="D2 Коротко и со ссылкой">
-            <div class="txt"><span class="id">D2</span><h3>Пункт — заголовок до 80 знаков, номер тикета открывает тикет. Пункты сгруппированы по источнику. Агенты обязаны записывать адрес того, что нашли; находка без адреса сама не принимается, а ждёт человека</h3><p class="why">Сейчас ночной агент сохраняет источник без адреса, поэтому ссылку взять неоткуда.</p></div><div class="ctl"></div>
+          <div class="rv" data-id="impl18_M2" data-kind="decision" data-label="M2 Вход по подписи Telegram">
+            <div class="txt"><span class="id">M2</span><h3>Вход без пароля: Frood проверяет данные запуска по открытому ключу Telegram. Токен бота ядру не нужен, он остаётся только в модуле. Человек — тот, чей Telegram привязан; сессия короткая и живёт только в Mini App</h3><p class="why">Непривязанный Telegram не входит никуда. Что можно делать после входа — QM2.</p></div><div class="ctl"></div>
           </div>
-          <div class="rv" data-id="impl17_D3" data-kind="decision" data-label="D3 Повторы склеиваются">
-            <div class="txt"><span class="id">D3</span><h3>Находки про один тикет или одну страницу — одна строка: «AIRC-1808 · 3 находки»</h3><p class="why">Сами знания при этом не сливаются: это делает слияние сущностей, отдельно.</p></div><div class="ctl"></div>
+          <div class="rv" data-id="impl18_M3" data-kind="decision" data-label="M3 Только с публичным адресом">
+            <div class="txt"><span class="id">M3</span><h3>Mini App работает только с публичным адресом https: у сервера он есть, ноутбуку нужен туннель. Без адреса всё как сейчас — кнопки в чате</h3><p class="why">Это требование Telegram: страница открывается по ссылке из интернета.</p></div><div class="ctl"></div>
           </div>
-          <div class="rv" data-id="impl17_D4" data-kind="decision" data-label="D4 Решать из сводки">
-            <div class="txt"><span class="id">D4</span><h3>Кнопки в сводке: «Разобрать» — карточки по одной с кнопками решения; «Принять все как непроверенные»; «Реже» — раз в неделю или выключить</h3><p class="why">В консоль идти не нужно.</p></div><div class="ctl"></div>
-          </div>
-          <div class="rv" data-id="impl17_D5" data-kind="decision" data-label="D5 Сводка не висит в Inbox">
-            <div class="txt"><span class="id">D5</span><h3>Сводка уходит из Inbox, как только доставлена: это сообщение, а не решение</h3><p class="why">Сейчас в Inbox висят 10 старых сводок.</p></div><div class="ctl"></div>
+          <div class="rv" data-id="impl18_M4" data-kind="decision" data-label="M4 Как часть Telegram">
+            <div class="txt"><span class="id">M4</span><h3>Выглядит как часть Telegram: цвета темы человека, системная кнопка «Назад», большая кнопка снизу для главного действия, отклик вибрацией. Ссылки на тикеты открываются в браузере, Mini App остаётся открытым</h3><p class="why">Набросок экрана — выше.</p></div><div class="ctl"></div>
           </div>
         </div>
         <div class="rv-list" style="margin-top:16px">
-          <div class="rv q" data-id="impl17_Q1" data-kind="question" data-label="QD1 Старые находки">
-            <div class="txt"><span class="id">QD1</span><h3>11 находок от 20 октября: (а) принять как «не проверено» — по нынешнему правилу они так бы и принялись; (б) убрать все; (в) разберу сам?</h3><p class="affects">Я предлагаю (а): там почти всё — тикеты, которые вы сами ведёте, и пометка «не проверено» честно говорит, откуда знание.</p></div><div class="ctl"></div>
+          <div class="rv q" data-id="impl18_Q1" data-kind="question" data-label="QM1 Что в первой версии">
+            <div class="txt"><span class="id">QM1</span><h3>Что в первой версии: (а) Inbox и сводка — разобрать, принять, отклонить, отложить, ссылки — и поиск; (б) то же плюс карточка знания с источниками, историей и кнопкой «Верно»; (в) вся консоль в мобильном виде, включая автоматизации и систему?</h3><p class="affects">Я предлагаю (б): разбор и чтение — то, что нужно с телефона; настройки установки удобнее за компьютером.</p></div><div class="ctl"></div>
           </div>
-          <div class="rv q" data-id="impl17_Q2" data-kind="question" data-label="QD2 Язык">
-            <div class="txt"><span class="id">QD2</span><h3>Язык пунктов: (а) без модели — заголовки как есть, на языке источника; (б) дешёвая модель пишет пункт простыми словами на вашем языке, несколько центов в день из ключа на $5?</h3><p class="affects">Без предпочтения: (а) бесплатно, но тикеты останутся на английском и техническими.</p></div><div class="ctl"></div>
+          <div class="rv q" data-id="impl18_Q2" data-kind="question" data-label="QM2 Что можно из Mini App">
+            <div class="txt"><span class="id">QM2</span><h3>Что можно из Mini App: (а) всё для своих знаний — читать, записывать, решать; настройки установки — только из консоли; (б) всё, как в консоли?</h3><p class="affects">Я предлагаю (а): потерянный телефон с открытым Telegram не должен менять установку.</p></div><div class="ctl"></div>
           </div>
-          <div class="rv q" data-id="impl17_Q3" data-kind="question" data-label="QD3 Когда">
-            <div class="txt"><span class="id">QD3</span><h3>Когда присылать: (а) по будням в 08:30, только если есть новое; (б) раз в неделю; (в) не присылать, только по команде /digest?</h3><p class="affects">Я предлагаю (а): с D1 пустых сводок не будет.</p></div><div class="ctl"></div>
+          <div class="rv q" data-id="impl18_Q3" data-kind="question" data-label="QM3 Кнопки в чате">
+            <div class="txt"><span class="id">QM3</span><h3>Кнопки в чате: (а) оставить как есть и добавить «Открыть в Frood»; (б) в чате только короткое сообщение и одна кнопка Mini App?</h3><p class="affects">Я предлагаю (а): быстрое «Принять» в чате остаётся, Mini App — для разбора и чтения.</p></div><div class="ctl"></div>
           </div>
         </div>
-        <div class="overall" data-id="impl17_overall" data-kind="overall" data-label="Общий вердикт по раунду 26">
-          <h3>Общий вердикт по раунду 26</h3>
+        <div class="overall" data-id="impl18_overall" data-kind="overall" data-label="Общий вердикт по раунду 27">
+          <h3>Общий вердикт по раунду 27</h3>
           <div class="ctl"></div>
         </div>
       </section>
@@ -1753,6 +1777,7 @@ jobs:
             <tr><td class="k">24</td><td>M10 «Хаб» (T1–T4, QT1–QT3)</td><td>принято с правками; QT2 — (в); QT1 — вопрос «зачем туннель»; замечание к T2 и ответ на QT3 — на подтверждение в раунде 25</td></tr>
             <tr><td class="k">25</td><td>M10: зачем туннель (QT1 снова), как поняты T2 и QT3; общий прокси сервера (V1–V2, QV1–QV2)</td><td>принято; QT1 — (а); вход через Google — подключаемая возможность, не обязательная; QV1 — (а), QV2 — (а), репозиторий vps-gateway приватный на GitHub</td></tr>
             <tr><td class="k">26</td><td>Утренняя сводка (D1–D5, QD1–QD3)</td><td>принято с правками: важное и срочное подсвечивается всегда; QD1 — (б), QD2 — (б) агентом по подписке, QD3 — (а) в 10:00</td></tr>
+            <tr><td class="k">27</td><td>Telegram Mini App (M1–M4, QM1–QM3)</td><td>на ревью</td></tr>
           </tbody>
         </table></div>
         <p class="caption">Все отметки хранятся в странице и продублированы в docs/README.md.</p>
@@ -1857,7 +1882,7 @@ jobs:
 
 <div class="bar" role="region" aria-label="Итог ревью">
   <div class="bar-in">
-    <div class="tally"><span>Решения <b id="n-model">0</b>/5</span><span>Вопросы <b id="n-q">0</b>/3</span><span>Вердикт <b id="n-all">—</b></span></div>
+    <div class="tally"><span>Решения <b id="n-model">0</b>/4</span><span>Вопросы <b id="n-q">0</b>/3</span><span>Вердикт <b id="n-all">—</b></span></div>
     <div class="status" id="status" aria-live="polite">Подключаюсь к хранилищу страницы…</div>
     <button class="btn" id="copy" type="button">Скопировать ответ</button>
   </div>
@@ -1987,13 +2012,13 @@ jobs:
     var a = 0, m = 0, q = 0;
     items.forEach(function(el){
       var id = el.dataset.id, s = state[id] || {};
-      if (el.dataset.kind === "decision" && s.verdict) { if (id.indexOf("impl17_") === 0) m++; else a++; }
+      if (el.dataset.kind === "decision" && s.verdict) { if (id.indexOf("impl18_") === 0) m++; else a++; }
       if (el.dataset.kind === "question" && (s.comment || "").trim()) q++;
     });
     var na = document.getElementById("n-arch"); if (na) na.textContent = a;
     document.getElementById("n-model").textContent = m;
     document.getElementById("n-q").textContent = q;
-    var o = state.impl17_overall || {};
+    var o = state.impl18_overall || {};
     document.getElementById("n-all").textContent = o.verdict ? LABEL[o.verdict] : "—";
   }
 
@@ -2020,9 +2045,9 @@ jobs:
   }
 
   function compose(){
-    var lines = ["Ревью Frood, раунд 26: утренняя сводка"];
-    var o = state.impl17_overall || {};
-    lines.push("Общее по раунду 26: " + (o.verdict ? LABEL[o.verdict] : "без вердикта") + (o.comment ? ". " + o.comment.trim() : ""));
+    var lines = ["Ревью Frood, раунд 27: Telegram Mini App"];
+    var o = state.impl18_overall || {};
+    lines.push("Общее по раунду 27: " + (o.verdict ? LABEL[o.verdict] : "без вердикта") + (o.comment ? ". " + o.comment.trim() : ""));
     items.forEach(function(el){
       var k = el.dataset.kind, s = state[el.dataset.id] || {}, c = (s.comment || "").trim();
       if (k === "decision") lines.push(el.dataset.label + ": " + (s.verdict ? LABEL[s.verdict] : "без отметки") + (c ? ". " + c : ""));
