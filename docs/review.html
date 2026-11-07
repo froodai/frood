@@ -304,7 +304,7 @@ details.area[open] summary .tw{transform:rotate(90deg)}
     </header>
 
     <div class="tabs" role="tablist" aria-label="Этапы ревью">
-      <button class="tab" role="tab" id="t-now" data-tab="now" aria-controls="now" aria-selected="true">Сейчас на ревью <span class="n">7</span></button>
+      <button class="tab" role="tab" id="t-now" data-tab="now" aria-controls="now" aria-selected="true">Сейчас на ревью <span class="n">8</span></button>
       <button class="tab" role="tab" id="t-mvp" data-tab="mvp" aria-controls="mvp" aria-selected="false">План MVP</button>
       <button class="tab" role="tab" id="t-platform" data-tab="platform" aria-controls="platform" aria-selected="false">Платформа</button>
       <button class="tab" role="tab" id="t-notify" data-tab="notify" aria-controls="notify" aria-selected="false">Inbox и уведомления</button>
@@ -321,85 +321,65 @@ details.area[open] summary .tw{transform:rotate(90deg)}
       <section id="now-intro">
         <div class="sh"><h2>Что нужно от вас</h2></div>
         <div class="prose">
-          <p><b>Раунд 25 принят 26.10, M10 «Хаб» сделан 05.11.</b> Решения — в <code>docs/28_m10_hub.md</code> §8 и <code>docs/29_shared_proxy.md</code> §4. Сервер переехал за общий прокси. Сделаны вход через Telegram и passkey, туннель, память для Hermes и OpenClaw, OpenClaw как канал. Ваше решение сейчас ничего не ждёт.</p>
-          <p>Раунд 25 — уточнения по M10 «Хаб». Ответы раунда 24 записаны в <code>docs/28_m10_hub.md</code> §6–7.</p>
+          <p>Раунд 26 — утренняя сводка в Telegram. Заметка — <code>docs/31_digest.md</code>.</p>
           <ul>
-            <li><b>Вопрос снова</b> — QT1: какой туннель. Ниже — зачем он вообще.</li>
-            <li><b>На подтверждение</b> — как я понял замечание к T2 и ответ на QT3.</li>
-            <li><b>Новое по вашей просьбе</b> — V1–V2, QV1–QV2: общий прокси сервера, в котором Frood — один из проектов.</li>
+            <li><b>На решение</b> — D1–D5: как сводка будет выглядеть и что в ней можно сделать.</li>
+            <li><b>На выбор</b> — QD1–QD3: что делать со старыми находками, язык, когда присылать.</li>
           </ul>
-          <p>Пока вы смотрите, делаю T2 — вход через Telegram. От туннеля он не зависит.</p>
+          <p>M10 «Хаб» сделан, выпуск 0.1.12 собирается.</p>
         </div>
-        <div class="locked"><span class="caption">Принято:</span><span class="chip">MVP</span><span class="chip">Фазы 1–6</span><span class="chip">M0–M9</span><span class="chip">U1–U4</span><span class="chip">Y1–Y3</span><span class="chip">F1–F5</span><span class="chip">T1–T4</span><span class="chip">QT1 (а)</span><span class="chip">QT2 (в)</span><span class="chip">V1–V2</span></div>
+        <div class="locked"><span class="caption">Принято:</span><span class="chip">MVP</span><span class="chip">Фазы 1–6</span><span class="chip">M0–M10</span><span class="chip">T1–T4</span><span class="chip">V1–V2</span></div>
       </section>
 
-      <section id="now-done">
-        <div class="sh"><span class="tag ref">сделано</span><h2>Сервер на 0.1.9</h2></div>
+      <section id="now-problem">
+        <div class="sh"><span class="tag ref">ваш отзыв</span><h2>Что не так — на сводках 5 и 6 ноября</h2></div>
         <div class="prose">
           <ul>
-            <li>Ревизия #10, все модули на 0.1.9, ошибок в логах нет. Плановый бэкап в 06:00 прошёл.</li>
-            <li>В конфиг добавлен пояс установки <code>Europe/Belgrade</code>. Сводка теперь приходит по будням в 08:30 по Белграду, хотя строки о ней в конфиге нет.</li>
-            <li>Программа <code>frood</code> для Mac собрана в выпуске впервые: универсальная, для Apple Silicon и Intel. <code>install.sh 0.1.9</code> на этом Mac её ставит.</li>
+            <li><b>Одно и то же каждый день.</b> Обе сводки — те же 11 пунктов «ждут решения». Это находки агентов от 20 октября, с приёмочного прогона. Они появились до правила «новые находки агента принимаются с пометкой «не проверено»», поэтому висят. Нового за день нет.</li>
+            <li><b>Сырой текст знаний.</b> Пункт — сама формулировка знания из тикета, целиком: технический язык, английский вперемешку с русским.</li>
+            <li><b>Повторы.</b> Одна находка — 2–3 пункта в разных словах: AIRC-1808 трижды, AIRC-1507/1551/1553 и JBAIP-1968 дважды. Её записали и разбор заметок, и ночной агент.</li>
+            <li><b>Ссылки не нажимаются.</b> Ночной агент сохранил источники без адреса тикета: номер есть, ссылки нет.</li>
+            <li><b>Решить нельзя.</b> Кнопок нет, только «откройте Inbox». И сама сводка остаётся в Inbox: там уже 10 сводок.</li>
           </ul>
         </div>
-      </section>
-
-      <section id="now-tunnel">
-        <div class="sh"><span class="tag ref">ответ на ваш вопрос</span><h2>Зачем туннель</h2></div>
-        <div class="prose">
-          <p>Claude в браузере (claude.ai), Claude на телефоне и ChatGPT подключаются к Frood не с вашего компьютера, а со своих серверов в облаке. Им нужен адрес Frood в интернете, который открывается откуда угодно.</p>
-        </div>
         <div class="flows" style="margin-top:12px">
-          <div class="flow"><h3><span class="k">сервер</span>Как у вас: адрес есть, туннель не нужен</h3><div class="steps"><span class="chip you">claude.ai</span><span class="ar">→</span><span class="chip">https://178-104-154-183.sslip.io/frood</span><span class="ar">→</span><span class="chip k">Frood на Hetzner</span></div></div>
-          <div class="flow"><h3><span class="k">ноутбук</span>Без туннеля: из облака не достать</h3><div class="steps"><span class="chip you">claude.ai</span><span class="ar">→</span><span class="chip">домашний роутер, адреса в интернете нет</span><span class="ar">✕</span><span class="chip">Frood на ноутбуке</span></div><p class="note">Работают только программы на самом ноутбуке: Claude Code, Codex, консоль. Telegram тоже работает: бот сам ходит в Telegram.</p></div>
-          <div class="flow"><h3><span class="k">туннель</span>С туннелем: постоянный адрес без домена и открытых портов</h3><div class="steps"><span class="chip you">claude.ai</span><span class="ar">→</span><span class="chip">https://ноутбук.сеть.ts.net</span><span class="ar">→</span><span class="chip">Tailscale</span><span class="ar">→</span><span class="chip k">Frood на ноутбуке</span></div><p class="note">Программа туннеля стоит рядом с Frood и сама подключается к Tailscale. Пока ноутбук спит, Claude в браузере Frood не видит.</p></div>
-        </div>
-      </section>
-
-      <section id="now-vps">
-        <div class="sh"><span class="tag need">нужно ваше решение</span><h2>VPS: общий вход вместо Caddy из Frood</h2></div>
-        <div class="prose">
-          <p>Заметка — <code>docs/29_shared_proxy.md</code>. Сейчас 80/443 и сертификаты держит Caddy, которого поднимает Frood, а pages и cockpit живут у него в гостях: <code>frood-routes.caddy</code> внутри его сайта. <code>/srv/edge</code> на сервере пока нет.</p>
-        </div>
-        <div class="flows" style="margin-top:12px">
-          <div class="flow"><h3><span class="k">сейчас</span>Всё через Frood</h3><div class="steps"><span class="chip you">:443</span><span class="ar">→</span><span class="chip k">Caddy из Frood: frood apply переписывает его конфиг</span><span class="ar">→</span><span class="chip">/frood</span><span class="chip">/pages</span><span class="chip">/cockpit</span></div><p class="note">Упал или переустанавливается Frood — не открывается ничего.</p></div>
-          <div class="flow"><h3><span class="k">предлагаю</span>Общий Caddy сервера, у каждого свой файл</h3><div class="steps"><span class="chip you">:443</span><span class="ar">→</span><span class="chip k">Caddy в /srv/edge</span><span class="ar">→</span><span class="chip">paths/frood.caddy</span><span class="chip">paths/pages.caddy</span><span class="chip">paths/cockpit.caddy</span><span class="chip">sites/&lt;свой домен&gt;.caddy</span></div><p class="note">Сломанный файл одного проекта не трогает остальные: Caddy оставляет прежний конфиг.</p></div>
-        </div>
-        <div class="rv-list" style="margin-top:16px">
-          <div class="rv" data-id="impl16_V1" data-kind="decision" data-label="V1 Общий прокси сервера">
-            <div class="txt"><span class="id">V1</span><h3>Прокси принадлежит серверу, не Frood. Отдельный репозиторий <code>~/PetProjects/vps-gateway</code>: Caddy в <code>/srv/edge</code>; проект на своём домене кладёт файл в <code>sites/</code>, проект под путём на общем домене — в <code>paths/</code>. Готовое решение — сам Caddy; в репозитории только раскладка, установщик, подхват файлов и короткая команда <code>edge</code>: добавить проект, проверить, показать список</h3><p class="why">Сам <code>caddy --watch</code> следит только за главным файлом: файлы через <code>import</code> он, по сообщениям сообщества, не видит. Поэтому подхват делает systemd: он смотрит на папки и вызывает <code>caddy reload</code>. Если новый конфиг неверный, Caddy оставляет прежний. Файлы pages и cockpit поначалу положу я, перенеся их из <code>frood-routes.caddy</code>. Потом их проекты забирают файлы себе. Traefik, caddy-docker-proxy, Coolify и Dokploy смотрел; почему нет — в заметке, §2.</p></div><div class="ctl"></div>
-          </div>
-          <div class="rv" data-id="impl16_V2" data-kind="decision" data-label="V2 Frood за чужим прокси">
-            <div class="txt"><span class="id">V2</span><h3>Frood умеет жить за чужим прокси: <code>deploy.proxy: { external: /srv/edge/paths/frood.caddy }</code>. Свой Caddy он тогда не запускает, а при <code>frood apply</code> пишет только свой файл маршрутов: путь Frood и адреса <code>/.well-known</code> в корне домена для OAuth. Без <code>external</code> — как сейчас: на пустом сервере Frood приносит свой Caddy</h3><p class="why">Нужен выпуск 0.1.10. Переезд: общий прокси готов, но не запущен → <code>frood apply</code> с <code>external</code> → Caddy из Frood уходит, общий сразу занимает 80/443. Простой — секунды. Сертификаты перенесу из тома Caddy, чтобы не выпускать заново. Откат — прежний <code>frood.yaml</code> и <code>frood apply</code>. Каждое действие на сервере — с вашего разрешения.</p></div><div class="ctl"></div>
-          </div>
-        </div>
-        <div class="rv-list" style="margin-top:16px">
-          <div class="rv q" data-id="impl16_QV1" data-kind="question" data-label="QV1 Как запускать общий Caddy">
-            <div class="txt"><span class="id">QV1</span><h3>Как запускать общий Caddy: (а) пакет caddy из официального репозитория Debian как служба systemd; (б) контейнер Docker с сетью хоста?</h3><p class="affects">Я предлагаю (а): вход сервера не зависит от Docker. Если Docker встанет или его обновят, pages, которые работают под systemd, продолжат открываться. Обновления приходят через apt.</p></div><div class="ctl"></div>
-          </div>
-          <div class="rv q" data-id="impl16_QV2" data-kind="question" data-label="QV2 Где репозиторий vps-gateway">
-            <div class="txt"><span class="id">QV2</span><h3>Где держать <code>vps-gateway</code>: (а) приватный репозиторий на GitHub; (б) только на этом Mac, без GitHub; (в) публичный на GitHub?</h3><p class="affects">Я предлагаю (а). В репозитории раскладка вашего сервера — домены, пути, адреса сервисов. Секретов нет: пароль pages остаётся в <code>/srv/claude-pages</code>.</p></div><div class="ctl"></div>
-          </div>
+          <div class="flow"><h3><span class="k">6 ноября</span>Так будет, когда нового нет</h3><div class="steps"><span class="chip">☀️ Frood · пятница, 6 ноября</span><span class="chip">Нового нет.</span><span class="chip">⏳ 11 ждут решения с 20 октября — YouTrack</span><span class="chip you">Разобрать</span><span class="chip you">Принять все как непроверенные</span><span class="chip you">Реже</span></div></div>
+          <div class="flow"><h3><span class="k">новое</span>Так — когда агент что-то нашёл</h3><div class="steps"><span class="chip">Новое — YouTrack, 2</span><span class="chip k">AIRC-1808 — сессия с длинной историей грузится 22 минуты (3 находки)</span><span class="chip k">JBAIP-1968 — когда в Codex появится веб-поиск (2 находки)</span><span class="chip">⏳ 9 ждут решения</span></div><p class="note">Номера тикетов нажимаются и открывают тикет.</p></div>
         </div>
       </section>
 
       <section id="now-decisions">
-        <div class="sh"><span class="tag need">нужно ваше решение</span><h2>Уточнения</h2></div>
+        <div class="sh"><span class="tag need">нужно ваше решение</span><h2>Новая сводка</h2></div>
         <div class="rv-list">
-          <div class="rv q" data-id="impl16_Q1" data-kind="question" data-label="QT1 Какой туннель (снова)">
-            <div class="txt"><span class="id">QT1</span><h3>Для тех, кто поставил Frood на ноутбук или домашний компьютер и хочет Claude в браузере или ChatGPT: (а) туннель Tailscale (бесплатно, адрес <code>…ts.net</code>), для своего домена — Cloudflare; (б) только Cloudflare и только со своим доменом; (в) не делать: облачные клиенты — только с сервером, у которого есть адрес, как у вас?</h3><p class="affects">Я предлагаю (а): после M9 Frood по умолчанию ставится на ноутбук, и без туннеля Claude в браузере и ChatGPT ему недоступны. Вам лично туннель не нужен.</p></div><div class="ctl"></div>
+          <div class="rv" data-id="impl17_D1" data-kind="decision" data-label="D1 Только о новом">
+            <div class="txt"><span class="id">D1</span><h3>Сводка — только о новом. Если за сутки ничего не появилось, сводки нет. Давно ждущее — одной строкой «11 ждут решения с 20 октября», с кнопкой «Разобрать»</h3><p class="why">Полный список старого больше не приходит каждый день.</p></div><div class="ctl"></div>
+          </div>
+          <div class="rv" data-id="impl17_D2" data-kind="decision" data-label="D2 Коротко и со ссылкой">
+            <div class="txt"><span class="id">D2</span><h3>Пункт — заголовок до 80 знаков, номер тикета открывает тикет. Пункты сгруппированы по источнику. Агенты обязаны записывать адрес того, что нашли; находка без адреса сама не принимается, а ждёт человека</h3><p class="why">Сейчас ночной агент сохраняет источник без адреса, поэтому ссылку взять неоткуда.</p></div><div class="ctl"></div>
+          </div>
+          <div class="rv" data-id="impl17_D3" data-kind="decision" data-label="D3 Повторы склеиваются">
+            <div class="txt"><span class="id">D3</span><h3>Находки про один тикет или одну страницу — одна строка: «AIRC-1808 · 3 находки»</h3><p class="why">Сами знания при этом не сливаются: это делает слияние сущностей, отдельно.</p></div><div class="ctl"></div>
+          </div>
+          <div class="rv" data-id="impl17_D4" data-kind="decision" data-label="D4 Решать из сводки">
+            <div class="txt"><span class="id">D4</span><h3>Кнопки в сводке: «Разобрать» — карточки по одной с кнопками решения; «Принять все как непроверенные»; «Реже» — раз в неделю или выключить</h3><p class="why">В консоль идти не нужно.</p></div><div class="ctl"></div>
+          </div>
+          <div class="rv" data-id="impl17_D5" data-kind="decision" data-label="D5 Сводка не висит в Inbox">
+            <div class="txt"><span class="id">D5</span><h3>Сводка уходит из Inbox, как только доставлена: это сообщение, а не решение</h3><p class="why">Сейчас в Inbox висят 10 старых сводок.</p></div><div class="ctl"></div>
           </div>
         </div>
         <div class="rv-list" style="margin-top:16px">
-          <div class="rv" data-id="impl16_D1" data-kind="decision" data-label="T2 как понято замечание">
-            <div class="txt"><span class="id">T2</span><h3>Ваше замечание «модуль для удобного логина с ограниченным доступом» я понял так. Вход через Telegram и passkey включается строкой в <code>auth.providers</code>, как Google. Он пускает только людей из <code>auth.allow</code>, через Telegram — только с уже привязанным Telegram, и новых людей не добавляет. Бот ничего не решает и токенов не видит: показывает кнопку «Войти» и передаёт нажатие, сессию выдаёт Frood</h3><p class="why">На странице входа и в сообщении бота — одинаковый короткий код: нажимать «Войти», только если он совпадает. Одна просьба о входе за раз, не чаще нескольких в час. Если «ограниченный доступ» значит другое — например, что такой вход не даёт прав администратора, — напишите в комментарии.</p></div><div class="ctl"></div>
+          <div class="rv q" data-id="impl17_Q1" data-kind="question" data-label="QD1 Старые находки">
+            <div class="txt"><span class="id">QD1</span><h3>11 находок от 20 октября: (а) принять как «не проверено» — по нынешнему правилу они так бы и принялись; (б) убрать все; (в) разберу сам?</h3><p class="affects">Я предлагаю (а): там почти всё — тикеты, которые вы сами ведёте, и пометка «не проверено» честно говорит, откуда знание.</p></div><div class="ctl"></div>
           </div>
-          <div class="rv" data-id="impl16_D2" data-kind="decision" data-label="QT3 как понят ответ">
-            <div class="txt"><span class="id">QT3</span><h3>Ответ «я не пользуюсь, но наверное важно для потенциальных юзеров» я понял как (а): провайдер памяти для Hermes и OpenClaw и канал OpenClaw делаются, но в конце M10. Порядок: T2 (Telegram, затем passkey) → T1 → T3 → T4</h3><p class="why">Публикация в каталогах ClawHub и Hermes — отдельным шагом, когда вы скажете.</p></div><div class="ctl"></div>
+          <div class="rv q" data-id="impl17_Q2" data-kind="question" data-label="QD2 Язык">
+            <div class="txt"><span class="id">QD2</span><h3>Язык пунктов: (а) без модели — заголовки как есть, на языке источника; (б) дешёвая модель пишет пункт простыми словами на вашем языке, несколько центов в день из ключа на $5?</h3><p class="affects">Без предпочтения: (а) бесплатно, но тикеты останутся на английском и техническими.</p></div><div class="ctl"></div>
+          </div>
+          <div class="rv q" data-id="impl17_Q3" data-kind="question" data-label="QD3 Когда">
+            <div class="txt"><span class="id">QD3</span><h3>Когда присылать: (а) по будням в 08:30, только если есть новое; (б) раз в неделю; (в) не присылать, только по команде /digest?</h3><p class="affects">Я предлагаю (а): с D1 пустых сводок не будет.</p></div><div class="ctl"></div>
           </div>
         </div>
-        <div class="overall" data-id="impl16_overall" data-kind="overall" data-label="Общий вердикт по раунду 25">
-          <h3>Общий вердикт по раунду 25</h3>
+        <div class="overall" data-id="impl17_overall" data-kind="overall" data-label="Общий вердикт по раунду 26">
+          <h3>Общий вердикт по раунду 26</h3>
           <div class="ctl"></div>
         </div>
       </section>
@@ -1771,6 +1751,7 @@ jobs:
             <tr><td class="k">23</td><td>M9 «Первый час» (F1–F5, QF1–QF3)</td><td>принято; QF1 — (а), QF2 — (а), QF3 — (б); F3 — без шаблонов, значения встроены в сервер; сделано (0.1.9)</td></tr>
             <tr><td class="k">24</td><td>M10 «Хаб» (T1–T4, QT1–QT3)</td><td>принято с правками; QT2 — (в); QT1 — вопрос «зачем туннель»; замечание к T2 и ответ на QT3 — на подтверждение в раунде 25</td></tr>
             <tr><td class="k">25</td><td>M10: зачем туннель (QT1 снова), как поняты T2 и QT3; общий прокси сервера (V1–V2, QV1–QV2)</td><td>принято; QT1 — (а); вход через Google — подключаемая возможность, не обязательная; QV1 — (а), QV2 — (а), репозиторий vps-gateway приватный на GitHub</td></tr>
+            <tr><td class="k">26</td><td>Утренняя сводка (D1–D5, QD1–QD3)</td><td>на ревью</td></tr>
           </tbody>
         </table></div>
         <p class="caption">Все отметки хранятся в странице и продублированы в docs/README.md.</p>
@@ -1875,7 +1856,7 @@ jobs:
 
 <div class="bar" role="region" aria-label="Итог ревью">
   <div class="bar-in">
-    <div class="tally"><span>Решения <b id="n-model">0</b>/4</span><span>Вопросы <b id="n-q">0</b>/3</span><span>Вердикт <b id="n-all">—</b></span></div>
+    <div class="tally"><span>Решения <b id="n-model">0</b>/5</span><span>Вопросы <b id="n-q">0</b>/3</span><span>Вердикт <b id="n-all">—</b></span></div>
     <div class="status" id="status" aria-live="polite">Подключаюсь к хранилищу страницы…</div>
     <button class="btn" id="copy" type="button">Скопировать ответ</button>
   </div>
@@ -2005,13 +1986,13 @@ jobs:
     var a = 0, m = 0, q = 0;
     items.forEach(function(el){
       var id = el.dataset.id, s = state[id] || {};
-      if (el.dataset.kind === "decision" && s.verdict) { if (id.indexOf("impl16_") === 0) m++; else a++; }
+      if (el.dataset.kind === "decision" && s.verdict) { if (id.indexOf("impl17_") === 0) m++; else a++; }
       if (el.dataset.kind === "question" && (s.comment || "").trim()) q++;
     });
     var na = document.getElementById("n-arch"); if (na) na.textContent = a;
     document.getElementById("n-model").textContent = m;
     document.getElementById("n-q").textContent = q;
-    var o = state.impl16_overall || {};
+    var o = state.impl17_overall || {};
     document.getElementById("n-all").textContent = o.verdict ? LABEL[o.verdict] : "—";
   }
 
@@ -2038,9 +2019,9 @@ jobs:
   }
 
   function compose(){
-    var lines = ["Ревью Frood, раунд 25: M10, уточнения; общий прокси сервера"];
-    var o = state.impl16_overall || {};
-    lines.push("Общее по раунду 25: " + (o.verdict ? LABEL[o.verdict] : "без вердикта") + (o.comment ? ". " + o.comment.trim() : ""));
+    var lines = ["Ревью Frood, раунд 26: утренняя сводка"];
+    var o = state.impl17_overall || {};
+    lines.push("Общее по раунду 26: " + (o.verdict ? LABEL[o.verdict] : "без вердикта") + (o.comment ? ". " + o.comment.trim() : ""));
     items.forEach(function(el){
       var k = el.dataset.kind, s = state[el.dataset.id] || {}, c = (s.comment || "").trim();
       if (k === "decision") lines.push(el.dataset.label + ": " + (s.verdict ? LABEL[s.verdict] : "без отметки") + (c ? ". " + c : ""));
