@@ -1,5 +1,5 @@
 name: notify-openclaw
-version: 0.1.13
+version: 0.1.14
 description: Inbox items and the digest in the OpenClaw conversation a person chooses (WhatsApp, iMessage, Signal and the rest), through the Gateway of OpenClaw. Text only, with numbered choices; a reply with the number, or yes or no, acts as that person. A person links a conversation by sending `frood <code>` in it. Only the owner's messages count.
 license: Apache-2.0
 provides:
