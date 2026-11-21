@@ -35,13 +35,15 @@ pub(crate) fn window_start(now: DateTime<Utc>, zone: Option<chrono_tz::Tz>) -> D
         }
     }
     let midnight = day.and_time(NaiveTime::MIN);
-    match zone {
-        Some(zone) => zone
-            .from_local_datetime(&midnight)
-            .earliest()
-            .map_or_else(|| midnight.and_utc(), |t| t.with_timezone(&Utc)),
-        None => midnight.and_utc(),
-    }
+    let Some(zone) = zone else {
+        return midnight.and_utc();
+    };
+    // Where the clocks jump forward at midnight (Cairo, at the end of April), the day starts
+    // at the first local time that exists.
+    (0..=24 * 4)
+        .map(|quarters| midnight + Duration::minutes(15 * quarters))
+        .find_map(|local| zone.from_local_datetime(&local).earliest())
+        .map_or_else(|| midnight.and_utc(), |t| t.with_timezone(&Utc))
 }
 
 /// Whether an agent job reads sources: it gets a `source:<name>` tool.
@@ -128,43 +130,24 @@ impl Dispatch {
             return Ok(result("not_scheduled", job, Some(&first_source), None));
         }
         // A young installation has not had three working days yet.
+        // The journal only grows and its time comes from the clock: the first by position is
+        // the oldest, read off the primary key instead of a scan.
         let first_event: Option<DateTime<Utc>> =
-            sqlx::query_scalar("SELECT min(occurred_at) FROM journal")
-                .fetch_one(pool)
+            sqlx::query_scalar("SELECT occurred_at FROM journal ORDER BY position LIMIT 1")
+                .fetch_optional(pool)
                 .await?;
         if first_event.is_some_and(|first| first > since) {
             return Ok(None);
         }
 
-        // Runs of the reading jobs in the window, newest first.
-        let mut in_window: Vec<Run> = Vec::new();
-        for job in &scheduled {
-            in_window.extend(
-                runs::list(pool, Some(&job.name), None, 100)
-                    .await?
-                    .into_iter()
-                    .filter(|r| r.created_at >= since && r.created_at <= now),
-            );
+        // The latest finished run of each reading job and subject in the window, newest first.
+        let names: Vec<String> = scheduled.iter().map(|j| j.name.clone()).collect();
+        let (any_run, latest) = runs::latest_finished(pool, &names, since, now).await?;
+        if !any_run {
+            return Ok(result("not_run", &names[0], None, None));
         }
-        in_window.sort_by_key(|r| std::cmp::Reverse(r.created_at));
-        let name = scheduled[0].name.as_str();
-        if in_window.is_empty() {
-            return Ok(result("not_run", name, None, None));
-        }
-        // The latest finished run of each job and subject.
-        let mut latest: Vec<&Run> = Vec::new();
-        for run in in_window
-            .iter()
-            .filter(|r| matches!(r.status.as_str(), "succeeded" | "failed"))
-        {
-            if !latest
-                .iter()
-                .any(|l| l.job == run.job && l.subject == run.subject)
-            {
-                latest.push(run);
-            }
-        }
-        if let Some(failed) = latest.iter().find(|r| r.status == "failed") {
+        // A cancelled pass did not get through either.
+        if let Some(failed) = latest.iter().find(|r| r.status != "succeeded") {
             let error = failed.error.as_deref().unwrap_or_default();
             let named = failed
                 .subject
@@ -185,10 +168,10 @@ impl Dispatch {
                 result("failed", &failed.job, named.as_deref(), Some(failed))
             });
         }
-        if latest.is_empty() {
-            return Ok(None); // runs are still going
+        match latest.first() {
+            Some(run) => Ok(result("found_nothing", &run.job, None, Some(run))),
+            None => Ok(None), // runs are still going
         }
-        Ok(result("found_nothing", name, None, latest.first().copied()))
     }
 }
 
@@ -217,6 +200,25 @@ mod tests {
         assert_eq!(
             window_start(at("2026-11-22T23:00:00Z"), Some(chrono_tz::Europe::Moscow)),
             at("2026-11-18T21:00:00Z")
+        );
+    }
+
+    #[test]
+    fn a_day_that_skips_its_midnight_starts_at_its_first_hour() {
+        // Cairo moves the clocks from 00:00 to 01:00 on Friday 2026-04-24. On Tuesday the window
+        // opens that Friday, at 01:00 local (UTC+3), not three hours late.
+        let skipped = NaiveDate::from_ymd_opt(2026, 4, 24)
+            .unwrap()
+            .and_time(NaiveTime::MIN);
+        assert!(
+            chrono_tz::Africa::Cairo
+                .from_local_datetime(&skipped)
+                .earliest()
+                .is_none()
+        );
+        assert_eq!(
+            window_start(at("2026-04-28T10:00:00Z"), Some(chrono_tz::Africa::Cairo)),
+            at("2026-04-23T22:00:00Z")
         );
     }
 

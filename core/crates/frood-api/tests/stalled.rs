@@ -17,6 +17,11 @@ struct World {
 
 /// An installation with the source `youtrack` and a `daily-sweep`, scheduled or not.
 async fn world(name: &str, scheduled: bool) -> Option<World> {
+    world_with(name, scheduled, "").await
+}
+
+/// The same, with more jobs in the config's `jobs:` block.
+async fn world_with(name: &str, scheduled: bool, more_jobs: &str) -> Option<World> {
     let Some(url) = frood_store::testing::database_url() else {
         eprintln!("FROOD_TEST_DATABASE_URL is not set; skipping");
         return None;
@@ -36,7 +41,7 @@ async fn world(name: &str, scheduled: bool) -> Option<World> {
          sources:\n  youtrack: {{ uses: mcp, server: 'http://yt:8080/mcp' }}\n\
          jobs:\n  extract: {{ enabled: false }}\n  digest: {{}}\n  daily-sweep:\n    uses: agents.execute\n{on}    \
          runtime: runtime\n    agent: claude-code\n    model: claude-haiku-5-5\n    account: claude\n    \
-         instructions: Sweep the source.\n    budget: {{ max_usd: 0.5 }}\n\
+         instructions: Sweep the source.\n    budget: {{ max_usd: 0.5 }}\n{more_jobs}\
          modules:\n  runtime: {{ url: 'http://127.0.0.1:1' }}\n"
     );
     let config = frood_config::parse(
@@ -96,15 +101,29 @@ impl World {
     }
 
     async fn run(&self, status: &str, error: Option<&str>, at: DateTime<Utc>) -> uuid::Uuid {
+        self.run_of("daily-sweep", "youtrack", status, error, at)
+            .await
+    }
+
+    async fn run_of(
+        &self,
+        job: &str,
+        subject: &str,
+        status: &str,
+        error: Option<&str>,
+        at: DateTime<Utc>,
+    ) -> uuid::Uuid {
         let id = uuid::Uuid::now_v7();
         frood_store::sqlx::query(
             "INSERT INTO runs (id, job, idempotency_key, subject, input, status, error, created_at, finished_at) \
-             VALUES ($1, 'daily-sweep', $1::text, 'youtrack', '{}', $2, $3, $4, $4)",
+             VALUES ($1, $5, $1::text, $6, '{}', $2, $3, $4, $4)",
         )
         .bind(id)
         .bind(status)
         .bind(error)
         .bind(at)
+        .bind(job)
+        .bind(subject)
         .execute(&self.pool)
         .await
         .unwrap();
@@ -230,4 +249,83 @@ async fn a_scheduled_sweep_that_brings_nothing_says_why() {
             .unwrap()
             .is_some()
     );
+}
+
+#[tokio::test]
+async fn a_failure_is_not_lost_behind_many_newer_runs() {
+    let Some(w) = world("stalled_many_runs", true).await else {
+        return;
+    };
+    let later = Utc::now() + Duration::days(10);
+    let failed = w
+        .run(
+            "failed",
+            Some("youtrack: HTTP 401"),
+            later - Duration::hours(20),
+        )
+        .await;
+    // More than a page of later runs, all of another subject.
+    for i in 0..120 {
+        w.run_of(
+            "daily-sweep",
+            "notes",
+            "succeeded",
+            None,
+            later - Duration::hours(10) + Duration::seconds(i),
+        )
+        .await;
+    }
+    let stalled = w.dispatch.stalled(later).await.unwrap().unwrap();
+    assert_eq!(stalled["reason"], "access_denied");
+    assert_eq!(stalled["run_id"], json!(failed));
+}
+
+#[tokio::test]
+async fn a_cancelled_pass_is_told_not_kept_quiet() {
+    let Some(w) = world("stalled_cancelled", true).await else {
+        return;
+    };
+    let later = Utc::now() + Duration::days(10);
+    let cancelled = w
+        .run(
+            "cancelled",
+            Some("the job is turned off"),
+            later - Duration::hours(3),
+        )
+        .await;
+    let stalled = w.dispatch.stalled(later).await.unwrap().unwrap();
+    assert_eq!(stalled["reason"], "failed");
+    assert_eq!(stalled["run_id"], json!(cancelled));
+    // A run still going, with nothing finished: no line yet.
+    let Some(w) = world("stalled_running", true).await else {
+        return;
+    };
+    w.run("running", None, later - Duration::hours(1)).await;
+    assert!(w.dispatch.stalled(later).await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn found_nothing_names_the_job_that_ran() {
+    let notes = "  notes-sweep:\n    uses: agents.execute\n    \
+                 on: [{ schedule: '0 4 * * *', timezone: UTC }]\n    runtime: runtime\n    \
+                 agent: claude-code\n    model: claude-haiku-5-5\n    account: claude\n    \
+                 tools: ['source:youtrack']\n    instructions: Read the notes.\n    \
+                 budget: { max_usd: 0.5 }\n";
+    let Some(w) = world_with("stalled_two_jobs", true, notes).await else {
+        return;
+    };
+    let later = Utc::now() + Duration::days(10);
+    let ran = w
+        .run_of(
+            "notes-sweep",
+            "youtrack",
+            "succeeded",
+            None,
+            later - Duration::hours(2),
+        )
+        .await;
+    let stalled = w.dispatch.stalled(later).await.unwrap().unwrap();
+    assert_eq!(stalled["reason"], "found_nothing");
+    assert_eq!(stalled["job"], "notes-sweep");
+    assert_eq!(stalled["run_id"], json!(ran));
 }

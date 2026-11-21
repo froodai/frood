@@ -320,6 +320,40 @@ pub async fn list(
     rows.iter().map(run).collect()
 }
 
+/// Runs of the given jobs created in `[since, until]`: whether there is any, and the latest
+/// finished one (succeeded, failed or cancelled) of each job and subject, newest first.
+pub(crate) async fn latest_finished(
+    pool: &PgPool,
+    jobs: &[String],
+    since: DateTime<Utc>,
+    until: DateTime<Utc>,
+) -> sqlx::Result<(bool, Vec<Run>)> {
+    let any: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM runs WHERE job = ANY($1) AND created_at >= $2 AND created_at <= $3)",
+    )
+    .bind(jobs)
+    .bind(since)
+    .bind(until)
+    .fetch_one(pool)
+    .await?;
+    if !any {
+        return Ok((false, Vec::new()));
+    }
+    let rows = sqlx::query(concat!(
+        "SELECT * FROM (SELECT DISTINCT ON (job, subject) ",
+        columns!(),
+        " FROM runs WHERE job = ANY($1) AND created_at >= $2 AND created_at <= $3 \
+          AND status IN ('succeeded', 'failed', 'cancelled') \
+          ORDER BY job, subject, created_at DESC) latest ORDER BY created_at DESC"
+    ))
+    .bind(jobs)
+    .bind(since)
+    .bind(until)
+    .fetch_all(pool)
+    .await?;
+    Ok((true, rows.iter().map(run).collect::<sqlx::Result<_>>()?))
+}
+
 /// A run created by hand (`POST /v1/runs`), not by an event.
 pub(crate) async fn create_manual(pool: &PgPool, job: &str, input: &Value) -> sqlx::Result<Run> {
     let id = Uuid::now_v7();
