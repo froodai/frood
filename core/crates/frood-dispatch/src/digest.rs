@@ -309,6 +309,7 @@ impl Dispatch {
         Ok(json!({
             "since": since,
             "until": now,
+            "stalled": self.stalled(now).await?,
             "important": important,
             "accepted": grouped(accepted),
             "waiting": {
@@ -373,8 +374,12 @@ impl Dispatch {
             .bind(Utc::now())
             .execute(pool)
             .await?;
-            if !says_something {
-                continue; // nothing new and nothing urgent: no message
+            // Nothing new and nothing urgent: no message. Except that Frood has stopped learning
+            // (docs/33 S1): then the digest is that one line, once in three working days.
+            if !says_something
+                && (digest["stalled"].is_null() || self.stalled_already_told(user).await?)
+            {
+                continue;
             }
             self.close_digests(user).await?;
             // In plain words first, by the agent on the subscription, when the installation has it.
@@ -409,6 +414,19 @@ impl Dispatch {
             made += 1;
         }
         Ok(json!({ "digests": made }))
+    }
+
+    /// Whether the person got a digest saying Frood has stopped learning within the window.
+    async fn stalled_already_told(&self, user: Uuid) -> sqlx::Result<bool> {
+        let since = crate::stalled::window_start(Utc::now(), self.ctx.timezone);
+        sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM inbox_items WHERE kind = 'digest' AND $1 = ANY(for_users) \
+               AND jsonb_typeof(data->'stalled') = 'object' AND created_at >= $2)",
+        )
+        .bind(user)
+        .bind(since)
+        .fetch_one(&self.ctx.pool)
+        .await
     }
 
     /// Earlier digests of a person leave the Inbox without touching their messages (docs/31 D5).

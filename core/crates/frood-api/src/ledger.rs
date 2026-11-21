@@ -47,15 +47,27 @@ struct NowQuery {
     sphere: Option<String>,
 }
 
-/// What holds, what is due and what changed (docs/25 §3.1).
+/// What holds, what is due and what changed (docs/25 §3.1), and, when Frood has stopped
+/// learning, why (`stalled`, docs/33 S1).
 async fn now(
     State(state): State<AppState>,
     _caller: Caller<Read>,
     Query(q): Query<NowQuery>,
-) -> ApiResult<frood_ledger::NowView> {
-    Ok(Json(
-        state.ledger.now(q.project, q.sphere.as_deref()).await?,
-    ))
+) -> ApiResult<serde_json::Value> {
+    let view = state.ledger.now(q.project, q.sphere.as_deref()).await?;
+    // Installation-wide: a project's page does not carry it.
+    let stalled = match q.project {
+        None => state
+            .dispatch
+            .stalled(Utc::now())
+            .await
+            .map_err(|e| ApiError::from(frood_ledger::LedgerError::from(e)))?,
+        Some(_) => None,
+    };
+    let mut view = serde_json::to_value(view)
+        .map_err(|e| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal", e.to_string()))?;
+    view["stalled"] = stalled.unwrap_or(serde_json::Value::Null);
+    Ok(Json(view))
 }
 
 /// The installation's spheres. Built-in ones carry no name: clients name them in their language.

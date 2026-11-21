@@ -16,6 +16,7 @@ import { en, type Key } from "@/i18n/en";
 import { api, BASE, telegramSignIn } from "@/lib/frood";
 import { useInbox, waiting } from "@/lib/queries";
 import { headline, proposal, TONE, titled, typeOf } from "@/lib/situations";
+import { type Stalled, useStalledText } from "@/lib/stalled";
 import type { Assertion, InboxEntry, SearchHit } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { type Act, Detail, useAct, useUndo } from "@/pages/Inbox";
@@ -248,6 +249,7 @@ type Line = {
   due?: string;
 };
 type Digest = {
+  stalled?: Stalled | null;
   important?: Line[];
   accepted?: Line[];
   due_soon?: Line[];
@@ -286,7 +288,8 @@ function DigestCard({ entry, open }: { entry: InboxEntry; open: Set<string> }) {
     },
     onSettled: () => client.invalidateQueries({ queryKey: ["inbox"] }),
   });
-  if (!important.length && !due.length && !accepted.length && !findings.length) return null;
+  const stalled = useStalledText(d.stalled);
+  if (!stalled && !important.length && !due.length && !accepted.length && !findings.length) return null;
   const why = (w: string | undefined) => (w && `mini.why.${w}` in en ? t(`mini.why.${w}` as Key) : null);
   const when = (w: string | undefined) => (w && `mini.due.${w.replace("due_", "")}` in en ? t(`mini.due.${w.replace("due_", "")}` as Key) : null);
 
@@ -295,6 +298,11 @@ function DigestCard({ entry, open }: { entry: InboxEntry; open: Set<string> }) {
       <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
         {t("mini.digest")} · {ago(entry.item.created_at)}
       </h2>
+      {stalled && (
+        <p className="text-sm leading-snug font-medium text-rose-700 dark:text-rose-300">
+          {stalled.title}. {stalled.reason}.
+        </p>
+      )}
       {important.length > 0 && (
         <DigestList title={t("mini.important")}>
           {important.map((line, i) => (

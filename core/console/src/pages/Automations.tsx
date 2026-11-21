@@ -81,7 +81,7 @@ export function Automations() {
   const title = useJobTitle();
   const when = useWhen();
   const [job, setJob] = useState<string | null>(null);
-  const [open, setOpen] = useState<string | null>(null);
+  const [open, setOpen] = useState<string | null>(new URLSearchParams(location.search).get("run"));
   const [editing, setEditing] = useState<string | null>(null);
   const running = useQuery({ queryKey: ["jobs"], queryFn: () => api<Job[]>("/v1/jobs") });
   // Every job, with what the console may change; without admin, only the running ones.

@@ -301,6 +301,24 @@ fn digest_line(entry: &Value) -> String {
     }
 }
 
+/// The line saying why nothing new has come in for three working days: the title and the reason.
+pub(crate) fn stalled_line(stalled: &Value, w: &Words) -> Option<String> {
+    let reason = match stalled["reason"].as_str()? {
+        "not_scheduled" => w.stalled_not_scheduled,
+        "not_run" => w.stalled_not_run,
+        "failed" => w.stalled_failed,
+        "access_denied" => w.stalled_access_denied,
+        "found_nothing" => w.stalled_found_nothing,
+        _ => return None,
+    };
+    let source = stalled["source"].as_str().unwrap_or_default();
+    Some(format!(
+        "⚠️ {}. {}.",
+        esc(w.stalled_title),
+        esc(&reason.replace("{source}", source))
+    ))
+}
+
 /// The digest (docs/31): what needs the person now, what is new, and how many waited longer.
 /// When an agent wrote it in plain words (the item's investigation report), that text goes
 /// instead, its labels turned into links.
@@ -311,6 +329,8 @@ pub(crate) fn digest_text(
     written: Option<&str>,
 ) -> String {
     let mut lines = vec![format!("<b>{}</b>", esc(w.digest))];
+    // Frood has stopped learning (docs/33 S1): one line at the top.
+    lines.extend(stalled_line(&digest["stalled"], w));
     let entries = |key: &str| -> Vec<Value> {
         digest
             .pointer(key)
@@ -1009,6 +1029,29 @@ mod tests {
             text(&reminder(2), w, &Spheres::default()),
             "<b>⏰ Срок 2026-11-14</b>: срок прошёл 2 дн. назад: выполнено или перенести?\nСдать отчёт"
         );
+    }
+
+    #[test]
+    fn a_digest_starts_with_why_nothing_new_came_in() {
+        let w = Lang::Ru.words();
+        let digest = json!({
+            "stalled": { "reason": "not_scheduled", "job": "daily-sweep", "source": "youtrack", "run_id": null },
+            "important": [], "accepted": [], "due_soon": [],
+            "waiting": { "count": 0, "new": [], "older": { "count": 0, "since": null } }
+        });
+        let text = digest_text(&digest, w, &Spheres::default(), None);
+        assert!(
+            text.starts_with(
+                "<b>📋 Что нового</b>\n⚠️ Три рабочих дня без нового. Источник youtrack подключён, но ночной проход не запланирован."
+            ),
+            "{text}"
+        );
+        let denied = json!({ "reason": "access_denied", "source": "youtrack" });
+        assert_eq!(
+            stalled_line(&denied, Lang::En.words()).as_deref(),
+            Some("⚠️ Nothing new for three working days. Source youtrack refused access.")
+        );
+        assert_eq!(stalled_line(&Value::Null, w), None);
     }
 
     #[test]

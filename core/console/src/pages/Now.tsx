@@ -8,6 +8,7 @@ import { useI18n } from "@/i18n";
 import { api } from "@/lib/frood";
 import { useInbox, waiting } from "@/lib/queries";
 import { titled } from "@/lib/situations";
+import { type Stalled, StalledBanner } from "@/lib/stalled";
 import { sphereIcon, useSphereName, useSpheres } from "@/lib/spheres";
 import type { Assertion } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -22,6 +23,8 @@ type NowView = {
   owners: Assertion[];
   questions: Assertion[];
   changes: Changed[];
+  /** Why nothing new has come in for three working days, when so (docs/33 S1). */
+  stalled?: Stalled | null;
 };
 
 function Panel({ title, sub, children, empty }: { title: string; sub?: string; children: React.ReactNode[]; empty: string }) {
@@ -92,6 +95,7 @@ export function Now() {
 
   return (
     <div className="flex max-w-6xl flex-col gap-5 px-4 py-5 md:px-7">
+      {v?.stalled && <StalledBanner stalled={v.stalled} />}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Link to="../inbox" className="flex flex-col gap-1 rounded-xl border bg-card p-4 hover:border-primary">
           <span className="text-sm text-muted-foreground">{t("now.waiting")}</span>

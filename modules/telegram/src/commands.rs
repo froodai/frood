@@ -186,6 +186,10 @@ impl Bot {
         let inbox = self.get("/v1/inbox?limit=200").await?;
         let waiting = open(&inbox).len();
         let mut out = vec![format!("<b>{}</b>", esc(t.now_title)), String::new()];
+        if let Some(line) = crate::notify::stalled_line(&now["stalled"], self.lang.words()) {
+            out.push(line);
+            out.push(String::new());
+        }
         let deadlines = now["deadlines"].as_array().cloned().unwrap_or_default();
         if deadlines.is_empty() {
             out.push(esc(t.nothing_due));
