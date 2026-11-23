@@ -117,6 +117,23 @@ jobs:
       - uses: actions/checkout@v5
       - run: docker build core
 
+  chart:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: deploy/helm/frood
+    steps:
+      - uses: actions/checkout@v5
+      # Helm comes with the runner's image.
+      - run: helm lint . --set database.existingSecret=frood-db
+      - run: |
+          set -e
+          for values in "-f examples/public.yaml" "-f examples/internal.yaml" \
+              "-f examples/public.yaml -f examples/external-auth.yaml -f examples/llm-gateway.yaml"; do
+            helm lint . $values
+            helm template frood . $values > /dev/null
+          done
+
   modules:
     runs-on: ubuntu-latest
     strategy:

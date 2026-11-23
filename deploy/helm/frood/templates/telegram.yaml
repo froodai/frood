@@ -1,0 +1,71 @@
+{{- if .Values.telegram.enabled -}}
+{{- $name := printf "%s-%s" (include "frood.fullname" .) .Values.telegram.name -}}
+{{- $botSecret := default (include "frood.secretsSecret" .) .Values.telegram.botToken.existingSecret -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "frood.labels" . | nindent 4 }}
+    app.kubernetes.io/component: telegram
+spec:
+  # Long polling: two pollers of one bot take each other's updates.
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels:
+      {{- include "frood.selector" (dict "ctx" . "component" "telegram") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "frood.labels" . | nindent 8 }}
+        app.kubernetes.io/component: telegram
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: telegram
+          image: {{ include "frood.image" (dict "ctx" . "image" .Values.telegram.image) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - { name: http, containerPort: 8080 }
+          env:
+            {{- include "frood.moduleEnv" (dict "ctx" . "name" .Values.telegram.name "config" (toJson (default dict .Values.telegram.config))) | nindent 12 }}
+            - name: TELEGRAM_BOT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "telegram: set telegram.botToken.existingSecret or secrets.existingSecret" $botSecret }}
+                  key: {{ .Values.telegram.botToken.key }}
+          {{- include "frood.moduleProbes" . | nindent 10 }}
+          resources:
+            {{- toYaml .Values.telegram.resources | nindent 12 }}
+          securityContext:
+            {{- include "frood.containerSecurity" . | nindent 12 }}
+          volumeMounts:
+            - { name: data, mountPath: /data }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: tmp
+          emptyDir: { sizeLimit: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "frood.labels" . | nindent 4 }}
+    app.kubernetes.io/component: telegram
+spec:
+  selector:
+    {{- include "frood.selector" (dict "ctx" . "component" "telegram") | nindent 4 }}
+  ports:
+    - { name: http, port: 8080, targetPort: http }
+{{- end }}

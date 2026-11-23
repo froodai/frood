@@ -1,0 +1,96 @@
+{{- if .Values.backup.enabled -}}
+{{- $fullname := include "frood.fullname" . -}}
+{{- $name := printf "%s-%s" $fullname .Values.backup.name -}}
+{{- $pvc := eq .Values.files.type "pvc" -}}
+{{- $claim := default (printf "%s-files" $fullname) .Values.files.pvc.existingClaim -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "frood.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels:
+      {{- include "frood.selector" (dict "ctx" . "component" "backup") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "frood.labels" . | nindent 8 }}
+        app.kubernetes.io/component: backup
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if and $pvc (eq .Values.files.pvc.accessMode "ReadWriteOnce") }}
+      # The files volume can be mounted on one node only: next to the server.
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  {{- include "frood.selector" (dict "ctx" . "component" "server") | nindent 18 }}
+      {{- end }}
+      containers:
+        - name: backup
+          image: {{ include "frood.image" (dict "ctx" . "image" .Values.backup.image) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - { name: http, containerPort: 8080 }
+          env:
+            {{- include "frood.moduleEnv" (dict "ctx" . "name" .Values.backup.name "config" "{}") | nindent 12 }}
+          {{- include "frood.moduleProbes" . | nindent 10 }}
+          resources:
+            {{- toYaml .Values.backup.resources | nindent 12 }}
+          securityContext:
+            {{- include "frood.containerSecurity" . | nindent 12 }}
+          volumeMounts:
+            - { name: work, mountPath: /backup }
+            - { name: restore, mountPath: /restore }
+            - { name: home, mountPath: /home/module }
+            - { name: tmp, mountPath: /tmp }
+            - { name: data, mountPath: /data }
+            {{- if $pvc }}
+            - { name: files, mountPath: /frood/objects, readOnly: true }
+            {{- end }}
+      volumes:
+        # A dump on its way to the targets, and one on its way back for the restore check.
+        - name: work
+          emptyDir: { sizeLimit: {{ .Values.backup.workSize }} }
+        - name: restore
+          emptyDir: { sizeLimit: {{ .Values.backup.workSize }} }
+        - name: home
+          emptyDir: { sizeLimit: 2Gi }
+        - name: tmp
+          emptyDir: { sizeLimit: 256Mi }
+        - name: data
+          emptyDir: {}
+        {{- if $pvc }}
+        - name: files
+          persistentVolumeClaim:
+            claimName: {{ $claim }}
+            readOnly: true
+        {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "frood.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup
+spec:
+  selector:
+    {{- include "frood.selector" (dict "ctx" . "component" "backup") | nindent 4 }}
+  ports:
+    - { name: http, port: 8080, targetPort: http }
+{{- end }}

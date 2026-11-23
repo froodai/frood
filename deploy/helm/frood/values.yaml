@@ -1,0 +1,231 @@
+# Frood on Kubernetes. Install: deploy/helm/README.md.
+#
+# The chart writes frood.yaml into a ConfigMap from `config` below and fills in what the cluster
+# decides: server.listen, server.public_url (from the ingress), storage.url (from the database
+# Secret), storage.objects (from `files`), deploy, and the url and config of each module it runs.
+# `${secret:NAME}` in `config` is read from the server's environment: put NAME into the Secret
+# named in `secrets.existingSecret`.
+
+# The release's own images; tags default to the chart's appVersion.
+image:
+  repository: ghcr.io/froodai/frood
+  tag: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+# Objects are named after the release (`<release>-frood`, or the release's name when it has
+# "frood" in it) unless this is set.
+fullnameOverride: ""
+
+# frood.yaml without what the chart fills in (docs/16 §5, `frood config schema`).
+config:
+  version: 1
+  installation:
+    name: frood
+    # timezone: Europe/Amsterdam
+  # Who signs in: here, work Google accounts of one domain.
+  auth:
+    allow: []
+    # allow_domains: [example.com]
+    providers: []
+    # - { kind: oidc, id: google, label: Google, issuer: https://accounts.google.com,
+    #     client_id: 1234.apps.googleusercontent.com, client_secret: '${secret:GOOGLE_CLIENT_SECRET}' }
+  # accounts:
+  #   anthropic: { kind: api_key, provider: anthropic, secret: '${secret:ANTHROPIC_API_KEY}' }
+  #   # A gateway with the Anthropic API: base_url is used by the server and by agents alike;
+  #   # the key is a secret, or comes from a command (api_key_helper). examples/llm-gateway.yaml.
+  #   # work: { kind: api_key, provider: anthropic, secret: '${secret:LLM_GATEWAY_TOKEN}', base_url: 'http://llm-gateway:4000/anthropic' }
+  # jobs:
+  #   daily-sweep:
+  #     runtime: agents          # the runtime-k8s module below
+  #     agent: claude-code
+  #     model: claude-haiku-5-5
+  #     account: anthropic
+  #     budget: { max_usd: 0.5, max_minutes: 15 }
+
+# The database: an existing Secret with the whole postgres:// URL (a managed Postgres with the
+# vector, pg_trgm and btree_gist extensions).
+database:
+  existingSecret: ""     # required
+  key: url
+
+# Values for `${secret:NAME}` in `config`: model keys, the OIDC client secret, S3 keys,
+# FROOD_VAULT_KEY (seals tokens the console stores: `age-keygen`, the AGE-SECRET-KEY-1… line),
+# TELEGRAM_BOT_TOKEN. The server gets every key of it as an environment variable.
+secrets:
+  existingSecret: ""
+  # Or let the chart make that Secret (fine for trying out; the values end up in Helm's release).
+  create: {}
+
+# Service tokens between the server and its modules. Generated on install and kept on upgrade
+# when empty; or an existing Secret with FROOD_MODULE_TOKEN_<MODULE> keys (AGENTS, TELEGRAM, BACKUP).
+moduleTokens:
+  existingSecret: ""
+
+# Where files go (photos, voice messages, documents).
+files:
+  # pvc: a PersistentVolumeClaim (one server replica, Recreate on upgrade);
+  # s3: the bucket in config.storage.objects ({ uses: s3, endpoint, bucket, … }), set by you;
+  # database: in Postgres, for small installations.
+  type: pvc
+  pvc:
+    existingClaim: ""
+    size: 10Gi
+    storageClass: ""
+    accessMode: ReadWriteOnce
+  max_mb: 100
+
+server:
+  # More than one replica works only without a PVC, and has not been tried: keep 1.
+  replicas: 1
+  port: 8080
+  # The address people and AI clients use; https://<ingress.host> by default.
+  publicUrl: ""
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "1", memory: 1Gi }
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  extraEnv: []
+
+service:
+  type: ClusterIP
+  port: 8080
+
+ingress:
+  enabled: true
+  # The cluster's ingress class: a public one by default, so cloud clients (Claude, ChatGPT),
+  # phones and Telegram's Mini App reach Frood without a VPN; Frood's own sign-in (auth.providers,
+  # e.g. Google with auth.allow_domains) decides who gets in. An internal class keeps Frood
+  # inside the company network instead.
+  className: ""
+  host: frood.example.com
+  annotations: {}
+  tls:
+    enabled: true
+    # The Secret with the certificate; cert-manager fills it when an issuer is named.
+    secretName: ""
+    # cert-manager: cert-manager.io/cluster-issuer or cert-manager.io/issuer.
+    clusterIssuer: ""
+    issuer: ""
+  # Optional: a sign-in proxy in front (oauth2-proxy and the like, through ingress-nginx's
+  # external auth). Frood does not need one. Paths machines call without a browser session stay
+  # outside it: MCP clients, OAuth, the token-authenticated API; a proxy there breaks them.
+  externalAuth:
+    enabled: false
+    # e.g. https://oauth2.example.com/oauth2/auth and https://oauth2.example.com/oauth2/start?rd=$scheme://$host$escaped_request_uri
+    url: ""
+    signin: ""
+    responseHeaders: ""
+    # Annotations for both, other than auth-url and auth-signin, for another controller.
+    annotations: {}
+    openPaths:
+      - /mcp
+      - /oauth
+      - /.well-known
+      - /v1
+      # A future Telegram webhook endpoint goes here too.
+
+# Agents (runtime-k8s): each turn of an agent is a Job in this namespace, or in jobNamespace.
+agents:
+  enabled: true
+  # The module's name in frood.yaml: jobs say `runtime: agents`.
+  name: agents
+  image:
+    repository: ghcr.io/froodai/runtime-k8s
+    tag: ""
+  # Agent programs and their images (default tag: appVersion).
+  agentImages:
+    claude-code: ghcr.io/froodai/agent-claude-code
+    # codex: ghcr.io/froodai/agent-codex
+  # Run agent Jobs in another namespace; the Role is made there (it must exist).
+  jobNamespace: ""
+  # Settings of the module (modules/runtime-k8s/frood-module.yaml), e.g. limits of agent pods.
+  config:
+    cpus: 1
+    memory_mb: 2048
+    session_mb: 1024
+    # storage_class: ""
+    # builtin_tools: Read,Grep
+    # read_only_root: true
+  serviceAccount:
+    annotations: {}
+  # The module's own state (runs, their costs and events).
+  persistence:
+    enabled: true
+    size: 1Gi
+    storageClass: ""
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+
+# Telegram bot (modules/telegram). One installation per bot: two pollers of one bot fail.
+telegram:
+  enabled: false
+  name: telegram
+  image:
+    repository: ghcr.io/froodai/telegram
+    tag: ""
+  config:
+    language: en
+  # The bot's token: a key of secrets.existingSecret by default.
+  botToken:
+    existingSecret: ""
+    key: TELEGRAM_BOT_TOKEN
+  resources:
+    requests: { cpu: 20m, memory: 64Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+
+# Backups (modules/backup-restic) into restic repositories; targets and keys go to config.backup.
+# A managed Postgres usually has its own backups: this one is for a copy elsewhere.
+backup:
+  enabled: false
+  name: backup
+  image:
+    repository: ghcr.io/froodai/backup-restic
+    tag: ""
+  # Room for a dump and for the restore check's temporary database.
+  workSize: 10Gi
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: "1", memory: 1Gi }
+
+# Every pod runs as this non-root user, with no privilege escalation, no capabilities and a
+# read-only root filesystem.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  fsGroupChangePolicy: OnRootMismatch
+  seccompProfile: { type: RuntimeDefault }
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities: { drop: [ALL] }
+
+# Who may talk to whom. Off by default: a namespace often has its own policies.
+networkPolicy:
+  enabled: false
+  # Who may reach the server on its port (the ingress controller); anyone in the cluster when empty.
+  ingressFrom: []
+  # - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: ingress-nginx } }
+  # The cluster DNS.
+  dns:
+    - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: kube-system } }
+      podSelector: { matchLabels: { k8s-app: kube-dns } }
+  # The internet: models, MCP sources, Telegram, OIDC providers, S3.
+  internet:
+    cidr: 0.0.0.0/0
+    except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16]
+  # The Kubernetes API server, for the agents module: the endpoints of `kubectl get endpoints
+  # kubernetes -n default`, e.g. [{ cidr: 10.0.0.1/32, port: 6443 }].
+  apiServer: []
+  # Private addresses the server and modules need, e.g. the managed Postgres or a company gateway:
+  # [{ cidr: 10.20.0.0/16, port: 5432 }].
+  privateEgress: []
+
+# More objects to install with the release, e.g. an LLM gateway proxy next to Frood
+# (examples/llm-gateway.yaml). Strings and values go through `tpl`.
+extraObjects: []

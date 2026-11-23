@@ -5,6 +5,7 @@ RUN npm install -g @openai/codex@${CODEX_VERSION} && npm cache clean --force
 RUN useradd --uid 10001 --create-home --home-dir /home/agent agent \
     && mkdir -p /home/agent/work && chown -R agent:agent /home/agent
 COPY entrypoint.sh /usr/local/bin/agent-entrypoint
-USER agent
+# Numeric, so Kubernetes can check runAsNonRoot.
+USER 10001
 WORKDIR /home/agent/work
 ENTRYPOINT ["agent-entrypoint"]

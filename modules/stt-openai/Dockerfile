@@ -30,6 +30,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && rm -rf /var/lib/apt/lists/*
 RUN useradd --system --uid 10001 --no-create-home module
 COPY --from=build /frood-stt-openai /usr/local/bin/frood-stt-openai
-USER module
+# Numeric, so Kubernetes can check runAsNonRoot.
+USER 10001
 EXPOSE 8080
 ENTRYPOINT ["frood-stt-openai"]

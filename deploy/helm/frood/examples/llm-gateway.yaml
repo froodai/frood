@@ -1,0 +1,48 @@
+# Calls to Claude through a gateway with the Anthropic API that runs next to Frood: a proxy
+# that holds the company's credentials and refreshes them itself. Frood and its agents only
+# know its Service's address and a token it accepts. Not a real product: replace the image,
+# its port, path and settings with your gateway's.
+extraObjects:
+  - apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: llm-gateway
+      labels: { app.kubernetes.io/name: llm-gateway }
+    spec:
+      replicas: 1
+      selector: { matchLabels: { app.kubernetes.io/name: llm-gateway } }
+      template:
+        metadata:
+          # Part of the release, so the NetworkPolicy lets Frood and agent pods reach it.
+          labels: { app.kubernetes.io/name: llm-gateway, app.kubernetes.io/part-of: frood, app.kubernetes.io/instance: '{{ .Release.Name }}' }
+        spec:
+          automountServiceAccountToken: false
+          securityContext: { runAsNonRoot: true, runAsUser: 10001, seccompProfile: { type: RuntimeDefault } }
+          containers:
+            - name: gateway
+              image: registry.example.com/llm-gateway:1.0.0
+              args: [--listen, '0.0.0.0:4000']
+              ports: [{ name: http, containerPort: 4000 }]
+              envFrom: [{ secretRef: { name: llm-gateway-credentials } }]
+              securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
+  - apiVersion: v1
+    kind: Service
+    metadata: { name: llm-gateway }
+    spec:
+      selector: { app.kubernetes.io/name: llm-gateway }
+      ports: [{ name: http, port: 4000, targetPort: http }]
+config:
+  accounts:
+    # The namespace's name in the address, so agent pods in another namespace find it too.
+    # Plain http is accepted only for addresses inside the deployment like this one.
+    work:
+      kind: api_key
+      provider: anthropic
+      base_url: 'http://llm-gateway.frood.svc:4000/anthropic'
+      secret: '${secret:LLM_GATEWAY_TOKEN}'
+      # Or, for a gateway that hands out short-lived keys: a command that prints one, run by
+      # the server and, as Claude Code's apiKeyHelper, inside agent pods (so it must exist in
+      # both images).
+      # api_key_helper: 'cat /run/llm-gateway/key'
+  jobs:
+    extract: { with: { account: work, model: claude-haiku-5-5 } }

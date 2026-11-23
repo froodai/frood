@@ -30,7 +30,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 RUN useradd --system --uid 10001 --create-home --home-dir /home/module module \
     && mkdir -p /backup /restore && chown module /backup /restore
 COPY --from=build /frood-backup-restic /usr/local/bin/frood-backup-restic
-USER module
+# Numeric, so Kubernetes can check runAsNonRoot.
+USER 10001
 ENV HOME=/home/module
 EXPOSE 8080
 ENTRYPOINT ["frood-backup-restic"]

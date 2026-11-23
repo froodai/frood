@@ -1,0 +1,24 @@
+# Frood only the company network reaches: an internal ingress class and a certificate from the
+# cluster's internal issuer. Files on a volume, no Telegram.
+database:
+  existingSecret: frood-db
+secrets:
+  existingSecret: frood-secrets
+files:
+  type: pvc
+  pvc: { size: 20Gi }
+ingress:
+  enabled: true
+  className: nginx-internal
+  host: frood.internal.example.com
+  tls:
+    clusterIssuer: internal-ca
+config:
+  installation: { name: work }
+  auth:
+    allow_domains: [example.com]
+    providers:
+      - { kind: oidc, id: google, label: Google, issuer: 'https://accounts.google.com',
+          client_id: 1234-abc.apps.googleusercontent.com, client_secret: '${secret:GOOGLE_CLIENT_SECRET}' }
+backup:
+  enabled: true

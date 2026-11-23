@@ -5,6 +5,7 @@ ARG CLAUDE_CODE_VERSION=2.1.302
 RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} && npm cache clean --force
 RUN useradd --uid 10001 --create-home --home-dir /home/agent agent \
     && mkdir -p /home/agent/work && chown -R agent:agent /home/agent
-USER agent
+# Numeric, so Kubernetes can check runAsNonRoot.
+USER 10001
 WORKDIR /home/agent/work
 ENTRYPOINT ["claude"]

@@ -1,0 +1,125 @@
+{{- if .Values.networkPolicy.enabled -}}
+{{- $fullname := include "frood.fullname" . -}}
+{{- $np := .Values.networkPolicy -}}
+{{- $jobs := default .Release.Namespace .Values.agents.jobNamespace -}}
+{{- $release := dict "app.kubernetes.io/instance" .Release.Name "app.kubernetes.io/part-of" "frood" -}}
+{{- $serverSel := include "frood.selector" (dict "ctx" . "component" "server") | fromYaml -}}
+# The server: reached through the ingress and by its modules and agents; reaches the database,
+# models, sources and sign-in providers, and its modules.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-server
+  labels:
+    {{- include "frood.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- toYaml $serverSel | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - ports:
+        - { protocol: TCP, port: {{ .Values.server.port }} }
+      {{- with $np.ingressFrom }}
+      from:
+        {{- toYaml . | nindent 8 }}
+        - podSelector:
+            matchLabels:
+              {{- toYaml $release | nindent 14 }}
+        {{- if ne $jobs $.Release.Namespace }}
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: {{ $jobs }} }
+          podSelector:
+            matchLabels:
+              {{- toYaml $release | nindent 14 }}
+        {{- end }}
+      {{- end }}
+  egress:
+    {{- include "frood.np.dns" $np.dns | nindent 4 }}
+    {{- include "frood.np.internet" $np.internet | nindent 4 }}
+    {{- include "frood.np.blocks" $np.privateEgress | nindent 4 }}
+    # Its modules, and whatever else the release runs (e.g. an LLM gateway in extraObjects).
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- toYaml $release | nindent 14 }}
+{{- range $module := list "agents" "telegram" "backup" }}
+{{- $values := index $.Values $module }}
+{{- if $values.enabled }}
+---
+# Module {{ $values.name }}: called by the server only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-{{ $values.name }}
+  labels:
+    {{- include "frood.labels" $ | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "frood.selector" (dict "ctx" $ "component" $module) | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- toYaml $serverSel | nindent 14 }}
+      ports:
+        - { protocol: TCP, port: 8080 }
+  egress:
+    {{- include "frood.np.dns" $np.dns | nindent 4 }}
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- toYaml $serverSel | nindent 14 }}
+      ports:
+        - { protocol: TCP, port: {{ $.Values.server.port }} }
+    {{- if eq $module "agents" }}
+    # The Kubernetes API server, for its Jobs.
+    {{- if not $np.apiServer }}
+    {{- fail "networkPolicy.apiServer: list the API server's endpoints, which the agents module calls" }}
+    {{- end }}
+    {{- include "frood.np.blocks" $np.apiServer | nindent 4 }}
+    {{- else if eq $module "telegram" }}
+    {{- include "frood.np.internet" $np.internet | nindent 4 }}
+    {{- else }}
+    # The backup targets and the database.
+    {{- include "frood.np.internet" $np.internet | nindent 4 }}
+    {{- include "frood.np.blocks" $np.privateEgress | nindent 4 }}
+    {{- end }}
+{{- end }}
+{{- end }}
+{{- if .Values.agents.enabled }}
+---
+# Agent pods: nobody calls them; they reach the models (or the gateway), their MCP sources and
+# Frood.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-agent-pods
+  namespace: {{ $jobs }}
+  labels:
+    {{- include "frood.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: frood-agent
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    {{- include "frood.np.dns" $np.dns | nindent 4 }}
+    {{- include "frood.np.internet" $np.internet | nindent 4 }}
+    {{- include "frood.np.blocks" $np.privateEgress | nindent 4 }}
+    # Frood, and the release's other pods such as an LLM gateway; the modules let in only the
+    # server.
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- toYaml $release | nindent 14 }}
+          {{- if ne $jobs .Release.Namespace }}
+          namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: {{ .Release.Namespace }} }
+          {{- end }}
+{{- end }}
+{{- end }}

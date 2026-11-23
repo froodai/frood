@@ -1,0 +1,10 @@
+# Optional, on top of public.yaml: a sign-in proxy (oauth2-proxy and the like) in front of the
+# console, through ingress-nginx's external auth. Frood checks sign-in itself, so this is a
+# second gate, not a requirement. MCP, OAuth and the /v1 API stay outside it: their clients
+# carry tokens, not a browser session.
+ingress:
+  externalAuth:
+    enabled: true
+    url: 'https://oauth2.example.com/oauth2/auth'
+    signin: 'https://oauth2.example.com/oauth2/start?rd=$scheme://$host$escaped_request_uri'
+    responseHeaders: X-Auth-Request-Email

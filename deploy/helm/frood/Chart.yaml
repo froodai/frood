@@ -1,0 +1,10 @@
+apiVersion: v2
+name: frood
+description: Frood, a self-hosted memory and proactive assistant, on Kubernetes - the server, agents as Jobs (runtime-k8s), and optional Telegram and backup modules.
+type: application
+version: 0.1.15
+appVersion: "0.1.15"
+home: https://github.com/froodai/frood
+sources:
+  - https://github.com/froodai/frood
+keywords: [memory, assistant, mcp, agents]

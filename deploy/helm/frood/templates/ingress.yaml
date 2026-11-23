@@ -1,0 +1,88 @@
+{{- if .Values.ingress.enabled -}}
+{{- $fullname := include "frood.fullname" . -}}
+{{- $ing := .Values.ingress -}}
+{{- $host := required "ingress.host is required" $ing.host -}}
+{{- $auth := $ing.externalAuth -}}
+{{- if and $auth.enabled (not $auth.url) -}}
+{{- fail "ingress.externalAuth.url is required when externalAuth is enabled" -}}
+{{- end -}}
+{{- $tlsSecret := default (printf "%s-tls" $fullname) $ing.tls.secretName -}}
+{{- $certManager := dict -}}
+{{- if $ing.tls.clusterIssuer }}{{ $_ := set $certManager "cert-manager.io/cluster-issuer" $ing.tls.clusterIssuer }}{{ end -}}
+{{- if $ing.tls.issuer }}{{ $_ := set $certManager "cert-manager.io/issuer" $ing.tls.issuer }}{{ end -}}
+{{- $authAnnotations := dict -}}
+{{- if $auth.enabled -}}
+{{- $_ := set $authAnnotations "nginx.ingress.kubernetes.io/auth-url" $auth.url -}}
+{{- with $auth.signin }}{{ $_ := set $authAnnotations "nginx.ingress.kubernetes.io/auth-signin" . }}{{ end -}}
+{{- with $auth.responseHeaders }}{{ $_ := set $authAnnotations "nginx.ingress.kubernetes.io/auth-response-headers" . }}{{ end -}}
+{{- $authAnnotations = merge $authAnnotations (default dict $auth.annotations) -}}
+{{- end -}}
+{{- /* The main Ingress: everything, behind the sign-in proxy when there is one. */ -}}
+{{- $main := merge (deepCopy (default dict $ing.annotations)) $certManager $authAnnotations }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullname }}
+  labels:
+    {{- include "frood.labels" . | nindent 4 }}
+  {{- with $main }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with $ing.className }}
+  ingressClassName: {{ . | quote }}
+  {{- end }}
+  {{- if $ing.tls.enabled }}
+  tls:
+    - hosts: [{{ $host | quote }}]
+      secretName: {{ $tlsSecret }}
+  {{- end }}
+  rules:
+    - host: {{ $host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullname }}
+                port: { name: http }
+{{- if and $auth.enabled $auth.openPaths }}
+---
+# What machines call without a browser session stays outside the sign-in proxy: MCP clients,
+# OAuth, the token-authenticated API. Frood checks their tokens itself.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullname }}-open
+  labels:
+    {{- include "frood.labels" . | nindent 4 }}
+  {{- with $ing.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with $ing.className }}
+  ingressClassName: {{ . | quote }}
+  {{- end }}
+  {{- if $ing.tls.enabled }}
+  tls:
+    # The same certificate; cert-manager is asked for it on the main Ingress only.
+    - hosts: [{{ $host | quote }}]
+      secretName: {{ $tlsSecret }}
+  {{- end }}
+  rules:
+    - host: {{ $host | quote }}
+      http:
+        paths:
+          {{- range $auth.openPaths }}
+          - path: {{ . | quote }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullname }}
+                port: { name: http }
+          {{- end }}
+{{- end }}
+{{- end }}

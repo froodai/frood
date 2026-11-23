@@ -36,6 +36,7 @@ RUN openclaw mcp serve --help | tee /tmp/help \
     && rm /tmp/help
 RUN useradd --system --uid 10001 --create-home module
 COPY --from=build /frood-notify-openclaw /usr/local/bin/frood-notify-openclaw
-USER module
+# Numeric, so Kubernetes can check runAsNonRoot.
+USER 10001
 EXPOSE 8080
 ENTRYPOINT ["frood-notify-openclaw"]

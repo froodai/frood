@@ -1,0 +1,42 @@
+# A work Frood on a public address, without a VPN: Frood's own Google sign-in lets in work
+# accounts of one domain only. Files in an S3 bucket, agents as Jobs, a Telegram bot.
+#   helm install frood deploy/helm/frood -n frood -f deploy/helm/frood/examples/public.yaml
+database:
+  existingSecret: frood-db          # key `url`: postgres://frood:…@db.example.internal:5432/frood
+secrets:
+  # GOOGLE_CLIENT_SECRET, ANTHROPIC_API_KEY, S3_ACCESS_KEY, S3_SECRET_KEY, FROOD_VAULT_KEY,
+  # TELEGRAM_BOT_TOKEN
+  existingSecret: frood-secrets
+files:
+  type: s3
+ingress:
+  enabled: true
+  className: nginx                  # the cluster's public ingress class
+  host: frood.example.com
+  tls:
+    clusterIssuer: letsencrypt
+config:
+  installation: { name: work, timezone: Europe/Amsterdam }
+  auth:
+    allow_domains: [example.com]
+    providers:
+      - { kind: oidc, id: google, label: Google, issuer: 'https://accounts.google.com',
+          client_id: 1234-abc.apps.googleusercontent.com, client_secret: '${secret:GOOGLE_CLIENT_SECRET}' }
+  storage:
+    objects: { uses: s3, endpoint: 'https://s3.example.com', bucket: frood-files,
+               access_key_id: '${secret:S3_ACCESS_KEY}', secret_access_key: '${secret:S3_SECRET_KEY}' }
+  accounts:
+    anthropic: { kind: api_key, provider: anthropic, secret: '${secret:ANTHROPIC_API_KEY}', budget: { monthly_usd: 50 } }
+  jobs:
+    extract: { with: { account: anthropic, model: claude-haiku-5-5 } }
+telegram:
+  enabled: true
+  config: { language: en }
+networkPolicy:
+  enabled: true
+  ingressFrom:
+    - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: ingress-nginx } }
+  apiServer:
+    - { cidr: 10.0.0.1/32, port: 443 }
+  privateEgress:
+    - { cidr: 10.20.0.0/16, port: 5432 }   # the managed Postgres

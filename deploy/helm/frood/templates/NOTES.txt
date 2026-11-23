@@ -1,0 +1,21 @@
+Frood {{ .Chart.AppVersion }} is installed as {{ include "frood.fullname" . }} in {{ .Release.Namespace }}.
+{{- with include "frood.publicUrl" . }}
+
+Open {{ . }}/admin/ and sign in with one of auth.providers.
+{{- else }}
+
+No ingress: kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "frood.fullname" . }} 8080:{{ .Values.service.port }}
+{{- end }}
+
+The server waits for the database and runs its migrations first; follow it with
+  kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "frood.fullname" . }} -f
+{{- if .Values.agents.enabled }}
+
+Agent jobs: `runtime: {{ .Values.agents.name }}` in config.jobs. Each turn is a Job in {{ default .Release.Namespace .Values.agents.jobNamespace }}:
+  kubectl -n {{ default .Release.Namespace .Values.agents.jobNamespace }} get jobs -l app.kubernetes.io/managed-by=frood-runtime-k8s
+{{- end }}
+{{- if and .Values.ingress.enabled .Values.ingress.externalAuth.enabled }}
+
+A sign-in proxy guards everything but {{ join ", " .Values.ingress.externalAuth.openPaths }}: MCP clients
+and the API need those paths without it.
+{{- end }}

@@ -1,0 +1,166 @@
+{{- $fullname := include "frood.fullname" . -}}
+{{- $pvc := eq .Values.files.type "pvc" -}}
+{{- if and $pvc (gt (int .Values.server.replicas) 1) -}}
+{{- fail "server.replicas > 1 needs files.type s3 or database: a PVC has one writer" -}}
+{{- end -}}
+{{- $claim := default (printf "%s-files" $fullname) .Values.files.pvc.existingClaim -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $fullname }}
+  labels:
+    {{- include "frood.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+{{- if and $pvc (not .Values.files.pvc.existingClaim) }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $claim }}
+  labels:
+    {{- include "frood.labels" . | nindent 4 }}
+  annotations:
+    # The files outlive the release.
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: [{{ .Values.files.pvc.accessMode }}]
+  {{- with .Values.files.pvc.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.files.pvc.size }}
+{{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullname }}
+  labels:
+    {{- include "frood.labels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+spec:
+  replicas: {{ .Values.server.replicas }}
+  {{- if $pvc }}
+  # One pod at a time owns the files volume.
+  strategy: { type: Recreate }
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "frood.selector" (dict "ctx" . "component" "server") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "frood.labels" . | nindent 8 }}
+        app.kubernetes.io/component: server
+      annotations:
+        checksum/config: {{ include "frood.config" . | sha256sum }}
+        {{- with .Values.server.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ $fullname }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if $pvc }}
+      initContainers:
+        # The mark tells the server the files folder lasts (it is not the container's own).
+        - name: files-mark
+          image: {{ include "frood.image" (dict "ctx" . "image" .Values.image) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: [sh, -c, "touch /var/lib/frood/objects/.frood-objects"]
+          securityContext:
+            {{- include "frood.containerSecurity" . | nindent 12 }}
+          resources:
+            limits: { cpu: 100m, memory: 32Mi }
+          volumeMounts:
+            - { name: files, mountPath: /var/lib/frood/objects }
+      {{- end }}
+      containers:
+        - name: frood
+          image: {{ include "frood.image" (dict "ctx" . "image" .Values.image) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: [serve, --config, /etc/frood/frood.yaml]
+          ports:
+            - { name: http, containerPort: {{ .Values.server.port }} }
+          env:
+            - name: FROOD_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "database.existingSecret is required: a Secret with the postgres:// URL" .Values.database.existingSecret }}
+                  key: {{ .Values.database.key }}
+            - { name: HOME, value: /tmp }
+            {{- with .Values.server.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          envFrom:
+            {{- with include "frood.secretsSecret" . }}
+            - secretRef: { name: {{ . }} }
+            {{- end }}
+            - secretRef: { name: {{ include "frood.moduleTokensSecret" . }} }
+          # Connecting to the database and the migrations come before the server listens.
+          startupProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 4
+          resources:
+            {{- toYaml .Values.server.resources | nindent 12 }}
+          securityContext:
+            {{- include "frood.containerSecurity" . | nindent 12 }}
+          volumeMounts:
+            - { name: config, mountPath: /etc/frood, readOnly: true }
+            - { name: tmp, mountPath: /tmp }
+            {{- if $pvc }}
+            - { name: files, mountPath: /var/lib/frood/objects }
+            {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $fullname }}-config
+        - name: tmp
+          emptyDir: { sizeLimit: 512Mi }
+        {{- if $pvc }}
+        - name: files
+          persistentVolumeClaim:
+            claimName: {{ $claim }}
+        {{- end }}
+      {{- with .Values.server.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.server.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.server.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fullname }}
+  labels:
+    {{- include "frood.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    {{- include "frood.selector" (dict "ctx" . "component" "server") | nindent 4 }}
+  ports:
+    - { name: http, port: {{ .Values.service.port }}, targetPort: http }

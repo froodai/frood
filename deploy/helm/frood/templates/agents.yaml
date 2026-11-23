@@ -1,0 +1,154 @@
+{{- if .Values.agents.enabled -}}
+{{- $fullname := include "frood.fullname" . -}}
+{{- $name := printf "%s-%s" $fullname .Values.agents.name -}}
+{{- $jobs := default .Release.Namespace .Values.agents.jobNamespace -}}
+# runtime-k8s: runs agent turns as Jobs. Its rights are namespaced and only these.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "frood.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agents
+  {{- with .Values.agents.serviceAccount.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}
+  namespace: {{ $jobs }}
+  labels:
+    {{- include "frood.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agents
+rules:
+  # A Job per turn: created suspended, let go once its Secret is there, deleted when done.
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [create, get, patch, delete]
+  # The turn's pod: its state and what it printed.
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [list]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+  # A volume per run for the agent's sessions.
+  - apiGroups: [""]
+    resources: [persistentvolumeclaims]
+    verbs: [create, delete]
+  # The turn's credentials and command line, owned by its Job; never read back.
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}
+  namespace: {{ $jobs }}
+  labels:
+    {{- include "frood.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agents
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+{{- if .Values.agents.persistence.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $name }}-data
+  labels:
+    {{- include "frood.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agents
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- with .Values.agents.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.agents.persistence.size }}
+{{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "frood.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agents
+spec:
+  # One module owns the runs: the old pod is gone before the new one starts.
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels:
+      {{- include "frood.selector" (dict "ctx" . "component" "agents") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "frood.labels" . | nindent 8 }}
+        app.kubernetes.io/component: agents
+      annotations:
+        checksum/config: {{ include "frood.agentsConfig" . | sha256sum }}
+    spec:
+      serviceAccountName: {{ $name }}
+      # The module talks to the API server with this token; agent pods get none.
+      automountServiceAccountToken: true
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 15
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: runtime-k8s
+          image: {{ include "frood.image" (dict "ctx" . "image" .Values.agents.image) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - { name: http, containerPort: 8080 }
+          env:
+            {{- include "frood.moduleEnv" (dict "ctx" . "name" .Values.agents.name "config" (include "frood.agentsConfig" .)) | nindent 12 }}
+          {{- include "frood.moduleProbes" . | nindent 10 }}
+          resources:
+            {{- toYaml .Values.agents.resources | nindent 12 }}
+          securityContext:
+            {{- include "frood.containerSecurity" . | nindent 12 }}
+          volumeMounts:
+            - { name: data, mountPath: /data }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: data
+          {{- if .Values.agents.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ $name }}-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: tmp
+          emptyDir: { sizeLimit: 64Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "frood.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agents
+spec:
+  selector:
+    {{- include "frood.selector" (dict "ctx" . "component" "agents") | nindent 4 }}
+  ports:
+    - { name: http, port: 8080, targetPort: http }
+{{- end }}

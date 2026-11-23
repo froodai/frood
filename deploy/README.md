@@ -124,6 +124,12 @@ The proxy picks the file up itself: `caddy --watch` sees only its main file, not
 so watch the folder (a systemd path unit running `caddy reload`, for example).
 `deploy.proxy.routes` does not go with `external`: other apps keep their own files in the proxy.
 
+## Kubernetes
+
+Where there is no Docker, the Helm chart in [helm/](helm/README.md) installs the server, agents as
+Kubernetes Jobs ([runtime-k8s](../modules/runtime-k8s)) and the optional modules next to a managed
+Postgres.
+
 ## End-to-end checks
 
 - `core/crates/frood-api/tests/scenario.rs` — steps 1–5 of the MVP scenario through the real
