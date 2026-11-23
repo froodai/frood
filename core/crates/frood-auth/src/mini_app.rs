@@ -36,6 +36,40 @@ pub struct MiniAppSession {
     pub token_type: &'static str,
     pub expires_in: u64,
     pub scope: String,
+    /// The bot is shared with another installation (docs/34 W4): the Mini App shows a switcher.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub link: Option<ChannelLinkInfo>,
+}
+
+/// One bot for two installations (docs/34 W4), as the channel's module says it: this
+/// installation's label, the other's, and the other installation's Mini App.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChannelLinkInfo {
+    pub here: String,
+    pub there: String,
+    pub there_url: String,
+    /// This installation comes first in the switcher (it is the one that polls).
+    #[serde(default)]
+    pub here_first: bool,
+}
+
+impl ChannelLinkInfo {
+    /// The labels are short, and the other Mini App is an `https` address.
+    pub fn check(&self) -> std::result::Result<(), String> {
+        for (what, label) in [("here", &self.here), ("there", &self.there)] {
+            let n = label.trim().chars().count();
+            if n == 0 || n > 40 {
+                return Err(format!("link.{what} must have 1 to 40 characters"));
+            }
+        }
+        if self.there_url.len() > 300 {
+            return Err("link.there_url is too long".into());
+        }
+        match url::Url::parse(&self.there_url) {
+            Ok(url) if url.scheme() == "https" && url.host_str().is_some() => Ok(()),
+            _ => Err("link.there_url must be an https address".into()),
+        }
+    }
 }
 
 /// What the checked launch data says.
@@ -144,6 +178,7 @@ impl Auth {
             }
         }
         let (channel, launch) = found.ok_or_else(|| refused(why))?;
+        let link = self.channel_link(&channel).await?;
         let user_id = self
             .linked_user(&channel, &launch.telegram_id.to_string())
             .await?
@@ -180,7 +215,35 @@ impl Auth {
             token_type: "Bearer",
             expires_in: settings.access_ttl.as_secs(),
             scope: scopes.join(" "),
+            link,
         })
+    }
+
+    /// What the channel's module said of the other installation, if the bot is shared.
+    pub async fn channel_link(&self, channel: &str) -> Result<Option<ChannelLinkInfo>> {
+        let row: Option<Option<sqlx::types::Json<ChannelLinkInfo>>> =
+            sqlx::query_scalar("SELECT link FROM channel_about WHERE channel = $1")
+                .bind(channel)
+                .fetch_optional(self.pool())
+                .await?;
+        Ok(row.flatten().map(|json| json.0))
+    }
+
+    /// The channel's module says whether its bot is shared with another installation.
+    pub async fn set_channel_link(
+        &self,
+        channel: &str,
+        link: Option<&ChannelLinkInfo>,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO channel_about (channel, link) VALUES ($1, $2) \
+             ON CONFLICT (channel) DO UPDATE SET link = EXCLUDED.link, updated_at = now()",
+        )
+        .bind(channel)
+        .bind(link.map(sqlx::types::Json))
+        .execute(self.pool())
+        .await?;
+        Ok(())
     }
 
     /// The channel's bot says its id, so launch data signed for it can be checked.
@@ -237,6 +300,32 @@ async fn sign_in(State(auth): State<Auth>, Json(launched): Json<Launched>) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_shared_bot_names_two_labels_and_an_https_mini_app() {
+        let good = ChannelLinkInfo {
+            here: "Работа".into(),
+            there: "Личное".into(),
+            there_url: "https://me.example.com/admin/m/".into(),
+            here_first: false,
+        };
+        assert!(good.check().is_ok());
+        let plain = ChannelLinkInfo {
+            there_url: "http://me.example.com/admin/m/".into(),
+            ..good.clone()
+        };
+        assert!(plain.check().is_err());
+        let empty = ChannelLinkInfo {
+            here: " ".into(),
+            ..good.clone()
+        };
+        assert!(empty.check().is_err());
+        let long = ChannelLinkInfo {
+            there: "x".repeat(41),
+            ..good
+        };
+        assert!(long.check().is_err());
+    }
 
     /// Signs launch data the way Telegram does, with a key of the test's own.
     fn signed(

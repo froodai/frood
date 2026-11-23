@@ -329,6 +329,45 @@ impl Modules {
         self.call_within(module, capability, input, None).await
     }
 
+    /// Passes a call from outside the installation on to a module's capability, e.g. the
+    /// other installation's Telegram module calling `channels.link@1` (docs/34 W4). The core
+    /// does not read the call: the module checks `presented`, the caller's own token, which
+    /// goes in `x-frood-link-token` next to the core's usual one. The module's status and body
+    /// come back as they are.
+    pub async fn relay(
+        &self,
+        module: &str,
+        capability: &str,
+        presented: &str,
+        input: &Value,
+    ) -> Result<(u16, Value), ModuleError> {
+        let endpoint = self.endpoint(module)?;
+        let manifest = match self.manifest(module) {
+            Some(manifest) => manifest,
+            None => self.discover(module).await?,
+        };
+        let versioned = manifest
+            .capability(capability)
+            .ok_or_else(|| ModuleError::NoProvider(capability.to_owned()))?
+            .to_owned();
+        let mut request = self
+            .http
+            .post(format!("{}/v1/capabilities/{versioned}", endpoint.url))
+            .header("x-frood-link-token", presented)
+            .timeout(Duration::from_secs(30))
+            .json(input);
+        if let Some(token) = &endpoint.token {
+            request = request.bearer_auth(token);
+        }
+        let response = request.send().await.map_err(|e| ModuleError::Unavailable {
+            module: module.to_owned(),
+            message: e.without_url().to_string(),
+        })?;
+        let status = response.status().as_u16();
+        let body: Value = response.json().await.unwrap_or(Value::Null);
+        Ok((status, body))
+    }
+
     /// A call that may take longer than the usual five minutes, e.g. a backup.
     pub async fn call_within(
         &self,
@@ -496,5 +535,66 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, ModuleError::Invalid { .. }), "{err}");
+    }
+
+    #[tokio::test]
+    async fn relays_a_call_from_outside_with_both_tokens() {
+        let app = axum::Router::new()
+            .route(
+                "/manifest",
+                get(|| async {
+                    Json(json!({ "name": "telegram", "version": "0.1.0", "provides": ["channels.link@1"], "frood_api": [] }))
+                }),
+            )
+            .route(
+                "/v1/capabilities/channels.link@1",
+                post(|headers: HeaderMap, Json(body): Json<Value>| async move {
+                    let header = |name: &str| headers.get(name).and_then(|v| v.to_str().ok()).unwrap_or_default().to_owned();
+                    if header("x-frood-link-token") != "link-secret" {
+                        return (axum::http::StatusCode::UNAUTHORIZED, Json(json!({ "detail": "bad link token" })));
+                    }
+                    (axum::http::StatusCode::ACCEPTED, Json(json!({ "op": body["op"], "core": header("authorization") })))
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let cfg = config(
+            &format!("  telegram: {{ url: '{url}' }}\n  stt: {{ url: '{url}' }}\n"),
+            "host",
+        );
+        let modules = Modules::new(&cfg, |name| {
+            (name == "FROOD_MODULE_TOKEN_TELEGRAM").then(|| "module-secret".to_owned())
+        });
+        let (status, body) = modules
+            .relay(
+                "telegram",
+                "channels.link",
+                "link-secret",
+                &json!({ "op": "words" }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(status, 202);
+        assert_eq!(
+            body,
+            json!({ "op": "words", "core": "Bearer module-secret" })
+        );
+        let (status, _) = modules
+            .relay(
+                "telegram",
+                "channels.link",
+                "guess",
+                &json!({ "op": "words" }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(status, 401, "the module decides");
+        assert!(matches!(
+            modules
+                .relay("nobody", "channels.link", "x", &json!({}))
+                .await,
+            Err(ModuleError::Unknown(_))
+        ));
     }
 }

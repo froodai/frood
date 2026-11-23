@@ -10,7 +10,7 @@ mod channels;
 mod clients;
 pub use clients::ADMIN_CLIENT;
 mod mini_app;
-pub use mini_app::{MINI_APP_CLIENT, MINI_APP_SCOPES, MiniAppSession};
+pub use mini_app::{ChannelLinkInfo, MINI_APP_CLIENT, MINI_APP_SCOPES, MiniAppSession};
 mod oidc;
 mod pages;
 mod passkey;

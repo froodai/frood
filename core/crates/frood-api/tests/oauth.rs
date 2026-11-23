@@ -1503,6 +1503,10 @@ async fn a_person_opens_the_mini_app_from_telegram() {
         "knowledge:read knowledge:capture knowledge:propose knowledge:decide"
     );
     assert!(session.get("refresh_token").is_none(), "{session}");
+    assert!(
+        session.get("link").is_none(),
+        "one installation alone: {session}"
+    );
     let token = session["access_token"].as_str().unwrap();
     let inbox = send(
         &app,
@@ -1522,6 +1526,51 @@ async fn a_person_opens_the_mini_app_from_telegram() {
     )
     .await;
     assert_eq!(reply.status, StatusCode::FORBIDDEN, "{}", reply.text());
+
+    // The bot is shared with another installation (docs/34 W4): the Mini App learns the
+    // labels and where the other one's Mini App is; an address that is not https is refused.
+    let about = |link: Value| {
+        send(
+            &app,
+            Request::put("/v1/channels/telegram/about")
+                .header(header::AUTHORIZATION, "Bearer tg-token")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "start_url": "https://t.me/frood_bot?start=", "bot_id": 7, "link": link })
+                        .to_string(),
+                ))
+                .unwrap(),
+        )
+    };
+    let link = json!({ "here": "Личное", "there": "Работа", "there_url": "https://work.example.com/admin/m/", "here_first": true });
+    let reply = about(json!({ "here": "Личное", "there": "Работа", "there_url": "http://work.example.com/admin/m/" })).await;
+    assert_eq!(
+        reply.status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{}",
+        reply.text()
+    );
+    let reply = about(link.clone()).await;
+    assert_eq!(reply.status, StatusCode::NO_CONTENT, "{}", reply.text());
+    let reply = post_json(
+        &app,
+        "/oauth/telegram",
+        json!({ "init_data": open(42, 7) }),
+        None,
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.text());
+    assert_eq!(reply.json()["link"], link);
+    let reply = about(Value::Null).await;
+    assert_eq!(reply.status, StatusCode::NO_CONTENT, "{}", reply.text());
+    let reply = post_json(
+        &app,
+        "/oauth/telegram",
+        json!({ "init_data": open(42, 7) }),
+        None,
+    )
+    .await;
+    assert!(reply.json().get("link").is_none(), "{}", reply.text());
 
     // Not linked, signed for another bot, or a person no longer allowed: refused.
     for (data, why) in [

@@ -174,6 +174,11 @@ impl Dispatch {
         self
     }
 
+    /// The installation's modules, for calls the API passes on (docs/34 W4).
+    pub fn modules(&self) -> &Modules {
+        &self.ctx.modules
+    }
+
     /// The jobs this installation runs now.
     pub fn jobs(&self) -> Arc<Vec<JobSpec>> {
         self.jobs.read().expect("jobs lock").clone()

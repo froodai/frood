@@ -400,6 +400,75 @@ mod tests {
         assert_eq!(body["code_challenge_methods_supported"], json!(["S256"]));
     }
 
+    /// One bot for two installations (docs/34 W4): the other installation's module reaches
+    /// this one's through the core with the link token, which the module checks.
+    #[tokio::test]
+    async fn a_link_call_is_passed_to_the_channel_module() {
+        use axum::routing::{get, post};
+        let module = Router::new()
+            .route(
+                "/manifest",
+                get(|| async {
+                    Json(json!({ "name": "telegram", "version": "0.1.0", "provides": ["channels.link@1"], "frood_api": [] }))
+                }),
+            )
+            .route(
+                "/v1/capabilities/channels.link@1",
+                post(|headers: axum::http::HeaderMap, Json(body): Json<Value>| async move {
+                    if headers.get("x-frood-link-token").and_then(|v| v.to_str().ok()) != Some("link-secret") {
+                        return (StatusCode::UNAUTHORIZED, Json(json!({ "detail": "bad link token" })));
+                    }
+                    (StatusCode::ACCEPTED, Json(json!({ "took": body["op"] })))
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, module).await.unwrap() });
+        let pool = frood_store::connect_lazy("postgres://frood:x@127.0.0.1:1/frood").unwrap();
+        let config = frood_config::parse(
+            &format!("version: 1\ninstallation: {{name: test}}\nstorage: {{uses: postgres, url: 'postgres://x', objects: {{uses: database}}}}\ndeploy: {{server: host}}\nmodules:\n  telegram: {{ url: '{url}' }}\n"),
+            &frood_config::Secrets::from_pairs(Vec::<(String, String)>::new()),
+        )
+        .unwrap()
+        .config;
+        let app = router(
+            assemble(&config, std::path::Path::new("."), pool, |name| {
+                (name == "FROOD_MODULE_TOKEN_TELEGRAM").then(|| "module-secret".to_owned())
+            })
+            .state,
+        );
+        let call = |channel: &str, token: Option<&str>| {
+            let mut request = Request::post(format!("/v1/channels/{channel}/link"))
+                .header("content-type", "application/json");
+            if let Some(token) = token {
+                request = request.header("authorization", format!("Bearer {token}"));
+            }
+            let request = request
+                .body(Body::from(json!({ "op": "words" }).to_string()))
+                .unwrap();
+            let app = app.clone();
+            async move {
+                let response = app.oneshot(request).await.unwrap();
+                let status = response.status();
+                let bytes = response.into_body().collect().await.unwrap().to_bytes();
+                (status, serde_json::from_slice::<Value>(&bytes).unwrap())
+            }
+        };
+        assert_eq!(
+            call("telegram", Some("link-secret")).await,
+            (StatusCode::ACCEPTED, json!({ "took": "words" }))
+        );
+        assert_eq!(
+            call("telegram", Some("guess")).await.0,
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(call("telegram", None).await.0, StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            call("slack", Some("link-secret")).await.0,
+            StatusCode::NOT_FOUND
+        );
+    }
+
     #[tokio::test]
     async fn version_names_installation() {
         let (status, body) = get_json("/v1/version").await;

@@ -1,7 +1,7 @@
 //! Channel accounts linked to people (docs/15 §4): a person asks for a one-time code, the
 //! channel module (Telegram, …) redeems it for the account that sent it.
 
-use axum::extract::{Path, RawForm, State};
+use axum::extract::{DefaultBodyLimit, Path, RawForm, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post, put};
@@ -27,11 +27,74 @@ pub fn routes() -> Router<AppState> {
             get(delivered),
         )
         .route("/v1/channels/{channel}/about", put(about))
+        .route(
+            "/v1/channels/{channel}/link",
+            post(link).layer(DefaultBodyLimit::max(LINK_BODY_LIMIT)),
+        )
         .route("/oauth/login/{provider}/ask", post(ask_sign_in))
         .route(
             "/v1/channels/{channel}/links/{external_id}/digest",
             put(digest_every),
         )
+}
+
+/// A forwarded Telegram update is small; the words' hashes are the largest call.
+const LINK_BODY_LIMIT: usize = 256 * 1024;
+
+/// One bot for two installations (docs/34 W4): the other installation's channel module calls
+/// this one's through the core, which has the public address. The caller presents the link
+/// token the two modules share; the core neither holds it nor reads the call, and passes it
+/// on to the module's `channels.link@1`, which checks the token and answers. Nothing of the
+/// call is logged or stored here.
+async fn link(
+    State(state): State<AppState>,
+    Path(channel): Path<String>,
+    headers: HeaderMap,
+    Json(input): Json<Value>,
+) -> Response {
+    let presented = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(str::trim)
+        .filter(|t| !t.is_empty());
+    let Some(presented) = presented else {
+        return ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "the link token is missing",
+        )
+        .into_response();
+    };
+    match state
+        .dispatch
+        .modules()
+        .relay(&channel, "channels.link", presented, &input)
+        .await
+    {
+        Ok((status, body)) => (
+            StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_GATEWAY),
+            Json(body),
+        )
+            .into_response(),
+        Err(frood_modhost::ModuleError::Unknown(_) | frood_modhost::ModuleError::NoProvider(_)) => {
+            ApiError::new(
+                StatusCode::NOT_FOUND,
+                "not-found",
+                format!("no module {channel} takes forwarded updates"),
+            )
+            .into_response()
+        }
+        Err(err) => {
+            tracing::warn!(module = %channel, error = %err, "cannot pass a link call on");
+            ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "module-unavailable",
+                format!("the module {channel} does not answer now"),
+            )
+            .into_response()
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -108,6 +171,10 @@ struct About {
     /// The Telegram bot's id: Mini App launch data is signed over it (docs/32 M2).
     #[serde(default)]
     bot_id: Option<i64>,
+    /// One bot for two installations (docs/34 W4): the labels and the other installation's
+    /// Mini App, for the Mini App's switcher.
+    #[serde(default)]
+    link: Option<frood_auth::ChannelLinkInfo>,
 }
 
 /// The channel's module says where it opens with a link code, so the console can link an
@@ -120,6 +187,15 @@ async fn about(
     Json(about): Json<About>,
 ) -> Result<StatusCode, ApiError> {
     own_channel(&caller, &channel)?;
+    if let Some(link) = &about.link
+        && let Err(problem) = link.check()
+    {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid-request",
+            problem,
+        ));
+    }
     let start_url = about.start_url.map(|u| u.trim().to_owned());
     if let Some(url) = &start_url
         && (!url.starts_with("https://") || url.len() > 300)
@@ -138,6 +214,11 @@ async fn about(
     state
         .auth
         .set_channel_bot_id(&channel, about.bot_id)
+        .await
+        .map_err(|err| auth_error(&state.auth, Resource::Api, err))?;
+    state
+        .auth
+        .set_channel_link(&channel, about.link.as_ref())
         .await
         .map_err(|err| auth_error(&state.auth, Resource::Api, err))?;
     Ok(StatusCode::NO_CONTENT)

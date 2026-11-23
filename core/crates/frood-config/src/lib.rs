@@ -582,6 +582,19 @@ fn validate_work(config: &Config, problems: &mut Vec<String>) {
         {
             problems.push(format!("module {name}: port {port} is used twice"));
         }
+        // One bot for two installations (docs/34 W4): the other installation gets the link
+        // token, so it is reached over https unless it is inside this deployment.
+        if let Some(url) = module
+            .config
+            .get("link")
+            .and_then(|link| link.get("url"))
+            .and_then(|url| url.as_str())
+            && !(is_url(url, "https://") || is_internal_http(url))
+        {
+            problems.push(format!(
+                "module {name}: link.url must be an https:// URL, or http:// to a service inside the deployment, got {url:?}"
+            ));
+        }
         for volume in &module.volumes {
             let ok = volume
                 .split_once(':')
@@ -1881,5 +1894,23 @@ jobs:
             template_for(ServerPlacement::Host)
         );
         assert!(problems(&volume).contains("host-path:/path/in/module"));
+    }
+
+    #[test]
+    fn the_other_installation_of_a_shared_bot_is_reached_over_https() {
+        let problems = |raw: &str| match parse(raw, &secrets()) {
+            Err(ConfigError::Invalid(problems)) => problems.join("\n"),
+            Err(other) => panic!("expected problems, got {other:?}"),
+            Ok(_) => String::new(),
+        };
+        let with = |url: &str| {
+            format!(
+                "{}\nmodules:\n  telegram: {{ image: t, config: {{ link: {{ name: Work, url: '{url}' }} }} }}\n",
+                template_for(ServerPlacement::Host)
+            )
+        };
+        assert!(problems(&with("http://work.example.com")).contains("link.url"));
+        assert!(!problems(&with("https://work.example.com")).contains("link.url"));
+        assert!(!problems(&with("http://frood.work.svc:8080")).contains("link.url"));
     }
 }
