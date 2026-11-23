@@ -160,7 +160,9 @@ agents:
     requests: { cpu: 50m, memory: 64Mi }
     limits: { cpu: 500m, memory: 256Mi }
 
-# Telegram bot (modules/telegram). One installation per bot: two pollers of one bot fail.
+# Telegram bot (modules/telegram). Two pollers of one bot fail: a bot shared with another
+# installation (docs/34 W4) runs here with config.link.mode: forwarded, which does not poll;
+# the other installation polls and forwards this one's updates.
 telegram:
   enabled: false
   name: telegram
@@ -173,6 +175,11 @@ telegram:
   botToken:
     existingSecret: ""
     key: TELEGRAM_BOT_TOKEN
+  # A bot shared with another installation (docs/34 W4): the token both sides present,
+  # given to the module as TELEGRAM_LINK_TOKEN. Empty: no link token from a secret.
+  linkToken:
+    existingSecret: ""
+    key: TELEGRAM_LINK_TOKEN
   resources:
     requests: { cpu: 20m, memory: 64Mi }
     limits: { cpu: 500m, memory: 256Mi }

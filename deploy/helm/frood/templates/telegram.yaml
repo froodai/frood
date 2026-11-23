@@ -9,7 +9,8 @@ metadata:
     {{- include "frood.labels" . | nindent 4 }}
     app.kubernetes.io/component: telegram
 spec:
-  # Long polling: two pollers of one bot take each other's updates.
+  # Long polling: two pollers of one bot take each other's updates. The forwarded side of a
+  # shared bot (docs/34 W4) does not poll, but its learned words are kept in one place.
   replicas: 1
   strategy: { type: Recreate }
   selector:
@@ -42,6 +43,15 @@ spec:
                 secretKeyRef:
                   name: {{ required "telegram: set telegram.botToken.existingSecret or secrets.existingSecret" $botSecret }}
                   key: {{ .Values.telegram.botToken.key }}
+            {{- with .Values.telegram.linkToken }}
+            {{- if .existingSecret }}
+            - name: TELEGRAM_LINK_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .existingSecret }}
+                  key: {{ .key }}
+            {{- end }}
+            {{- end }}
           {{- include "frood.moduleProbes" . | nindent 10 }}
           resources:
             {{- toYaml .Values.telegram.resources | nindent 12 }}

@@ -672,6 +672,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn each_side_tells_its_frood_of_the_other_and_only_the_personal_sets_the_menu() {
+        let (url, world) = world().await;
+        let mut personal = personal(&url, "https://work.example.com");
+        personal.console = Arc::new(tokio::sync::OnceCell::new_with(Some(Some(
+            "https://me.example.com/admin/".to_owned(),
+        ))));
+        personal.announce().await;
+        let mut work = forwarded(&url);
+        work.console = Arc::new(tokio::sync::OnceCell::new_with(Some(Some(
+            "https://work.example.com/admin/".to_owned(),
+        ))));
+        work.announce().await;
+        let w = world.lock().unwrap();
+        assert_eq!(
+            w.about,
+            [
+                json!({ "start_url": "https://t.me/frood_test_bot?start=", "bot_id": 7, "link": {
+                    "here": "Личное", "there": "Работа", "there_url": "https://work.example.com/admin/m/", "here_first": true } }),
+                // The work side's link codes are marked, so the personal side passes them on.
+                json!({ "start_url": "https://t.me/frood_test_bot?start=l-", "bot_id": 7, "link": {
+                    "here": "Работа", "there": "Личное", "there_url": "https://me.example.com/admin/m/", "here_first": false } }),
+            ]
+        );
+        assert_eq!(w.menu.len(), 1, "one menu button, the personal side's");
+        assert_eq!(
+            w.menu[0]["menu_button"]["web_app"]["url"],
+            "https://me.example.com/admin/m/"
+        );
+    }
+
+    #[tokio::test]
     async fn one_installation_alone_works_as_before() {
         let (url, world) = world().await;
         let bot = bot(&url, Lang::Ru);
