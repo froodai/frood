@@ -110,8 +110,8 @@ tokens on those paths itself. A future Telegram webhook path belongs in the list
 With `agents.enabled` (the default), jobs with `runtime: agents` run their agent (Claude Code;
 Codex when `agents.agentImages.codex` is set) as Jobs in the release's namespace, or in
 `agents.jobNamespace`, where the chart puts the Role. The module may only create, read, let go
-and delete Jobs, list pods and read their logs, create and delete PersistentVolumeClaims, and
-create Secrets; nothing cluster-wide.
+and delete Jobs (also all Jobs of a run at once, at its end), list pods and read their logs,
+create and delete PersistentVolumeClaims, and create Secrets; nothing cluster-wide.
 
 A turn's pod:
 

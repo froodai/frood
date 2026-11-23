@@ -14,8 +14,8 @@
 //!   read-only root, with no API token, within CPU and memory limits, and end at the run's
 //!   `max_minutes` whatever the agent does.
 //!
-//! The module needs only namespaced RBAC: Jobs (create, get, patch, delete), pods (list),
-//! pods/log (get), PersistentVolumeClaims (create, delete) and Secrets (create).
+//! The module needs only namespaced RBAC: Jobs (create, get, patch, delete, deletecollection),
+//! pods (list), pods/log (get), PersistentVolumeClaims (create, delete) and Secrets (create).
 //!
 //! Environment: `FROOD_TOKEN`, `FROOD_URL`, `FROOD_MODULE`, `FROOD_MODULE_CONFIG`, `FROOD_DATA`
 //! (where run state is kept, default `/data`), `PORT` (8080), and the pod's ServiceAccount.
@@ -497,6 +497,11 @@ async fn execute<B: Backend>(
             if let Some(id) = &record.container {
                 let _ = app.backend.remove(id).await;
             }
+            // And any turn the module lost track of: a Job left suspended would stay forever,
+            // with the run's key in its Secret.
+            if let Err(err) = app.backend.remove_run_turns(&run_id).await {
+                tracing::warn!(run = %run_id, error = %err, "cannot remove the run's jobs");
+            }
             if let Err(err) = app.backend.remove_volume(&record.volume).await {
                 tracing::warn!(run = %run_id, error = %err, "cannot remove the run's volume");
             }
@@ -963,6 +968,102 @@ mod tests {
             .unwrap();
         let response = router(app.clone()).oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    /// The mock API server refuses what the Role does not allow; the Role the manifest asks for
+    /// and the one the Helm chart makes are that same Role.
+    #[test]
+    fn the_role_is_the_same_everywhere() {
+        let role: BTreeMap<String, Vec<String>> = super::mock::ROLE
+            .iter()
+            .map(|(r, verbs)| (r.to_string(), verbs.iter().map(|v| v.to_string()).collect()))
+            .collect();
+        let manifest: Value = serde_yaml_ng::from_str(MANIFEST).unwrap();
+        let asked: BTreeMap<String, Vec<String>> = manifest["permissions"]["kubernetes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|rule| {
+                (
+                    rule["resources"][0].as_str().unwrap().to_owned(),
+                    serde_json::from_value(rule["verbs"].clone()).unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(asked, role, "frood-module.yaml");
+        // The chart's rules are plain YAML lines: `resources: [x]` then `verbs: [a, b]`.
+        let chart = include_str!("../../../deploy/helm/frood/templates/agents.yaml");
+        let list = |line: &str, key: &str| -> Option<Vec<String>> {
+            let inner = line.trim().strip_prefix(key)?.trim();
+            let inner = inner.strip_prefix('[')?.strip_suffix(']')?;
+            Some(inner.split(',').map(|v| v.trim().to_owned()).collect())
+        };
+        let lines: Vec<&str> = chart.lines().collect();
+        let made: BTreeMap<String, Vec<String>> = lines
+            .windows(2)
+            .filter_map(|pair| {
+                let resource = list(pair[0], "resources:")?.remove(0);
+                Some((resource, list(pair[1], "verbs:")?))
+            })
+            .collect();
+        assert_eq!(made, role, "the chart's Role");
+    }
+
+    #[tokio::test]
+    async fn leftover_jobs_of_a_run_are_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let (app, cluster) = app(&dir).await;
+        let run = "0199f1c2-0000-7000-8000-000000000008";
+        // The module went down after creating the first turn's Job and before saving the run:
+        // the Job is still suspended, with its Secret.
+        let leftover = |name: &str, uid: &str| {
+            let mut world = cluster.world.lock().unwrap();
+            world.jobs.insert(
+                name.to_owned(),
+                json!({ "metadata": { "name": name, "uid": uid, "labels": {
+                    "frood.run": run, "app.kubernetes.io/managed-by": "frood-runtime-k8s" } },
+                    "spec": { "suspend": true }, "status": {} }),
+            );
+            world.secrets.insert(
+                name.to_owned(),
+                json!({ "metadata": { "name": name, "ownerReferences": [{ "uid": uid }] } }),
+            );
+        };
+        leftover(&format!("frood-run-{run}-1"), "uid-left-1");
+        let mut start = spec("start", run);
+        start["prompt"] = json!("Go");
+        // A retried start finds it: it is removed, and the next attempt works.
+        let (status, refused) = call(&app, start.clone()).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{refused}");
+        assert_eq!(refused["retryable"], true);
+        {
+            let world = cluster.world.lock().unwrap();
+            assert!(world.jobs.is_empty() && world.secrets.is_empty());
+        }
+        let (status, started) = call(&app, start).await;
+        assert_eq!(status, StatusCode::OK, "{started}");
+        assert_eq!(settle(&app, run).await["state"], "finished");
+
+        // `stop` takes every Job of the run, also those the module does not know of.
+        leftover(&format!("frood-run-{run}-7"), "uid-left-7");
+        leftover("frood-run-someone-else-1", "uid-other");
+        cluster
+            .world
+            .lock()
+            .unwrap()
+            .jobs
+            .get_mut("frood-run-someone-else-1")
+            .unwrap()["metadata"]["labels"]["frood.run"] = json!("someone-else");
+        let (status, _) = call(&app, json!({ "op": "stop", "run_id": run })).await;
+        assert_eq!(status, StatusCode::OK);
+        let world = cluster.world.lock().unwrap();
+        assert_eq!(
+            world.jobs.keys().collect::<Vec<_>>(),
+            ["frood-run-someone-else-1"],
+            "only the run's own"
+        );
+        assert_eq!(world.secrets.len(), 1);
+        assert!(world.claims.is_empty());
     }
 
     #[tokio::test]

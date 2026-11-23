@@ -35,7 +35,7 @@ permissions:
   # Namespace-scoped RBAC only: Jobs, their pods and logs, a PVC per run, and a Secret per turn
   # that only Kubernetes reads back. No privileged pods, no host access, no Docker.
   kubernetes:
-    - { resources: [jobs], verbs: [create, get, patch, delete] }
+    - { resources: [jobs], verbs: [create, get, patch, delete, deletecollection] }
     - { resources: [pods], verbs: [list] }
     - { resources: [pods/log], verbs: [get] }
     - { resources: [persistentvolumeclaims], verbs: [create, delete] }

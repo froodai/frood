@@ -265,6 +265,22 @@ impl Kube {
         }
     }
 
+    /// Deletes every object of the kind with these labels, and what they own, in the
+    /// background (the `deletecollection` verb).
+    pub async fn delete_all(&self, kind: Kind, label_selector: &str) -> Result<(), ApiError> {
+        self.send(
+            Method::DELETE,
+            self.path(kind, None, None),
+            &[
+                ("labelSelector", label_selector.to_owned()),
+                ("propagationPolicy", "Background".to_owned()),
+            ],
+            None,
+        )
+        .await
+        .map(|_| ())
+    }
+
     pub async fn list(&self, kind: Kind, label_selector: &str) -> Result<Vec<Value>, ApiError> {
         let text = self
             .send(

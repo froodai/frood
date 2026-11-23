@@ -9,7 +9,6 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::future::Future;
-use std::sync::Mutex;
 
 use serde_json::{Value, json};
 
@@ -54,6 +53,9 @@ pub trait Backend: Send + Sync + 'static {
     fn state(&self, id: &str) -> impl Future<Output = Result<Exit, String>> + Send;
     /// Stops and removes the turn; not an error when it is gone.
     fn remove(&self, id: &str) -> impl Future<Output = Result<(), String>> + Send;
+    /// Removes every turn of the run that is still there, including ones the module lost track
+    /// of (it went down between creating a Job and saving the run).
+    fn remove_run_turns(&self, run_id: &str) -> impl Future<Output = Result<(), String>> + Send;
 }
 
 /// Limits and placement of agent pods.
@@ -381,47 +383,27 @@ pub fn stderr_lines(log: &str, last: usize) -> String {
 pub struct KubeBackend {
     kube: Kube,
     placement: Placement,
-    /// The pod of each turn, once seen.
-    pods: Mutex<HashMap<String, String>>,
 }
 
 impl KubeBackend {
     pub fn new(kube: Kube, placement: Placement) -> Self {
-        Self {
-            kube,
-            placement,
-            pods: Mutex::new(HashMap::new()),
-        }
+        Self { kube, placement }
     }
 
+    /// The turn's pod, by its Job's label: the module may list pods, not get one by name.
     async fn pod(&self, job: &str) -> Result<Option<Value>, String> {
-        let known = self.pods.lock().expect("pods lock").get(job).cloned();
-        if let Some(name) = known {
-            match self.kube.get(Kind::Pod, &name).await {
-                Ok(Some(pod)) => return Ok(Some(pod)),
-                Ok(None) => {}
-                Err(err) => return Err(err.to_string()),
-            }
-        }
         let pods = self
             .kube
             .list(Kind::Pod, &format!("job-name={job}"))
             .await
             .map_err(|e| e.to_string())?;
         // backoffLimit is 0: one pod, unless one was replaced before it started.
-        let pod = pods.into_iter().max_by_key(|p| {
+        Ok(pods.into_iter().max_by_key(|p| {
             p["metadata"]["creationTimestamp"]
                 .as_str()
                 .unwrap_or_default()
                 .to_owned()
-        });
-        if let Some(name) = pod.as_ref().and_then(|p| p["metadata"]["name"].as_str()) {
-            self.pods
-                .lock()
-                .expect("pods lock")
-                .insert(job.to_owned(), name.to_owned());
-        }
-        Ok(pod)
+        }))
     }
 
     async fn log(&self, job: &str, tail: Option<u32>) -> Result<String, String> {
@@ -457,11 +439,28 @@ impl Backend for KubeBackend {
     }
 
     async fn run(&self, spec: &ContainerSpec) -> Result<String, String> {
-        let job = self
+        let job = match self
             .kube
             .create(Kind::Job, &job_manifest(spec, &self.placement))
             .await
-            .map_err(|e| e.to_string())?;
+        {
+            Ok(job) => job,
+            // A Job of this name from an attempt the module lost track of (it went down before
+            // saving the run, or lost its state). It is not this turn's: it goes, with its
+            // Secret, and the next attempt starts clean.
+            Err(err) if err.conflict() => {
+                tracing::warn!(job = %spec.name, "removing a leftover job of the same name");
+                self.kube
+                    .delete(Kind::Job, &spec.name)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                return Err(format!(
+                    "job {} was left from an earlier attempt and is being removed; try again",
+                    spec.name
+                ));
+            }
+            Err(err) => return Err(err.to_string()),
+        };
         let uid = job["metadata"]["uid"]
             .as_str()
             .unwrap_or_default()
@@ -508,12 +507,23 @@ impl Backend for KubeBackend {
     }
 
     async fn remove(&self, id: &str) -> Result<(), String> {
-        self.pods.lock().expect("pods lock").remove(id);
         self.kube
             .delete(Kind::Job, id)
             .await
             .map_err(|e| e.to_string())
     }
+
+    async fn remove_run_turns(&self, run_id: &str) -> Result<(), String> {
+        self.kube
+            .delete_all(Kind::Job, &run_selector(run_id))
+            .await
+            .map_err(|e| e.to_string())
+    }
+}
+
+/// The Jobs of one run.
+pub fn run_selector(run_id: &str) -> String {
+    format!("frood.run={run_id},app.kubernetes.io/managed-by=frood-runtime-k8s")
 }
 
 #[cfg(test)]

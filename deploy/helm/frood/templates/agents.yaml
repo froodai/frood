@@ -24,10 +24,11 @@ metadata:
     {{- include "frood.labels" . | nindent 4 }}
     app.kubernetes.io/component: agents
 rules:
-  # A Job per turn: created suspended, let go once its Secret is there, deleted when done.
+  # A Job per turn: created suspended, let go once its Secret is there, deleted when done;
+  # at the run's end, any of its Jobs the module lost track of (deletecollection).
   - apiGroups: [batch]
     resources: [jobs]
-    verbs: [create, get, patch, delete]
+    verbs: [create, get, patch, delete, deletecollection]
   # The turn's pod: its state and what it printed.
   - apiGroups: [""]
     resources: [pods]

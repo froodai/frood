@@ -21,6 +21,34 @@ use serde_json::{Value, json};
 pub const NAMESPACE: &str = "agents-ns";
 pub const TOKEN: &str = "sa-token";
 
+/// What the module's Role allows (frood-module.yaml, the Helm chart's Role): anything else is
+/// refused as a real API server would.
+pub const ROLE: &[(&str, &[&str])] = &[
+    (
+        "jobs",
+        &["create", "get", "patch", "delete", "deletecollection"],
+    ),
+    ("pods", &["list"]),
+    ("pods/log", &["get"]),
+    ("persistentvolumeclaims", &["create", "delete"]),
+    ("secrets", &["create"]),
+];
+
+/// The RBAC resource and verb of a request.
+fn rbac(method: &str, rest: &[&str]) -> (String, &'static str) {
+    match (method, rest) {
+        ("GET", [plural]) => (plural.to_string(), "list"),
+        ("POST", [plural]) => (plural.to_string(), "create"),
+        ("DELETE", [plural]) => (plural.to_string(), "deletecollection"),
+        ("GET", [plural, _]) => (plural.to_string(), "get"),
+        ("PATCH", [plural, _]) => (plural.to_string(), "patch"),
+        ("PUT", [plural, _]) => (plural.to_string(), "update"),
+        ("DELETE", [plural, _]) => (plural.to_string(), "delete"),
+        (_, [plural, _, sub, ..]) => (format!("{plural}/{sub}"), "get"),
+        _ => (String::new(), "unknown"),
+    }
+}
+
 pub struct Pod {
     pub job: String,
     pub object: Value,
@@ -348,6 +376,18 @@ async fn handle(
             .unwrap_or_default()
             .to_owned()
     };
+    let (resource, verb) = rbac(method.as_str(), &rest);
+    if !ROLE
+        .iter()
+        .any(|(r, verbs)| *r == resource && verbs.contains(&verb))
+    {
+        return status(
+            StatusCode::FORBIDDEN,
+            format!(
+                "{resource} is forbidden: User \"system:serviceaccount:{NAMESPACE}:frood-agents\" cannot {verb} resource \"{resource}\""
+            ),
+        );
+    }
     match (method.as_str(), rest.as_slice()) {
         ("POST", [plural]) if world.forbidden.iter().any(|f| f == plural) => status(
             StatusCode::FORBIDDEN,
@@ -463,6 +503,28 @@ async fn handle(
                 )
             }
         }
+        ("DELETE", ["jobs"]) => {
+            assert_eq!(
+                query.get("propagationPolicy").map(String::as_str),
+                Some("Background")
+            );
+            let selector = query.get("labelSelector").cloned().unwrap_or_default();
+            let names: Vec<String> = world
+                .jobs
+                .iter()
+                .filter(|(_, job)| {
+                    selector.split(',').all(|term| {
+                        term.split_once('=')
+                            .is_some_and(|(k, v)| job["metadata"]["labels"][k] == v)
+                    })
+                })
+                .map(|(name, _)| name.clone())
+                .collect();
+            for name in names {
+                world.delete_job(&name);
+            }
+            axum::Json(json!({ "kind": "Status", "status": "Success" })).into_response()
+        }
         ("POST", ["secrets"]) => {
             let name = name_of(&body);
             let owner = &body["metadata"]["ownerReferences"][0];
@@ -497,10 +559,6 @@ async fn handle(
                 .collect();
             axum::Json(json!({ "kind": "PodList", "items": items })).into_response()
         }
-        ("GET", ["pods", name]) => match world.pods.get_mut(*name) {
-            Some(pod) => axum::Json(World::pod_object(pod)).into_response(),
-            None => status(StatusCode::NOT_FOUND, format!("pods \"{name}\" not found")),
-        },
         ("GET", ["pods", name, "log"]) => {
             assert_eq!(query.get("container").map(String::as_str), Some("agent"));
             let Some(pod) = world.pods.get(*name) else {
