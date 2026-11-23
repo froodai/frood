@@ -149,11 +149,13 @@ names (`*.svc`, `*.svc.cluster.local`, dotless names) and loopback only.
 - `telegram.enabled`: the bot, with `TELEGRAM_BOT_TOKEN` from `secrets.existingSecret` (or
   `telegram.botToken`). It long-polls Telegram, so it needs no address of its own. Two pollers
   of one bot fail: either give a work Frood its own bot, or share one bot with a personal
-  installation ([docs/34 §4 W4](../../docs/34_work_installation.md)). Then this side sets
+  installation ([docs/34 §5 W4](../../docs/34_work_installation.md)). Then this side sets
   `config.link.mode: forwarded` and does not poll; the personal side polls and forwards this
   side's updates to `/v1/channels/telegram/link` on the server's public address (already past the
   sign-in proxy, like all of `/v1`). The shared link token comes from
-  `telegram.linkToken.existingSecret` as `TELEGRAM_LINK_TOKEN`.
+  `telegram.linkToken.existingSecret` as `TELEGRAM_LINK_TOKEN`. Words the forwarded side learns
+  live in `/data`, an `emptyDir` until `telegram.persistence.enabled` puts it on a PVC (and sets
+  `config.state_dir: /data`).
 - `backup.enabled`: backups into restic repositories, configured in `config.backup` (see
   [modules/README.md](../../modules/README.md#backups)). With a PVC for files it runs on the
   server's node and reads the files read-only. A managed Postgres has its own backups; this one is

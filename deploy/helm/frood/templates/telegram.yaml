@@ -1,6 +1,33 @@
 {{- if .Values.telegram.enabled -}}
 {{- $name := printf "%s-%s" (include "frood.fullname" .) .Values.telegram.name -}}
 {{- $botSecret := default (include "frood.secretsSecret" .) .Values.telegram.botToken.existingSecret -}}
+{{- $keep := and .Values.telegram.persistence .Values.telegram.persistence.enabled -}}
+{{- $config := deepCopy (default dict .Values.telegram.config) -}}
+{{- if and $keep (not (hasKey $config "state_dir")) -}}
+{{- $_ := set $config "state_dir" "/data" -}}
+{{- end -}}
+{{- $claim := printf "%s-data" $name -}}
+{{- if and $keep (not .Values.telegram.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $claim }}
+  labels:
+    {{- include "frood.labels" . | nindent 4 }}
+    app.kubernetes.io/component: telegram
+  annotations:
+    # A shared bot's learned words (docs/34 W4) outlive the release.
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- with .Values.telegram.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.telegram.persistence.size }}
+---
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -37,7 +64,7 @@ spec:
           ports:
             - { name: http, containerPort: 8080 }
           env:
-            {{- include "frood.moduleEnv" (dict "ctx" . "name" .Values.telegram.name "config" (toJson (default dict .Values.telegram.config))) | nindent 12 }}
+            {{- include "frood.moduleEnv" (dict "ctx" . "name" .Values.telegram.name "config" (toJson $config)) | nindent 12 }}
             - name: TELEGRAM_BOT_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -62,7 +89,12 @@ spec:
             - { name: tmp, mountPath: /tmp }
       volumes:
         - name: data
+          {{- if $keep }}
+          persistentVolumeClaim:
+            claimName: {{ default $claim .Values.telegram.persistence.existingClaim }}
+          {{- else }}
           emptyDir: {}
+          {{- end }}
         - name: tmp
           emptyDir: { sizeLimit: 256Mi }
 ---

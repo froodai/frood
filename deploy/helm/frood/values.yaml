@@ -180,6 +180,14 @@ telegram:
   linkToken:
     existingSecret: ""
     key: TELEGRAM_LINK_TOKEN
+  # /data on a volume, for a shared bot's learned words (docs/34 W4); the module's
+  # config.state_dir is set to /data unless the config names another. Off: /data is an
+  # emptyDir, and learned words last until the pod restarts.
+  persistence:
+    enabled: false
+    size: 64Mi
+    storageClass: ""
+    existingClaim: ""
   resources:
     requests: { cpu: 20m, memory: 64Mi }
     limits: { cpu: 500m, memory: 256Mi }
