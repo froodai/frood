@@ -5,14 +5,30 @@ license: Apache-2.0
 provides:
   - notify.send@1
   - notify.update@1
+  # One bot for two installations (docs/34 W4): the forwarded side takes the polling side's
+  # updates here; the core relays them from POST /v1/channels/{channel}/link.
+  - channels.link@1
 frood_api: [knowledge:capture, knowledge:read, channels:act]
 config:
   type: object
   properties:
     language: { type: string, enum: [en, zh, es, hi, ar, fr, pt, ru], description: "Language of the bot's replies and notifications, default en; the menu comes in every language" }
+    label: { type: string, maxLength: 40, description: "With a link: this installation's label at the top of each bot message; default Personal on the polling side, Work on the forwarded side, in the bot's language" }
+    state_dir: { type: string, description: "With a link: a writable folder for the learned words; in memory only without it" }
+    link:
+      type: object
+      description: "One bot for two installations (docs/34 W4). Off when not set"
+      required: [name, url]
+      properties:
+        mode: { type: string, enum: [poll, forwarded], description: "poll (default): this side polls Telegram and forwards the other's updates; forwarded: it never polls and takes them from the other side" }
+        name: { type: string, maxLength: 40, description: "The other installation's label, e.g. Work" }
+        url: { type: string, description: "The other installation's address (https://, or http:// inside the deployment)" }
+        token: { type: string, description: "The shared link token, at least 32 characters: ${secret:TELEGRAM_LINK_TOKEN}; or set the TELEGRAM_LINK_TOKEN secret" }
+        channel: { type: string, description: "The Telegram module's name on the other installation, default telegram" }
+        words: { type: array, items: { type: string }, description: "Forwarded side: extra words that mean this installation, besides the names its knowledge holds" }
 permissions:
   egress: [api.telegram.org]
-  secrets: [TELEGRAM_BOT_TOKEN]
+  secrets: [TELEGRAM_BOT_TOKEN]   # and TELEGRAM_LINK_TOKEN with a link
 runtime:
   form: container
   health: /healthz

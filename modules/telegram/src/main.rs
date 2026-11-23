@@ -12,8 +12,10 @@
 //! optionally `TELEGRAM_API_URL`, `PORT` (8080, for `/manifest` and `/healthz`).
 
 mod attach;
+mod bridge;
 mod commands;
 mod lang;
+mod link;
 mod notify;
 mod spheres;
 
@@ -53,11 +55,12 @@ struct Bot {
     batches: Arc<std::sync::Mutex<std::collections::HashMap<String, Vec<Card>>>>,
     /// The installation's spheres and when they were asked (`/v1/spheres`).
     spheres: Arc<tokio::sync::Mutex<Option<(std::time::Instant, spheres::Spheres)>>>,
+    /// One bot for two installations (docs/34 W4); none when the config sets no `link`.
+    link: Option<Arc<bridge::Linked>>,
 }
 
 #[derive(Deserialize)]
 struct Update {
-    update_id: i64,
     #[serde(default)]
     message: Option<Message>,
     #[serde(default)]
@@ -147,7 +150,16 @@ struct FileRef {
 }
 
 impl Bot {
-    async fn telegram(&self, method: &str, body: Value) -> Result<Value, String> {
+    /// A Bot API call. With a link, the bot's messages start with the installation's label
+    /// and the forwarded side's buttons are marked (docs/34 W4).
+    async fn telegram(&self, method: &str, mut body: Value) -> Result<Value, String> {
+        if let Some(link) = &self.link {
+            link.dress(method, &mut body);
+        }
+        self.telegram_plain(method, body).await
+    }
+
+    async fn telegram_plain(&self, method: &str, body: Value) -> Result<Value, String> {
         let response = self
             .http
             .post(format!("{}/{method}", self.telegram))
@@ -494,10 +506,23 @@ impl Bot {
         }
     }
 
-    /// Long polling until the process stops.
+    /// Long polling until the process stops. With a link, each update is routed: the other
+    /// installation's go to it at once.
     async fn run(self) {
         self.set_menu().await;
         self.announce().await;
+        if self.link.is_some() {
+            for task in 0..3 {
+                let bot = self.clone();
+                tokio::spawn(async move {
+                    match task {
+                        0 => bot.deliver().await,
+                        1 => bot.refresh_words().await,
+                        _ => bot.sweep_held(Duration::from_secs(60)).await,
+                    }
+                });
+            }
+        }
         let mut offset: i64 = 0;
         loop {
             let updates = self
@@ -507,18 +532,17 @@ impl Bot {
                 )
                 .await;
             match updates
-                .and_then(|v| serde_json::from_value::<Vec<Update>>(v).map_err(|e| e.to_string()))
+                .and_then(|v| serde_json::from_value::<Vec<Value>>(v).map_err(|e| e.to_string()))
             {
                 Ok(updates) => {
                     for update in updates {
-                        offset = offset.max(update.update_id + 1);
-                        if let Some(message) = update.message {
+                        let id = update["update_id"].as_i64().unwrap_or_default();
+                        offset = offset.max(id + 1);
+                        if self.link.is_some() {
+                            self.route(update);
+                        } else {
                             let bot = self.clone();
-                            tokio::spawn(async move { bot.handle(message).await });
-                        }
-                        if let Some(query) = update.callback_query {
-                            let bot = self.clone();
-                            tokio::spawn(async move { bot.on_button(&query).await });
+                            tokio::spawn(async move { bot.accept(update).await });
                         }
                     }
                 }
@@ -650,6 +674,7 @@ fn router(bot: Arc<Bot>) -> Router {
         )
         .route("/v1/capabilities/notify.send@1", post(notify_send))
         .route("/v1/capabilities/notify.update@1", post(notify_update))
+        .route("/v1/capabilities/channels.link@1", post(link_call))
         .with_state(bot)
 }
 
@@ -700,6 +725,23 @@ async fn notify_update(
     }
 }
 
+/// `channels.link@1` (docs/34 W4): the core relays the other installation's calls from
+/// `POST /v1/channels/{channel}/link`; the module checks the link token itself.
+async fn link_call(
+    State(bot): State<Arc<Bot>>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    if !from_core(&bot, &headers) {
+        return problem(StatusCode::UNAUTHORIZED, "bad or missing token");
+    }
+    let (status, body) = bot.link_call(&headers, body).await;
+    if status.is_success() {
+        return (status, Json(body)).into_response();
+    }
+    problem(status, body["detail"].as_str().unwrap_or("refused"))
+}
+
 fn bot_from_env() -> Result<Bot, String> {
     let config: Value = std::env::var("FROOD_MODULE_CONFIG")
         .ok()
@@ -711,6 +753,8 @@ fn bot_from_env() -> Result<Bot, String> {
         std::env::var("TELEGRAM_BOT_TOKEN").map_err(|_| "TELEGRAM_BOT_TOKEN is not set")?;
     let api = std::env::var("TELEGRAM_API_URL").unwrap_or_else(|_| TELEGRAM_URL.to_owned());
     let api = api.trim_end_matches('/');
+    let lang = Lang::from_code(config["language"].as_str().unwrap_or("en"));
+    let link = link::Link::from_config(&config, lang, std::env::var("TELEGRAM_LINK_TOKEN").ok())?;
     Ok(Bot {
         http: reqwest::Client::builder()
             .timeout(Duration::from_secs(60))
@@ -724,12 +768,13 @@ fn bot_from_env() -> Result<Bot, String> {
             .to_owned(),
         token: std::env::var("FROOD_TOKEN").map_err(|_| "FROOD_TOKEN is not set")?,
         channel: std::env::var("FROOD_MODULE").unwrap_or_else(|_| "telegram".to_owned()),
-        lang: Lang::from_code(config["language"].as_str().unwrap_or("en")),
+        lang,
         poll_every: Duration::from_secs(2),
         poll_for: Duration::from_secs(180),
         console: Arc::default(),
         batches: Arc::default(),
         spheres: Arc::default(),
+        link: link.map(|l| Arc::new(bridge::Linked::new(l))),
     })
 }
 
@@ -750,11 +795,19 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port))
         .await
         .expect("bind");
-    tracing::info!(port, channel = %bot.channel, lang = ?bot.lang, "telegram module started");
+    let forwarded = bot.link.as_ref().is_some_and(|l| !l.polls());
+    tracing::info!(port, channel = %bot.channel, lang = ?bot.lang, linked = bot.link.is_some(), forwarded, "telegram module started");
     let bot = Arc::new(bot);
     tokio::spawn({
         let bot = bot.clone();
-        async move { (*bot).clone().run().await }
+        // The forwarded side never polls: Telegram gives updates to one poller only.
+        async move {
+            if forwarded {
+                bot.announce().await
+            } else {
+                (*bot).clone().run().await
+            }
+        }
     });
     axum::serve(listener, router(bot.clone()))
         .with_graceful_shutdown(async {
@@ -765,7 +818,7 @@ async fn main() {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::sync::Mutex;
 
     use axum::extract::{Multipart, Path, State};
@@ -775,17 +828,17 @@ mod tests {
     use super::*;
 
     #[derive(Default)]
-    struct World {
-        sent: Vec<Value>,
-        edited: Vec<Value>,
-        captures: Vec<Value>,
-        links: Vec<Value>,
-        acts: Vec<Value>,
-        answered: Vec<Value>,
-        withdrawn: Vec<Value>,
-        attached: Vec<Value>,
-        about: Vec<Value>,
-        menu: Vec<Value>,
+    pub(crate) struct World {
+        pub(crate) sent: Vec<Value>,
+        pub(crate) edited: Vec<Value>,
+        pub(crate) captures: Vec<Value>,
+        pub(crate) links: Vec<Value>,
+        pub(crate) acts: Vec<Value>,
+        pub(crate) answered: Vec<Value>,
+        pub(crate) withdrawn: Vec<Value>,
+        pub(crate) attached: Vec<Value>,
+        pub(crate) about: Vec<Value>,
+        pub(crate) menu: Vec<Value>,
     }
 
     /// A form or JSON body as one object; a file as its type and text.
@@ -817,10 +870,10 @@ mod tests {
         record
     }
 
-    type Shared = Arc<Mutex<World>>;
+    pub(crate) type Shared = Arc<Mutex<World>>;
 
     /// Telegram and Frood in one fake server.
-    async fn world() -> (String, Shared) {
+    pub(crate) async fn world() -> (String, Shared) {
         let shared: Shared = Arc::default();
         let app = Router::new()
             .route("/botTOKEN/sendMessage", post(|State(w): State<Shared>, Json(b): Json<Value>| async move {
@@ -850,6 +903,13 @@ mod tests {
             .route("/v1/channels/telegram/messages/{message_ref}", get(|Path(message_ref): Path<String>| async move {
                 assert_eq!(message_ref, "77:901");
                 Json(json!({ "item": { "id": "item-1" } }))
+            }))
+            .route("/v1/entities", get(|axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>| async move {
+                Json(match q.get("type").map(String::as_str) {
+                    Some("person") => json!([{ "name": "Анна Петрова", "aliases": ["Аня"] }]),
+                    Some("document") => json!([{ "name": "PROJ-123: the login page fails on a long name", "aliases": [] }]),
+                    _ => json!([]),
+                })
             }))
             .route("/v1/search", get(|| async { Json(json!([
                 { "text": "Docs freeze on Nov 10", "valid_from": "2026-10-03T12:00:00Z", "unverified": true },
@@ -919,7 +979,7 @@ mod tests {
         (url, shared)
     }
 
-    fn bot(url: &str, lang: Lang) -> Bot {
+    pub(crate) fn bot(url: &str, lang: Lang) -> Bot {
         Bot {
             http: reqwest::Client::new(),
             telegram: format!("{url}/botTOKEN"),
@@ -933,11 +993,12 @@ mod tests {
             console: Arc::default(),
             batches: Arc::default(),
             spheres: Arc::default(),
+            link: None,
         }
     }
 
     /// An Inbox item as the core shows it: a change with one option.
-    fn card(id: &str) -> Value {
+    pub(crate) fn card(id: &str) -> Value {
         json!({
             "item": { "id": id, "kind": "proposal", "state": "open" },
             "content": { "proposal_id": "p-1", "risk": "conflict", "alternatives": [{ "key": "default", "changes": [{ "before": "Релиз — 14.11", "after": "Релиз — 28.11" }] }] },
@@ -945,7 +1006,7 @@ mod tests {
         })
     }
 
-    fn message(from: i64, extra: Value) -> Message {
+    pub(crate) fn message(from: i64, extra: Value) -> Message {
         let mut base = json!({ "message_id": 5, "chat": { "id": 77 }, "from": { "id": from, "username": "alice" }, "date": 1_792_281_600 });
         for (k, v) in extra.as_object().unwrap() {
             base[k] = v.clone();

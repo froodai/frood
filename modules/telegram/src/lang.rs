@@ -1517,6 +1517,139 @@ const RU_WORDS: Words = Words {
     tag_failed: "сбой",
 };
 
+/// One bot for two installations (docs/34 W4): the labels, the question when the bot cannot
+/// tell where a message goes, and what it says about the other installation.
+pub(crate) struct LinkTexts {
+    /// The labels when the config names none: the side that polls, the side it forwards to.
+    pub(crate) personal: &'static str,
+    pub(crate) work: &'static str,
+    /// The question, with `{a}` and `{b}` the two labels.
+    pub(crate) which: &'static str,
+    /// The question after the answer: `{name}` is where the message went.
+    pub(crate) sent_to: &'static str,
+    /// The question after an hour without an answer.
+    pub(crate) dropped: &'static str,
+    /// A button of a question that is gone.
+    pub(crate) gone: &'static str,
+    /// A bare prefix: what follows goes there.
+    pub(crate) switched: &'static str,
+    /// The other installation does not answer; said once until it does.
+    pub(crate) later: &'static str,
+    /// The other installation refused, e.g. a wrong link token; `{status}` is its answer.
+    pub(crate) refused: &'static str,
+}
+
+impl Lang {
+    pub(crate) fn link(self) -> &'static LinkTexts {
+        match self {
+            Self::En => &EN_LINK,
+            Self::Zh => &ZH_LINK,
+            Self::Es => &ES_LINK,
+            Self::Hi => &HI_LINK,
+            Self::Ar => &AR_LINK,
+            Self::Fr => &FR_LINK,
+            Self::Pt => &PT_LINK,
+            Self::Ru => &RU_LINK,
+        }
+    }
+}
+
+static EN_LINK: LinkTexts = LinkTexts {
+    personal: "Personal",
+    work: "Work",
+    which: "{a} or {b}?",
+    sent_to: "→ {name}",
+    dropped: "No answer within an hour, so the message was not kept. Send it again.",
+    gone: "This question is gone; send the message again.",
+    switched: "Next messages go to {name}.",
+    later: "{name} does not answer now. I will deliver it when it does; if the bot restarts before that, the message is lost.",
+    refused: "{name} does not take messages ({status}). Check the link token.",
+};
+
+static ZH_LINK: LinkTexts = LinkTexts {
+    personal: "个人",
+    work: "工作",
+    which: "{a} 还是 {b}？",
+    sent_to: "→ {name}",
+    dropped: "一小时内没有回答，消息未保存。请重新发送。",
+    gone: "这个问题已失效，请重新发送消息。",
+    switched: "接下来的消息发往 {name}。",
+    later: "{name} 暂时没有响应。它恢复后我会送达；如果在此之前机器人重启，消息会丢失。",
+    refused: "{name} 不接收消息（{status}）。请检查链接令牌。",
+};
+
+static ES_LINK: LinkTexts = LinkTexts {
+    personal: "Personal",
+    work: "Trabajo",
+    which: "¿{a} o {b}?",
+    sent_to: "→ {name}",
+    dropped: "Sin respuesta en una hora: el mensaje no se guardó. Envíalo de nuevo.",
+    gone: "Esta pregunta ya no vale; envía el mensaje de nuevo.",
+    switched: "Los próximos mensajes van a {name}.",
+    later: "{name} no responde ahora. Lo entregaré cuando responda; si el bot se reinicia antes, el mensaje se pierde.",
+    refused: "{name} no acepta mensajes ({status}). Revisa el token del enlace.",
+};
+
+static HI_LINK: LinkTexts = LinkTexts {
+    personal: "निजी",
+    work: "काम",
+    which: "{a} या {b}?",
+    sent_to: "→ {name}",
+    dropped: "एक घंटे में जवाब नहीं मिला, इसलिए संदेश नहीं रखा गया। उसे फिर से भेजें।",
+    gone: "यह सवाल अब नहीं है; संदेश फिर से भेजें।",
+    switched: "अगले संदेश {name} में जाएंगे।",
+    later: "{name} अभी जवाब नहीं दे रहा। जवाब देते ही पहुंचा दूंगा; अगर उससे पहले बॉट फिर से शुरू हुआ, तो संदेश खो जाएगा।",
+    refused: "{name} संदेश नहीं ले रहा ({status})। लिंक टोकन जांचें।",
+};
+
+static AR_LINK: LinkTexts = LinkTexts {
+    personal: "شخصي",
+    work: "عمل",
+    which: "{a} أم {b}؟",
+    sent_to: "← {name}",
+    dropped: "لم يصل رد خلال ساعة، فلم تُحفظ الرسالة. أرسلها مرة أخرى.",
+    gone: "انتهى هذا السؤال؛ أرسل الرسالة مرة أخرى.",
+    switched: "الرسائل التالية تذهب إلى {name}.",
+    later: "{name} لا يستجيب الآن. سأوصلها عندما يستجيب؛ وإذا أُعيد تشغيل البوت قبل ذلك فستضيع الرسالة.",
+    refused: "{name} لا يقبل الرسائل ({status}). تحقق من رمز الربط.",
+};
+
+static FR_LINK: LinkTexts = LinkTexts {
+    personal: "Perso",
+    work: "Travail",
+    which: "{a} ou {b} ?",
+    sent_to: "→ {name}",
+    dropped: "Pas de réponse en une heure : le message n'a pas été gardé. Renvoyez-le.",
+    gone: "Cette question n'est plus valable ; renvoyez le message.",
+    switched: "Les prochains messages vont à {name}.",
+    later: "{name} ne répond pas pour l'instant. Je le livrerai dès qu'il répond ; si le bot redémarre avant, le message est perdu.",
+    refused: "{name} refuse les messages ({status}). Vérifiez le jeton du lien.",
+};
+
+static PT_LINK: LinkTexts = LinkTexts {
+    personal: "Pessoal",
+    work: "Trabalho",
+    which: "{a} ou {b}?",
+    sent_to: "→ {name}",
+    dropped: "Sem resposta em uma hora: a mensagem não foi guardada. Envie de novo.",
+    gone: "Esta pergunta já não vale; envie a mensagem de novo.",
+    switched: "As próximas mensagens vão para {name}.",
+    later: "{name} não responde agora. Entrego quando responder; se o bot reiniciar antes, a mensagem se perde.",
+    refused: "{name} não aceita mensagens ({status}). Verifique o token do link.",
+};
+
+static RU_LINK: LinkTexts = LinkTexts {
+    personal: "Личное",
+    work: "Работа",
+    which: "{a} или {b}?",
+    sent_to: "→ {name}",
+    dropped: "Ответа не было час, поэтому сообщение не сохранено. Пришлите его ещё раз.",
+    gone: "Этот вопрос уже не действует, пришлите сообщение ещё раз.",
+    switched: "Следующие сообщения пойдут в «{name}».",
+    later: "«{name}» сейчас не отвечает. Доставлю, когда ответит; если бот перезапустится раньше, сообщение пропадёт.",
+    refused: "«{name}» не принимает сообщения ({status}). Проверьте токен связи.",
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1565,6 +1698,17 @@ mod tests {
             ] {
                 assert_eq!(holes(a), holes(b), "{lang:?}: {a}");
             }
+            let (l, e) = (lang.link(), en.link());
+            for (a, b) in [
+                (l.which, e.which),
+                (l.sent_to, e.sent_to),
+                (l.switched, e.switched),
+                (l.later, e.later),
+                (l.refused, e.refused),
+            ] {
+                assert_eq!(holes(a), holes(b), "{lang:?}: {a}");
+            }
+            assert_ne!(l.personal, l.work, "{lang:?}");
             assert_eq!(Lang::from_code(lang.code()), lang);
         }
         assert_eq!(Lang::from_code("klingon"), Lang::En);

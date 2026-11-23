@@ -53,18 +53,36 @@ impl Bot {
         let Some(username) = me["username"].as_str() else {
             return;
         };
+        let forwarded = self.link.as_ref().is_some_and(|l| !l.polls());
+        // The forwarded side's link codes are marked, so the polling side passes them on.
+        let start = if forwarded { crate::link::START } else { "" };
+        let mut about = json!({ "start_url": format!("https://t.me/{username}?start={start}"), "bot_id": me["id"] });
+        // The Mini App's switcher (docs/34 W4): the other installation's Mini App, opened
+        // straight from Telegram's WebView; nothing of it passes through this server.
+        if let Some(link) = self.link.as_ref().map(|l| &l.link)
+            && let Some(there_url) = crate::notify::mini_app(&format!("{}/admin/", link.url))
+        {
+            about["link"] = json!({
+                "here": link.here,
+                "there": link.there,
+                "there_url": there_url,
+                "here_first": link.mode == crate::link::Mode::Poll,
+            });
+        }
         let response = self
             .frood(
                 self.http
                     .put(format!("{}/v1/channels/{}/about", self.frood, self.channel)),
             )
-            .json(&json!({ "start_url": format!("https://t.me/{username}?start="), "bot_id": me["id"] }))
+            .json(&about)
             .send()
             .await;
-        if let Some(home) = self
-            .console_url("")
-            .await
-            .and_then(|url| crate::notify::mini_app(url.trim_end_matches("inbox/")))
+        // One menu button for both installations: the polling side's.
+        if !forwarded
+            && let Some(home) = self
+                .console_url("")
+                .await
+                .and_then(|url| crate::notify::mini_app(url.trim_end_matches("inbox/")))
         {
             let button = json!({ "menu_button": { "type": "web_app", "text": "Frood", "web_app": { "url": home } } });
             if let Err(err) = self.telegram("setChatMenuButton", button).await {
