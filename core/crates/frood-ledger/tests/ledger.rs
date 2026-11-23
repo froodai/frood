@@ -148,18 +148,18 @@ async fn a_source_links_only_to_the_web() {
         kind: "note".into(),
         origin: "capture".into(),
         uri: Some(uri.into()),
-        title: Some("AIRC-1808".into()),
+        title: Some("PROJ-1808".into()),
         content: format!("seen at {uri}"),
         said_at: None,
         metadata: json!({}),
     };
     let kept = ledger
-        .capture_source(&user(), note(" https://youtrack.example/issue/AIRC-1808 "))
+        .capture_source(&user(), note(" https://youtrack.example/issue/PROJ-1808 "))
         .await
         .unwrap();
     assert_eq!(
         kept.source.uri.as_deref(),
-        Some("https://youtrack.example/issue/AIRC-1808")
+        Some("https://youtrack.example/issue/PROJ-1808")
     );
     for bad in [
         "javascript:alert(1)",

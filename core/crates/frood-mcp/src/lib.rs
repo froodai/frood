@@ -233,7 +233,7 @@ pub struct CaptureParams {
     /// Address of the original this note comes from (an issue, a pull request, a thread), so a
     /// person can open it.
     pub uri: Option<String>,
-    /// Name of the original, e.g. "AIRC-1808: Task view keeps loading".
+    /// Name of the original, e.g. "PROJ-1808: Project page keeps loading".
     pub title: Option<String>,
     /// Only when moving what you remember about the person into Frood (the import_memory
     /// prompt): your own name, e.g. "Claude". What Frood reads from it is marked as coming from
@@ -250,7 +250,7 @@ pub struct ProposeParams {
     /// create_entity {ref?, type, name, aliases?}.
     /// kind: decision, commitment, rule, responsibility, fact, status, event or open_question.
     /// title: a headline of a few words (under 80 characters) a person reads first, e.g.
-    /// "AIRC-1808: finished session loads for 22 minutes"; text: the full statement under it.
+    /// "PROJ-1808: finished project loads for 15 minutes"; text: the full statement under it.
     /// modality: mentioned, proposed, agreed, decided, reported, observed or inferred.
     /// sphere: the area of life it belongs to: tech, business or personal, unless the
     /// installation has its own (get_context lists them). Without it, a create takes its
@@ -268,7 +268,7 @@ pub struct ProposeParams {
     /// it whenever there is one, so a person can open the original. An agent's new knowledge
     /// without it waits for a person instead of being taken at once.
     pub source_uri: Option<String>,
-    /// Name of that original, e.g. "AIRC-1808: Task view keeps loading".
+    /// Name of that original, e.g. "PROJ-1808: Project page keeps loading".
     pub source_title: Option<String>,
     /// Evidence ids (from captured sources) for the whole proposal.
     pub evidence: Option<Vec<String>>,

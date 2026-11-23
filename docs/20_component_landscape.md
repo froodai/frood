@@ -163,7 +163,7 @@
 
 ## 16. Добавлено в раунде 4 (2026-10-18)
 
-- **JetBrains Air:** облачные агенты в контейнерах, автоматизации по расписанию и событиям без вашей машины, облачные задачи тратят кредиты JetBrains AI (свои ключи — только локально), результат пушится в ветку после каждого хода, приостановленную задачу можно продолжить до архивации через 24 ч ✅ [Cloud agents](https://www.jetbrains.com/help/air/cloud-agents.html). Агенты: Claude Agent, Codex, Gemini CLI, Junie ✅. Air CLI (`aircli cloud run/status/cancel`, `aircli remote prompt/resolve/cancel/stop`; сейчас только echo-сессии) ✅. Публичного API, кроме CLI, не нашёл ⚠️.
+- **JetBrains Air:** облачные агенты в контейнерах, автоматизации по расписанию и событиям без вашей машины, облачные задачи тратят кредиты JetBrains AI (свои ключи — только локально), результат пушится в ветку после каждого хода, приостановленную задачу можно продолжить до архивации через 24 ч ✅ [Cloud agents](https://www.jetbrains.com/help/air/cloud-agents.html). Агенты: Claude Agent, Codex, Gemini CLI, Junie ✅. Air CLI (`aircli cloud run/status/cancel`, `aircli remote prompt/resolve/cancel/stop`) ✅. Публичного API, кроме CLI, не нашёл ⚠️.
 - **Подписка Claude для фона:** `claude setup-token`; с 15.06.2026 отдельный лимит на программное использование; Agent SDK — только API-ключ; нельзя пускать чужие запросы ⚠️ (сторонние источники).
 - **Codex:** `codex exec resume` ✅; вход через ChatGPT, device auth ⚠️; app-server по WebSocket ✅.
 - **Claude Agent SDK:** streaming input с прерываниями и очередью сообщений ✅.

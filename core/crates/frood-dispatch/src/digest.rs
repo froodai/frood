@@ -25,7 +25,7 @@ pub(crate) const WRITER: &str = "write-digest";
 /// How long a digest waits for its writer before it goes as it is.
 const WRITER_WAIT_MINUTES: i64 = 10;
 
-/// An issue key such as AIRC-1808: capital letters or digits, a dash, digits.
+/// An issue key such as PROJ-1808: capital letters or digits, a dash, digits.
 fn issue_key(text: &str) -> Option<&str> {
     text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
         .find(|word| {
@@ -50,7 +50,7 @@ pub(crate) fn headline(text: &str, label: Option<&str>) -> String {
         && let Some(rest) = text.strip_prefix(key)
     {
         let rest = rest.trim_start();
-        // "AIRC-1808 (Bug, Chat): …" → "…"
+        // "PROJ-1808 (Bug, Docs): …" → "…"
         let rest = match rest.strip_prefix('(').and_then(|r| r.split_once(')')) {
             Some((_, after)) => after,
             None => rest,
@@ -465,16 +465,16 @@ mod tests {
 
     #[test]
     fn headlines_are_short_and_lose_the_key_they_are_filed_under() {
-        let text = "AIRC-1808 (Bug, Chat): a FINISHED session with a long history (1987 records) shows only the projected tail and keeps loading for about 22 minutes";
+        let text = "PROJ-1808 (Bug, Docs): a FINISHED project with a long history (1312 records) shows only the first page and keeps loading for about 15 minutes";
         let label = issue_key(text);
-        assert_eq!(label, Some("AIRC-1808"));
+        assert_eq!(label, Some("PROJ-1808"));
         let title = headline(text, label);
-        assert!(title.starts_with("a FINISHED session"), "{title}");
+        assert!(title.starts_with("a FINISHED project"), "{title}");
         assert!(title.chars().count() <= TITLE + 1, "{title}");
         assert!(title.ends_with('…'), "{title}");
         assert_eq!(headline("Short and clear", None), "Short and clear");
-        assert_eq!(issue_key("Вызов PtyOptions::new в ExecApiService"), None);
-        assert_eq!(issue_key("see JBAIP-1968, please"), Some("JBAIP-1968"));
+        assert_eq!(issue_key("Вызов Parser::new в ReportService"), None);
+        assert_eq!(issue_key("see PROJ-1968, please"), Some("PROJ-1968"));
         assert_eq!(issue_key("2026-10-20 and E-1"), None);
     }
 
@@ -489,9 +489,9 @@ mod tests {
             sphere: Value::Null,
         };
         let lines = grouped(vec![
-            line("a", Some("AIRC-1808"), None),
+            line("a", Some("PROJ-1808"), None),
             line("b", None, None),
-            line("c", Some("AIRC-1808"), None),
+            line("c", Some("PROJ-1808"), None),
             line("d", Some("X-1"), Some("https://yt/issue/X-1")),
             line("e", None, Some("https://yt/issue/X-1")),
         ]);
@@ -502,7 +502,7 @@ mod tests {
         assert_eq!(
             counts,
             [
-                (json!("AIRC-1808"), json!(2)),
+                (json!("PROJ-1808"), json!(2)),
                 (Value::Null, json!(1)),
                 (json!("X-1"), json!(2)),
             ]

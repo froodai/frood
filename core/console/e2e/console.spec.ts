@@ -48,13 +48,13 @@ test("a decision leaves the Inbox at once and comes back with Undo", async ({ pa
 
 test("an item reads as a title with its kind, and opens the original", async ({ page }) => {
   await signIn(page, "/admin/inbox");
-  const row = page.getByRole("button", { name: /^ATL-142: a finished session loads for 22 minutes/ });
+  const row = page.getByRole("button", { name: /^ATL-142: a finished project loads for 15 minutes/ });
   await expect(row.getByText("Fact")).toBeVisible();
   await row.click();
   const detail = page.getByRole("main").getByRole("complementary");
-  await expect(detail.getByRole("heading", { level: 2 })).toHaveText("ATL-142: a finished session loads for 22 minutes");
+  await expect(detail.getByRole("heading", { level: 2 })).toHaveText("ATL-142: a finished project loads for 15 minutes");
   await expect(detail.getByText(/the proposed fix is to attach with session\/resume/)).toBeVisible();
-  await expect(detail.getByRole("link", { name: /ATL-142: Task view keeps loading/ })).toHaveAttribute("href", "https://tracker.example/issue/ATL-142");
+  await expect(detail.getByRole("link", { name: /ATL-142: Project page keeps loading/ })).toHaveAttribute("href", "https://tracker.example/issue/ATL-142");
 });
 
 test("several are decided in one go", async ({ page }) => {
@@ -204,7 +204,7 @@ test("attachments: a photo and a link on knowledge, and on a change that waits",
 
   // On a change that waits: the row shows a paper clip with the count.
   await page.goto("/admin/inbox");
-  const row = page.getByRole("button", { name: /^ATL-142: a finished session loads for 22 minutes/ });
+  const row = page.getByRole("button", { name: /^ATL-142: a finished project loads for 15 minutes/ });
   await row.click();
   // The details switch to the item before anything is typed there.
   await expect(page.getByRole("complementary").getByRole("heading", { level: 2 })).toHaveText(/^ATL-142/);
@@ -348,7 +348,7 @@ test("the Telegram Mini App: the Inbox one card at a time, search, knowledge wit
 
   // A card: the main button accepts, Telegram's back button returns.
   // The earlier tests leave this new fact waiting.
-  await page.getByRole("button", { name: /ATL-142: a finished session/ }).click();
+  await page.getByRole("button", { name: /ATL-142: a finished project/ }).click();
   await expect(page.getByText(/\d+ of \d+/)).toBeVisible();
   expect(await calls()).toEqual(expect.arrayContaining(["Main.setText:Accept", "Main.show", "Back.show"]));
   await expect(page.getByRole("button", { name: "Accept", exact: true })).toHaveCount(0);

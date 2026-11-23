@@ -286,7 +286,7 @@ fn labelled(label: Option<&str>, link: Option<&str>) -> Option<String> {
     })
 }
 
-/// "AIRC-1808 — title (3)", the label a link to the original.
+/// "PROJ-1808 — title (3)", the label a link to the original.
 fn digest_line(entry: &Value) -> String {
     let title = esc(&short(entry["title"].as_str().unwrap_or("?"), DIGEST_CHARS));
     let count = entry["count"].as_u64().unwrap_or(1);
@@ -943,14 +943,14 @@ mod tests {
             "item": { "id": "0199-item", "kind": "proposal", "state": "open" },
             "content": {
                 "risk": "new", "author": "agent:daily-sweep",
-                "alternatives": [{ "key": "default", "label": null, "changes": [{ "kind": "fact", "title": "AIRC-1808: сессия грузится 22 минуты", "before": null, "after": "Завершённая сессия с длинной историей показывает только хвост и грузится около 22 минут" }] }],
-                "origin": { "uri": "https://youtrack.example/issue/AIRC-1808", "title": "AIRC-1808" }
+                "alternatives": [{ "key": "default", "label": null, "changes": [{ "kind": "fact", "title": "PROJ-1808: проект грузится 15 минут", "before": null, "after": "Завершённый проект с длинной историей показывает только первую страницу и грузится около 15 минут" }] }],
+                "origin": { "uri": "https://youtrack.example/issue/PROJ-1808", "title": "PROJ-1808" }
             },
             "actions": [{ "action": "accept", "alternative": "default" }]
         });
         assert_eq!(
             text(&shown, w, &Spheres::default()),
-            "<b>🆕 Новое знание</b> · Факт\n<b>AIRC-1808: сессия грузится 22 минуты</b>\nЗавершённая сессия с длинной историей показывает только хвост и грузится около 22 минут\n<i>От агента: daily-sweep</i>"
+            "<b>🆕 Новое знание</b> · Факт\n<b>PROJ-1808: проект грузится 15 минут</b>\nЗавершённый проект с длинной историей показывает только первую страницу и грузится около 15 минут\n<i>От агента: daily-sweep</i>"
         );
         assert_eq!(
             keyboard(
@@ -960,7 +960,7 @@ mod tests {
             ),
             json!({ "inline_keyboard": [
                 [{ "text": "Принять", "callback_data": "i:0199-item:0" }],
-                [{ "text": "Открыть оригинал", "url": "https://youtrack.example/issue/AIRC-1808" },
+                [{ "text": "Открыть оригинал", "url": "https://youtrack.example/issue/PROJ-1808" },
                  { "text": "Открыть в Frood", "web_app": { "url": "https://frood.example/admin/m/inbox/0199-item" } }]
             ] })
         );
@@ -1062,7 +1062,7 @@ mod tests {
             "accepted": [{ "title": "Релиз 2.4 — 28 ноября", "count": 1 }],
             "waiting": {
                 "count": 13,
-                "new": [{ "title": "сессия с длинной историей грузится 22 минуты", "label": "AIRC-1808", "link": "https://yt.example/issue/AIRC-1808", "count": 3 }],
+                "new": [{ "title": "проект с длинной историей грузится 15 минут", "label": "PROJ-1808", "link": "https://yt.example/issue/PROJ-1808", "count": 3 }],
                 "older": { "count": 11, "since": "2026-10-20T08:00:00Z" }
             },
             "due_soon": [{ "title": "Сдать отчёт", "due": "2026-11-07", "why": "due_today" }, { "title": "Позже", "due": "2026-11-12" }],
@@ -1070,7 +1070,7 @@ mod tests {
         });
         assert_eq!(
             digest_text(&digest, w, &Spheres::default(), None),
-            "<b>📋 Что нового</b>\n\n<b>Нужно вам сейчас</b>\n• <i>вопрос</i> · Решение или обсуждение?\n• <i>сегодня</i> · Сдать отчёт\n\n<b>Новое</b>\n• Релиз 2.4 — 28 ноября\n• <a href=\"https://yt.example/issue/AIRC-1808\">AIRC-1808</a> — сессия с длинной историей грузится 22 минуты (3)\n\n⏳ 11 ждут вашего решения с 20.10"
+            "<b>📋 Что нового</b>\n\n<b>Нужно вам сейчас</b>\n• <i>вопрос</i> · Решение или обсуждение?\n• <i>сегодня</i> · Сдать отчёт\n\n<b>Новое</b>\n• Релиз 2.4 — 28 ноября\n• <a href=\"https://yt.example/issue/PROJ-1808\">PROJ-1808</a> — проект с длинной историей грузится 15 минут (3)\n\n⏳ 11 ждут вашего решения с 20.10"
         );
         // Nothing to say: the core sends no digest, and a bare one says so.
         assert_eq!(
@@ -1083,10 +1083,10 @@ mod tests {
             "<b>📋 Что нового</b>\nНичего нового."
         );
         // Written by the agent: its lines, the labels made links again.
-        let written = "AIRC-1808 — долгая загрузка старой сессии: три находки\nЕщё 11 ждут решения с 20 октября";
+        let written = "PROJ-1808 — долгая загрузка старого проекта: три находки\nЕщё 11 ждут решения с 20 октября";
         assert_eq!(
             digest_text(&digest, w, &Spheres::default(), Some(written)),
-            "<b>📋 Что нового</b>\n<a href=\"https://yt.example/issue/AIRC-1808\">AIRC-1808</a> — долгая загрузка старой сессии: три находки\nЕщё 11 ждут решения с 20 октября"
+            "<b>📋 Что нового</b>\n<a href=\"https://yt.example/issue/PROJ-1808\">PROJ-1808</a> — долгая загрузка старого проекта: три находки\nЕщё 11 ждут решения с 20 октября"
         );
         // Its buttons: go through the 13, accept the 2 findings, less often.
         let shown = json!({ "item": { "id": "d1", "kind": "digest" }, "content": digest, "actions": [{ "action": "seen" }] });

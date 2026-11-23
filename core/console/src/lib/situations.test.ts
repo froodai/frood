@@ -12,12 +12,12 @@ describe("titled", () => {
 
   it("takes the first clause of older knowledge, cut at a word", () => {
     const text =
-      "AIRC-1808 (Bug, Chat): a FINISHED session with a long history (1987 records) shows only the projected tail and keeps loading for about 22 minutes; the proposed fix is to attach with session/resume.";
+      "PROJ-1808 (Bug, Docs): a FINISHED project with a long history (1312 records) shows only the first page and keeps loading for about 15 minutes; the proposed fix is to load it in pages.";
     const { title, description } = titled(null, text);
-    expect(title).toBe("AIRC-1808 (Bug, Chat): a FINISHED session with a long history (1987 records)…");
+    expect(title).toBe("PROJ-1808 (Bug, Docs): a FINISHED project with a long history (1312 records)…");
     expect(title.length).toBeLessThanOrEqual(81);
     expect(description).toBe(
-      "…shows only the projected tail and keeps loading for about 22 minutes; the proposed fix is to attach with session/resume.",
+      "…shows only the first page and keeps loading for about 15 minutes; the proposed fix is to load it in pages.",
     );
     expect(titled(null, "Release on Nov 14. Olya owns it.")).toEqual({ title: "Release on Nov 14", description: "Olya owns it." });
     expect(titled(null, "Payments go through one provider; no billing of our own")).toEqual({

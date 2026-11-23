@@ -65,7 +65,7 @@ is appended). Optional; without it the console shows the code to send.
   - `digest` (docs/31): `since`, `until`; `important` — what needs the person whatever its age
     (`id`, `kind`, `why`: `conflict`, `question`, `due`, `failed`; `title`, `label`, `link`);
     `accepted` and `waiting.new` — what is new, one line per issue or page (`ids`, `count`,
-    `kind`, `title` of at most 80 characters, `label` such as `AIRC-1808`, `link` to the
+    `kind`, `title` of at most 80 characters, `label` such as `PROJ-1808`, `link` to the
     original or null, `sphere`); `waiting.count` and `waiting.older` (`count`, `since`) — what
     waited longer, as one line; `due_soon` (`title`, `due`, `sphere`, and `why` — `due_today`,
     `due_tomorrow`, `overdue` — when it is urgent); `accept_ids` — open findings a person may

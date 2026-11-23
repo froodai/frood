@@ -127,13 +127,13 @@ await found(
   {
     kind: "fact",
     sphere: "tech",
-    title: "ATL-142: a finished session loads for 22 minutes",
-    text: "ATL-142 (Bug, Chat): a finished session with a long history (1987 records) shows only the last part and keeps loading for about 22 minutes; the proposed fix is to attach with session/resume instead of session/load. Assigned to Maria.",
+    title: "ATL-142: a finished project loads for 15 minutes",
+    text: "ATL-142 (Bug, Docs): a finished project with a long history (1312 records) shows only the first page and keeps loading for about 15 minutes; the proposed fix is to load it in pages instead of all at once. Assigned to Maria.",
     subjects: [atlas],
   },
-  "Task view: a finished session with a long history shows only the projected tail and keeps loading (ATL-142, created by Oleg)",
+  "Project page: a finished project with a long history shows only the first page and keeps loading (ATL-142, created by Oleg)",
   "https://tracker.example/issue/ATL-142",
-  "ATL-142: Task view keeps loading",
+  "ATL-142: Project page keeps loading",
   "Tracker (ATL): ATL-142 was created today by Oleg, state Submitted, priority Normal, assignee Maria.",
 );
 await found(

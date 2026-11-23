@@ -126,7 +126,7 @@ fn reminder(content: &Value, w: &Words, lines: &mut Vec<String>) {
     lines.push(content["text"].as_str().unwrap_or_default().to_owned());
 }
 
-/// "AIRC-1808 — title (3) https://…": a chat turns the address into a link.
+/// "PROJ-1808 — title (3) https://…": a chat turns the address into a link.
 fn digest_line(entry: &Value) -> String {
     let title = short(entry["title"].as_str().unwrap_or("?"), 110);
     let count = entry["count"].as_u64().unwrap_or(1);
@@ -456,7 +456,7 @@ mod tests {
                 "accepted": [{ "title": "Release moved to Nov 28", "count": 1 }],
                 "waiting": {
                     "count": 12,
-                    "new": [{ "title": "old session loads for 22 minutes", "label": "AIRC-1808", "link": "https://yt.example/issue/AIRC-1808", "count": 3 }],
+                    "new": [{ "title": "old project loads for 15 minutes", "label": "PROJ-1808", "link": "https://yt.example/issue/PROJ-1808", "count": 3 }],
                     "older": { "count": 11, "since": "2026-10-20T08:00:00Z" }
                 },
                 "due_soon": [{ "title": "Send the report", "due": "2026-11-14" }]
@@ -469,7 +469,7 @@ mod tests {
             "{message}"
         );
         assert!(message.contains("- Release moved to Nov 28"), "{message}");
-        assert!(message.contains("- AIRC-1808 — old session loads for 22 minutes (3) https://yt.example/issue/AIRC-1808"), "{message}");
+        assert!(message.contains("- PROJ-1808 — old project loads for 15 minutes (3) https://yt.example/issue/PROJ-1808"), "{message}");
         assert!(
             message.contains("11 have waited for your decision since 20.10"),
             "{message}"
@@ -481,11 +481,11 @@ mod tests {
         assert!(!message.contains(w.reply_hint), "{message}");
         assert!(choices(&shown).is_empty());
         let mut written = shown.clone();
-        written["item"]["investigation"] = json!({ "state": "done", "report": "AIRC-1808 — the old session loads slowly\n11 more wait" });
+        written["item"]["investigation"] = json!({ "state": "done", "report": "PROJ-1808 — the old project loads slowly\n11 more wait" });
         assert_eq!(
             text(&written, None, w),
             format!(
-                "{}\nAIRC-1808 — the old session loads slowly\n11 more wait",
+                "{}\nPROJ-1808 — the old project loads slowly\n11 more wait",
                 w.digest
             )
         );

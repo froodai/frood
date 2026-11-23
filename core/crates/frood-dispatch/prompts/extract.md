@@ -10,7 +10,7 @@ One assertion states one thing. "Olya will ship 2.4 on Nov 14 and Ivan owns the 
 
 Write the text of each assertion in the language of the source — a Russian note gives Russian assertions — short and self-contained: a reader should understand it without the source. Name people and projects as the source does, in its script ("Оля", not "Olya").
 
-Give each assertion a `title`: a headline of a few words, under 80 characters, that a person scanning a list reads first — what it is about and the gist ("Релиз 2.4 — 14 ноября", "AIRC-1808: завершённая сессия грузится 22 минуты"). The `text` under it says the rest.
+Give each assertion a `title`: a headline of a few words, under 80 characters, that a person scanning a list reads first — what it is about and the gist ("Релиз 2.4 — 14 ноября", "PROJ-1808: завершённый проект грузится 15 минут"). The `text` under it says the rest.
 
 ## Kinds and modality
 
