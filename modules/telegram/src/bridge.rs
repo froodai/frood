@@ -1,4 +1,4 @@
-//! The link between two installations at work (docs/34 §4 W4): the polling side routes each
+//! The link between two installations at work (docs/34 §5 W4): the polling side routes each
 //! update, forwards the other side's at once and retries while it does not answer; the
 //! forwarded side takes them on `channels.link@1` and serves the hashes of its work words.
 //! What is forwarded is never stored, logged with its text or sent to this installation's
@@ -13,6 +13,11 @@ use serde_json::{Value, json};
 
 use crate::Bot;
 use crate::link::{self, Decision, HOLD_FOR, Link, Memory, Mode, Place, TOKEN_HEADER};
+
+/// At most this many messages wait for «Personal or Work?»; a new one pushes out the oldest.
+const HELD_AT_MOST: usize = 100;
+/// At most this many updates wait for the other side while it is away; more are not kept.
+const OUTBOX_AT_MOST: usize = 500;
 
 /// Entity types whose names make the work list (the extractor's types, docs/11).
 const ENTITY_TYPES: [&str; 9] = [
@@ -36,6 +41,8 @@ pub(crate) struct Linked {
     /// The forwarded side's learned work words, plain (they are its own).
     learned: Mutex<HashSet<String>>,
     outbox: Mutex<VecDeque<Pending>>,
+    /// The author was told the outbox is full; said again only after a delivery.
+    told_full: std::sync::atomic::AtomicBool,
     wake: tokio::sync::Notify,
     /// The first wait before forwarding again; it doubles up to `retry_max`.
     pub(crate) retry_first: Duration,
@@ -80,6 +87,7 @@ impl Linked {
             held: Mutex::default(),
             learned: Mutex::new(learned),
             outbox: Mutex::default(),
+            told_full: std::sync::atomic::AtomicBool::new(false),
             wake: tokio::sync::Notify::new(),
             retry_first: Duration::from_secs(2),
             retry_max: Duration::from_secs(120),
@@ -181,9 +189,32 @@ impl Bot {
         }
     }
 
-    /// Queues an update for the other side; the outbox sends it at once if it can.
+    /// Queues an update for the other side; the outbox sends it at once if it can. While the
+    /// other side is away the outbox is bounded: past `OUTBOX_AT_MOST` an update is dropped,
+    /// and the author is told once.
     fn forward(&self, update: Value, learn: bool) {
         let linked = self.bridge();
+        let full = linked.outbox.lock().expect("outbox").len() >= OUTBOX_AT_MOST;
+        if full {
+            use std::sync::atomic::Ordering;
+            let chat = chat_of(&update);
+            let query = update
+                .pointer("/callback_query/id")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            let said = self.lang.link().full.replace("{name}", &linked.link.there);
+            let tell = !linked.told_full.swap(true, Ordering::SeqCst);
+            let bot = self.clone();
+            tokio::spawn(async move {
+                if let Some(query) = query {
+                    bot.answer_query(&query, &said).await;
+                }
+                if tell && let Some(chat) = chat {
+                    bot.say(chat, &said).await;
+                }
+            });
+            return;
+        }
         let pending = Pending {
             chat: chat_of(&update),
             query: update
@@ -237,6 +268,9 @@ impl Bot {
                     linked.outbox.lock().expect("outbox").pop_front();
                     wait = linked.retry_first;
                     told = false;
+                    linked
+                        .told_full
+                        .store(false, std::sync::atomic::Ordering::SeqCst);
                 }
                 Err(Failure::Refused(status)) => {
                     linked.outbox.lock().expect("outbox").pop_front();
@@ -283,16 +317,18 @@ impl Bot {
     pub(crate) async fn refresh_words(&self) {
         loop {
             match self.post_link(&json!({ "op": "words" })).await {
-                Ok(answer) => {
-                    let hashes: HashSet<String> = answer["hashes"]
-                        .as_array()
-                        .into_iter()
-                        .flatten()
-                        .filter_map(Value::as_str)
-                        .map(str::to_owned)
-                        .collect();
-                    self.bridge().memory.lock().expect("memory").work = hashes;
-                }
+                // An answer without the list keeps the last one, as a failure does.
+                Ok(answer) => match answer["hashes"].as_array() {
+                    Some(hashes) => {
+                        let hashes: HashSet<String> = hashes
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .map(str::to_owned)
+                            .collect();
+                        self.bridge().memory.lock().expect("memory").work = hashes;
+                    }
+                    None => tracing::warn!("the work words came without a list; keeping the last"),
+                },
                 Err(Failure::Transient(err)) => {
                     tracing::warn!(error = %err, "cannot ask for the work words; keeping the last list")
                 }
@@ -359,15 +395,38 @@ impl Bot {
         if let Some(id) = update.pointer("/message/message_id") {
             body["reply_parameters"] = json!({ "message_id": id });
         }
-        linked.held.lock().expect("held").insert(
-            key.clone(),
-            Held {
-                update,
-                chat,
-                question: None,
-                at: Instant::now(),
-            },
-        );
+        // Bounded: past `HELD_AT_MOST` the oldest waiting message is let go.
+        let pushed_out = {
+            let mut held = linked.held.lock().expect("held");
+            let oldest = (held.len() >= HELD_AT_MOST)
+                .then(|| {
+                    held.iter()
+                        .min_by_key(|(_, h)| h.at)
+                        .map(|(k, _)| k.clone())
+                })
+                .flatten();
+            let pushed_out = oldest.and_then(|k| held.remove(&k));
+            held.insert(
+                key.clone(),
+                Held {
+                    update,
+                    chat,
+                    question: None,
+                    at: Instant::now(),
+                },
+            );
+            pushed_out
+        };
+        if let Some(old) = pushed_out
+            && let Some(question) = old.question
+        {
+            let _ = self
+                .telegram_plain(
+                    "editMessageText",
+                    json!({ "chat_id": old.chat, "message_id": question, "text": self.lang.link().gone }),
+                )
+                .await;
+        }
         let question = self
             .telegram_plain("sendMessage", body)
             .await
@@ -386,7 +445,19 @@ impl Bot {
             .pointer("/callback_query/id")
             .and_then(Value::as_str)
             .unwrap_or_default();
-        let Some(held) = linked.held.lock().expect("held").remove(key) else {
+        // Only the author of the held message answers for it: callback data comes from the
+        // client, and the keys are easy to guess.
+        let by = press
+            .pointer("/callback_query/from/id")
+            .and_then(Value::as_i64);
+        let taken = {
+            let mut held = linked.held.lock().expect("held");
+            let theirs = held.get(key).is_some_and(|h| {
+                by.is_some() && h.update.pointer("/message/from/id").and_then(Value::as_i64) == by
+            });
+            if theirs { held.remove(key) } else { None }
+        };
+        let Some(held) = taken else {
             self.answer_query(query, l.gone).await;
             return;
         };
@@ -412,7 +483,20 @@ impl Bot {
             .insert(held.chat, (place, Instant::now()));
         let words = link::distinctive(text_of(&held.update));
         match place {
-            Place::There => self.forward(held.update, true),
+            Place::There => {
+                // Words once called personal are work now: this side lets them go.
+                {
+                    let mut memory = linked.memory.lock().expect("memory");
+                    let before = memory.personal.len();
+                    for word in &words {
+                        memory.personal.remove(word);
+                    }
+                    if memory.personal.len() != before {
+                        link::save_words(linked.link.state_dir.as_ref(), &memory.personal);
+                    }
+                }
+                self.forward(held.update, true)
+            }
             Place::Here => {
                 {
                     let mut memory = linked.memory.lock().expect("memory");
@@ -516,10 +600,14 @@ impl Bot {
                     hashes.dedup();
                     (StatusCode::OK, json!({ "hashes": hashes }))
                 }
-                Err(err) => (
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    json!({ "detail": err, "retryable": true }),
-                ),
+                // The reason stays here: it can name this installation's inner addresses.
+                Err(err) => {
+                    tracing::warn!(error = %err, "cannot read the work words");
+                    (
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        json!({ "detail": "the work words cannot be read now", "retryable": true }),
+                    )
+                }
             },
             Some("forget") => {
                 let hashes: HashSet<&str> = body["hashes"]
@@ -1038,6 +1126,125 @@ mod tests {
             .unwrap();
         assert!(!forget.to_string().contains("лиз"), "{forget}");
         deliver.abort();
+    }
+
+    #[tokio::test]
+    async fn only_the_author_answers_and_an_answer_can_turn_a_personal_word_to_work() {
+        let (url, world) = world().await;
+        let (work_url, work) = work().await;
+        work.up.store(true, Ordering::SeqCst);
+        let me = personal(&url, &work_url);
+        let deliver = {
+            let me = me.clone();
+            tokio::spawn(async move { me.deliver().await })
+        };
+        me.bridge()
+            .memory
+            .lock()
+            .unwrap()
+            .personal
+            .insert("мариной".into());
+        // «мариной» is personal, so a message with it stays here; one without it is asked.
+        me.route(update("Созвон с Ниной перенесли"));
+        until(|| !world.lock().unwrap().sent.is_empty()).await;
+        let there =
+            world.lock().unwrap().sent[0]["reply_markup"]["inline_keyboard"][0][1]["callback_data"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+        let press = |from: i64| {
+            json!({ "update_id": 2, "callback_query": { "id": format!("q-{from}"), "from": { "id": from }, "data": there,
+            "message": { "message_id": 900, "chat": { "id": from } } } })
+        };
+        // Someone else presses (or makes up) the same data: the message stays held.
+        me.route(press(99));
+        until(|| world.lock().unwrap().answered.len() == 1).await;
+        assert_eq!(
+            world.lock().unwrap().answered[0]["text"],
+            "Этот вопрос уже не действует, пришлите сообщение ещё раз."
+        );
+        assert_eq!(me.bridge().held.lock().unwrap().len(), 1);
+        assert!(work.got.lock().unwrap().is_empty());
+        // The author answers «Работа».
+        me.bridge()
+            .held
+            .lock()
+            .unwrap()
+            .values_mut()
+            .for_each(|h| h.update["message"]["text"] = json!("Созвон с Мариной перенесли"));
+        me.route(press(42));
+        until(|| !work.got.lock().unwrap().is_empty()).await;
+        assert!(
+            !me.bridge()
+                .memory
+                .lock()
+                .unwrap()
+                .personal
+                .contains("мариной"),
+            "a word the author now sends to work is not personal any more"
+        );
+        deliver.abort();
+    }
+
+    #[tokio::test]
+    async fn what_waits_in_memory_is_bounded() {
+        let (url, world) = world().await;
+        let me = personal(&url, "http://127.0.0.1:1");
+        // Questions: past the bound the oldest is let go, and its question says so.
+        for n in 0..=HELD_AT_MOST {
+            let mut one = update("что-то неясное");
+            one["message"]["message_id"] = json!(n);
+            me.route(one);
+            until(|| world.lock().unwrap().sent.len() == n + 1).await;
+        }
+        until(|| !world.lock().unwrap().edited.is_empty()).await;
+        assert_eq!(me.bridge().held.lock().unwrap().len(), HELD_AT_MOST);
+        assert_eq!(
+            world.lock().unwrap().edited[0]["text"],
+            "Этот вопрос уже не действует, пришлите сообщение ещё раз."
+        );
+        // The outbox, while the other side is away (nothing delivers here).
+        for _ in 0..OUTBOX_AT_MOST + 3 {
+            me.forward(update("PROJ-1"), false);
+        }
+        assert_eq!(me.waiting(), OUTBOX_AT_MOST);
+        let full = "«Работа» давно не отвечает, и сообщений в очереди слишком много: это не сохранено. Пришлите его позже.";
+        until(|| world.lock().unwrap().sent.iter().any(|s| s["text"] == full)).await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let told = world
+            .lock()
+            .unwrap()
+            .sent
+            .iter()
+            .filter(|s| s["text"] == full)
+            .count();
+        assert_eq!(told, 1, "said once");
+    }
+
+    #[tokio::test]
+    async fn an_answer_without_the_list_keeps_the_last_work_words() {
+        let (url, _world) = world().await;
+        let app = Router::new().route(
+            "/v1/channels/telegram/link",
+            post(|| async { (StatusCode::OK, Json(json!({ "accepted": true }))) }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let work_url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let me = personal(&url, &work_url);
+        me.bridge()
+            .memory
+            .lock()
+            .unwrap()
+            .work
+            .insert(link::hash(TOKEN, "proj"));
+        let refresh = {
+            let me = me.clone();
+            tokio::spawn(async move { me.refresh_words().await })
+        };
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(me.bridge().memory.lock().unwrap().work.len(), 1);
+        refresh.abort();
     }
 
     #[tokio::test]

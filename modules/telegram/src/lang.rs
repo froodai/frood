@@ -1537,6 +1537,8 @@ pub(crate) struct LinkTexts {
     pub(crate) later: &'static str,
     /// The other installation refused, e.g. a wrong link token; `{status}` is its answer.
     pub(crate) refused: &'static str,
+    /// The other installation has been away long, and too much waits for it: this one is lost.
+    pub(crate) full: &'static str,
 }
 
 impl Lang {
@@ -1564,6 +1566,7 @@ static EN_LINK: LinkTexts = LinkTexts {
     switched: "Next messages go to {name}.",
     later: "{name} does not answer now. I will deliver it when it does; if the bot restarts before that, the message is lost.",
     refused: "{name} does not take messages ({status}). Check the link token.",
+    full: "{name} has not answered for a long time and too many messages wait for it: this one is not kept. Send it again later.",
 };
 
 static ZH_LINK: LinkTexts = LinkTexts {
@@ -1576,6 +1579,7 @@ static ZH_LINK: LinkTexts = LinkTexts {
     switched: "接下来的消息发往 {name}。",
     later: "{name} 暂时没有响应。它恢复后我会送达；如果在此之前机器人重启，消息会丢失。",
     refused: "{name} 不接收消息（{status}）。请检查链接令牌。",
+    full: "{name} 很久没有响应，等待的消息太多：这条消息没有保存。请稍后重新发送。",
 };
 
 static ES_LINK: LinkTexts = LinkTexts {
@@ -1588,6 +1592,7 @@ static ES_LINK: LinkTexts = LinkTexts {
     switched: "Los próximos mensajes van a {name}.",
     later: "{name} no responde ahora. Lo entregaré cuando responda; si el bot se reinicia antes, el mensaje se pierde.",
     refused: "{name} no acepta mensajes ({status}). Revisa el token del enlace.",
+    full: "{name} lleva mucho sin responder y hay demasiado esperando: este mensaje no se guarda. Envíalo de nuevo más tarde.",
 };
 
 static HI_LINK: LinkTexts = LinkTexts {
@@ -1600,6 +1605,7 @@ static HI_LINK: LinkTexts = LinkTexts {
     switched: "अगले संदेश {name} में जाएंगे।",
     later: "{name} अभी जवाब नहीं दे रहा। जवाब देते ही पहुंचा दूंगा; अगर उससे पहले बॉट फिर से शुरू हुआ, तो संदेश खो जाएगा।",
     refused: "{name} संदेश नहीं ले रहा ({status})। लिंक टोकन जांचें।",
+    full: "{name} बहुत देर से जवाब नहीं दे रहा और बहुत कुछ इंतज़ार में है: यह संदेश नहीं रखा गया। बाद में फिर से भेजें।",
 };
 
 static AR_LINK: LinkTexts = LinkTexts {
@@ -1612,6 +1618,7 @@ static AR_LINK: LinkTexts = LinkTexts {
     switched: "الرسائل التالية تذهب إلى {name}.",
     later: "{name} لا يستجيب الآن. سأوصلها عندما يستجيب؛ وإذا أُعيد تشغيل البوت قبل ذلك فستضيع الرسالة.",
     refused: "{name} لا يقبل الرسائل ({status}). تحقق من رمز الربط.",
+    full: "{name} لا يستجيب منذ مدة وهناك الكثير بانتظاره: لم تُحفظ هذه الرسالة. أرسلها مرة أخرى لاحقًا.",
 };
 
 static FR_LINK: LinkTexts = LinkTexts {
@@ -1624,6 +1631,7 @@ static FR_LINK: LinkTexts = LinkTexts {
     switched: "Les prochains messages vont à {name}.",
     later: "{name} ne répond pas pour l'instant. Je le livrerai dès qu'il répond ; si le bot redémarre avant, le message est perdu.",
     refused: "{name} refuse les messages ({status}). Vérifiez le jeton du lien.",
+    full: "{name} ne répond plus depuis longtemps et trop de messages attendent : celui-ci n'est pas gardé. Renvoyez-le plus tard.",
 };
 
 static PT_LINK: LinkTexts = LinkTexts {
@@ -1636,6 +1644,7 @@ static PT_LINK: LinkTexts = LinkTexts {
     switched: "As próximas mensagens vão para {name}.",
     later: "{name} não responde agora. Entrego quando responder; se o bot reiniciar antes, a mensagem se perde.",
     refused: "{name} não aceita mensagens ({status}). Verifique o token do link.",
+    full: "{name} não responde há muito tempo e há coisas demais esperando: esta mensagem não foi guardada. Envie de novo mais tarde.",
 };
 
 static RU_LINK: LinkTexts = LinkTexts {
@@ -1648,6 +1657,7 @@ static RU_LINK: LinkTexts = LinkTexts {
     switched: "Следующие сообщения пойдут в «{name}».",
     later: "«{name}» сейчас не отвечает. Доставлю, когда ответит; если бот перезапустится раньше, сообщение пропадёт.",
     refused: "«{name}» не принимает сообщения ({status}). Проверьте токен связи.",
+    full: "«{name}» давно не отвечает, и сообщений в очереди слишком много: это не сохранено. Пришлите его позже.",
 };
 
 #[cfg(test)]

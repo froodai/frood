@@ -1,4 +1,4 @@
-//! One bot for two installations (docs/34 §3 QW4, §4 W4). Telegram gives a bot's updates to
+//! One bot for two installations (docs/34 §3 QW4, §5 W4). Telegram gives a bot's updates to
 //! one poller only, so one side polls (`mode: poll`, the personal Frood) and forwards the other
 //! side's updates to it; the other side (`mode: forwarded`, the work Frood) never polls and
 //! takes them on `channels.link@1`, which its core relays from
@@ -45,8 +45,9 @@ pub(crate) enum Mode {
     Forwarded,
 }
 
-/// The link's settings (`label`, `link` and `state_dir` in the module's config).
-#[derive(Clone, Debug)]
+/// The link's settings (`label`, `link` and `state_dir` in the module's config). Its `Debug`
+/// leaves the token out.
+#[derive(Clone)]
 pub(crate) struct Link {
     pub(crate) mode: Mode,
     /// This installation's label.
@@ -62,6 +63,21 @@ pub(crate) struct Link {
     pub(crate) words: Vec<String>,
     /// Where learned words are kept across restarts; memory only without it.
     pub(crate) state_dir: Option<PathBuf>,
+}
+
+impl std::fmt::Debug for Link {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Link")
+            .field("mode", &self.mode)
+            .field("here", &self.here)
+            .field("there", &self.there)
+            .field("url", &self.url)
+            .field("channel", &self.channel)
+            .field("token", &"<hidden>")
+            .field("words", &self.words.len())
+            .field("state_dir", &self.state_dir)
+            .finish()
+    }
 }
 
 /// Where a message goes, as the polling side sees it.
@@ -391,7 +407,27 @@ impl Link {
         if let Some(query) = update.get("callback_query") {
             let data = query["data"].as_str().unwrap_or_default();
             if data.starts_with(MARK) {
-                return Decision::There;
+                // Callback data comes from the client, so a mark alone is not trusted: a press
+                // on this side's own message stays here, where the marked data means nothing.
+                // Telegram sends the message with its current buttons; an old message may
+                // come without them, then its label tells.
+                let message = &query["message"];
+                let buttons = message.pointer("/reply_markup/inline_keyboard").map(marked);
+                let ours = match buttons {
+                    Some(marked) => !marked,
+                    None => {
+                        message["text"]
+                            .as_str()
+                            .or(message["caption"].as_str())
+                            .and_then(|t| self.labelled(t))
+                            == Some(Place::Here)
+                    }
+                };
+                return if ours {
+                    Decision::Here
+                } else {
+                    Decision::There
+                };
             }
             let mut parts = data.splitn(3, ':');
             return match (parts.next(), parts.next(), parts.next()) {
@@ -416,15 +452,7 @@ impl Link {
             let text = replied["text"].as_str().or(replied["caption"].as_str());
             let marked = replied
                 .pointer("/reply_markup/inline_keyboard")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-                .flat_map(|row| row.as_array().cloned().unwrap_or_default())
-                .any(|b| {
-                    b["callback_data"]
-                        .as_str()
-                        .is_some_and(|d| d.starts_with(MARK))
-                });
+                .is_some_and(marked);
             let place = text
                 .and_then(|t| self.labelled(t))
                 .or(marked.then_some(Place::There));
@@ -450,7 +478,7 @@ impl Link {
                 Place::There => Decision::There,
             };
         }
-        // Commands, each decided once (docs/34 §4 W4).
+        // Commands, each decided once (docs/34 §5 W4).
         if field == "text" && text.starts_with('/') {
             let mut parts = text.split_whitespace();
             let command = parts.next().unwrap_or_default();
@@ -485,6 +513,21 @@ impl Link {
         // 6. Not sure: ask.
         Decision::Ask
     }
+}
+
+/// Whether an inline keyboard has a button of the forwarded side.
+fn marked(keyboard: &Value) -> bool {
+    keyboard
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_array)
+        .flatten()
+        .any(|b| {
+            b["callback_data"]
+                .as_str()
+                .is_some_and(|d| d.starts_with(MARK))
+        })
 }
 
 /// The forwarded side marks its buttons, so the polling side forwards a press unread.
@@ -535,13 +578,18 @@ pub(crate) fn unmark(update: &mut Value) {
             }
         }
     }
-    // A link code from the other side's console: `/start l-CODE`.
+    // A link code from the other side's console: `/start l-CODE` or `/link l-CODE`. Other
+    // text is the author's and stays as it is.
     if let Some(text) = update.pointer_mut("/message/text")
         && let Some(s) = text.as_str()
     {
         let mut parts = s.splitn(2, ' ');
         let (command, rest) = (parts.next().unwrap_or_default(), parts.next());
-        if let Some(code) = rest.and_then(|r| r.trim().strip_prefix(START)) {
+        let linking = matches!(
+            command.split('@').next().unwrap_or_default(),
+            "/start" | "/link"
+        );
+        if linking && let Some(code) = rest.and_then(|r| r.trim().strip_prefix(START)) {
             *text = Value::String(format!("{command} {code}"));
         }
     }
@@ -562,9 +610,13 @@ pub(crate) fn save_words(dir: Option<&PathBuf>, words: &HashSet<String>) {
     let mut sorted: Vec<&String> = words.iter().collect();
     sorted.sort();
     let path = dir.join("link-words.json");
+    // Written aside and renamed, so a crash mid-write does not leave a file that reads as
+    // nothing learned.
+    let aside = dir.join("link-words.json.new");
     let written = serde_json::to_vec(&sorted)
         .map_err(|e| e.to_string())
-        .and_then(|bytes| std::fs::write(&path, bytes).map_err(|e| e.to_string()));
+        .and_then(|bytes| std::fs::write(&aside, bytes).map_err(|e| e.to_string()))
+        .and_then(|()| std::fs::rename(&aside, &path).map_err(|e| e.to_string()));
     if let Err(err) = written {
         tracing::warn!(error = %err, "cannot keep the learned words; they stay in memory");
     }
@@ -707,6 +759,18 @@ mod tests {
     }
 
     #[test]
+    fn learned_words_are_kept_whole_and_debug_hides_the_token() {
+        let dir = std::env::temp_dir().join(format!("frood-link-words-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let words: HashSet<String> = ["лизой".to_owned(), "дача".to_owned()].into();
+        save_words(Some(&dir), &words);
+        assert_eq!(load_words(Some(&dir)), words);
+        assert!(!dir.join("link-words.json.new").exists());
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(!format!("{:?}", link()).contains(TOKEN));
+    }
+
+    #[test]
     fn secrets_compare_whole() {
         assert!(same_secret(TOKEN, TOKEN));
         assert!(!same_secret(TOKEN, &TOKEN.replace('f', "e")));
@@ -824,6 +888,30 @@ mod tests {
             link.decide(&mut press("i:item:0"), &mut memory, now),
             Decision::Here
         );
+        // A mark the client made up on this side's own message is not forwarded: the message
+        // it was pressed on has plain buttons, or this side's label.
+        let on = |data: &str, message: Value| json!({ "update_id": 2, "callback_query": { "id": "q", "data": data, "message": message } });
+        let plain = json!({ "message_id": 9, "text": "Личное\nЗаметка", "reply_markup": { "inline_keyboard": [[{ "text": "Undo", "callback_data": "s:src-1" }]] } });
+        assert_eq!(
+            link.decide(&mut on("~s:src-1", plain), &mut memory, now),
+            Decision::Here
+        );
+        let mine = json!({ "message_id": 9, "text": "Личное\nЗаметка" });
+        assert_eq!(
+            link.decide(&mut on("~s:src-1", mine), &mut memory, now),
+            Decision::Here
+        );
+        let work = json!({ "message_id": 9, "text": "Работа\nКарточка", "reply_markup": { "inline_keyboard": [[{ "text": "OK", "callback_data": "~i:item:0" }]] } });
+        assert_eq!(
+            link.decide(&mut on("~i:item:0", work), &mut memory, now),
+            Decision::There
+        );
+        let old = json!({ "message_id": 9, "chat": { "id": 77 }, "date": 0 });
+        assert_eq!(
+            link.decide(&mut on("~i:item:0", old), &mut memory, now),
+            Decision::There,
+            "an old message without its buttons or text"
+        );
         assert_eq!(
             link.decide(&mut press("r:t:k1"), &mut memory, now),
             Decision::Answer(Place::There, "k1".into())
@@ -854,5 +942,12 @@ mod tests {
         let mut start = json!({ "message": { "text": "/start l-K7M2QX9P" } });
         unmark(&mut start);
         assert_eq!(start["message"]["text"], "/start K7M2QX9P");
+        let mut link = json!({ "message": { "text": "/link@frood_bot l-K7M2QX9P" } });
+        unmark(&mut link);
+        assert_eq!(link["message"]["text"], "/link@frood_bot K7M2QX9P");
+        // Only a link command loses the mark: the author's text stays whole.
+        let mut text = json!({ "message": { "text": "see l-value in PROJ-1" } });
+        unmark(&mut text);
+        assert_eq!(text["message"]["text"], "see l-value in PROJ-1");
     }
 }
