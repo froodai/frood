@@ -136,16 +136,18 @@ enum Key {
 }
 
 impl Key {
-    /// The key to send; `fresh` runs the helper again even if its last key is recent.
-    async fn get(&self, fresh: bool) -> Result<String> {
+    /// The key to send. `rejected`, the key the provider just refused, runs the helper again
+    /// even if that key is recent, unless another call has renewed it meanwhile: requests that
+    /// fail together run the helper once, not once each.
+    async fn get(&self, rejected: Option<&str>) -> Result<String> {
         let (command, cached) = match self {
             Self::Fixed(key) => return Ok(key.clone()),
             Self::Helper { command, cached } => (command, cached),
         };
         let mut cached = cached.lock().await;
-        if !fresh
-            && let Some((key, at)) = cached.as_ref()
+        if let Some((key, at)) = cached.as_ref()
             && at.elapsed() < HELPER_TTL
+            && rejected != Some(key.as_str())
         {
             return Ok(key.clone());
         }
@@ -309,14 +311,14 @@ impl Gateway {
         request: impl Fn(&str) -> reqwest::RequestBuilder,
         body: &Value,
     ) -> Result<Value> {
-        let key = endpoint.key.get(false).await?;
+        let key = endpoint.key.get(None).await?;
         let mut response = request(&key)
             .json(body)
             .send()
             .await
             .map_err(|e| LlmError::Network(e.to_string()))?;
         if response.status() == reqwest::StatusCode::UNAUTHORIZED && endpoint.key.renewable() {
-            let key = endpoint.key.get(true).await?;
+            let key = endpoint.key.get(Some(&key)).await?;
             response = request(&key)
                 .json(body)
                 .send()
@@ -857,6 +859,28 @@ mod tests {
             text.contains("not logged in") && !text.contains("secret-ish"),
             "{text}"
         );
+    }
+
+    #[tokio::test]
+    async fn a_rejected_key_is_renewed_once_for_all_who_had_it() {
+        let counter = std::env::temp_dir().join(format!("frood-key-renew-{}", std::process::id()));
+        let _ = std::fs::remove_file(&counter);
+        let key = Key::Helper {
+            command: format!(
+                "n=$(cat '{0}' 2>/dev/null || echo 0); n=$((n+1)); echo $n > '{0}'; echo key-$n",
+                counter.display()
+            ),
+            cached: Arc::default(),
+        };
+        assert_eq!(key.get(None).await.unwrap(), "key-1");
+        // Two requests sent with key-1 are refused: the first renews it, the second gets the
+        // new key without running the helper again.
+        assert_eq!(key.get(Some("key-1")).await.unwrap(), "key-2");
+        assert_eq!(key.get(Some("key-1")).await.unwrap(), "key-2");
+        // A key that is refused again is renewed again.
+        assert_eq!(key.get(Some("key-2")).await.unwrap(), "key-3");
+        assert_eq!(std::fs::read_to_string(&counter).unwrap().trim(), "3");
+        let _ = std::fs::remove_file(&counter);
     }
 
     #[test]
