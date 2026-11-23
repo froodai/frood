@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useI18n } from "@/i18n";
 import { en, type Key } from "@/i18n/en";
-import { api, BASE, telegramSignIn } from "@/lib/frood";
+import { api, BASE, miniLink, telegramSignIn } from "@/lib/frood";
 import { useInbox, waiting } from "@/lib/queries";
 import { headline, proposal, TONE, titled, typeOf } from "@/lib/situations";
 import { type Stalled, useStalledText } from "@/lib/stalled";
@@ -21,7 +21,7 @@ import type { Assertion, InboxEntry, SearchHit } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { type Act, Detail, useAct, useUndo } from "@/pages/Inbox";
 import { History } from "@/pages/Knowledge";
-import { feel, startTelegram, tg } from "./telegram";
+import { feel, otherMiniApp, startTelegram, tg } from "./telegram";
 
 const router = createBrowserRouter(
   [
@@ -177,6 +177,7 @@ function Home() {
 
   return (
     <>
+      <Switcher />
       <SearchField value="" />
       {digest && <DigestCard entry={digest} open={new Set(all.map((e) => e.item.id))} />}
       <section className="flex flex-col gap-2">
@@ -199,6 +200,43 @@ function Home() {
         )}
       </section>
     </>
+  );
+}
+
+/**
+ * One bot for two installations (docs/34 W4): «Личное / Работа» at the top. The other side
+ * opens the other installation's Mini App in place, with Telegram's launch data in the hash;
+ * that installation checks it and serves its own data.
+ */
+function Switcher() {
+  const link = miniLink();
+  const app = tg();
+  if (!link || !app) return null;
+  const here = { label: link.here, current: true };
+  const there = { label: link.there, current: false };
+  const sides = link.here_first ? [here, there] : [there, here];
+  const go = () => {
+    feel("select");
+    location.assign(otherMiniApp(link.there_url, app));
+  };
+  return (
+    <div role="tablist" className="grid grid-cols-2 gap-1 rounded-xl border bg-card p-1">
+      {sides.map((side) => (
+        <button
+          key={side.label}
+          type="button"
+          role="tab"
+          aria-selected={side.current}
+          onClick={side.current ? undefined : go}
+          className={cn(
+            "rounded-lg px-3 py-1.5 text-sm font-medium",
+            side.current ? "bg-primary text-primary-foreground" : "text-muted-foreground",
+          )}
+        >
+          {side.label}
+        </button>
+      ))}
+    </div>
   );
 }
 

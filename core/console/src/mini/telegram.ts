@@ -27,6 +27,9 @@ export type WebApp = {
   };
   colorScheme: "light" | "dark";
   themeParams: Record<string, string | undefined>;
+  /** The Bot API version the client supports, and the client (`ios`, `android`, `tdesktop`…). */
+  version?: string;
+  platform?: string;
   ready: () => void;
   expand: () => void;
   openLink: (url: string) => void;
@@ -107,6 +110,27 @@ export function startTelegram(app: WebApp) {
     event.preventDefault();
     app.openLink(link.href);
   });
+}
+
+/**
+ * One bot for two installations (docs/34 W4): the other installation's Mini App is opened in
+ * place, and Telegram's script there reads the launch data from the address's hash, as it does
+ * when Telegram opens a Mini App. The launch data is signed by Telegram for the bot, so the
+ * other installation checks it itself; nothing passes through this one's server.
+ */
+export function launchHash(app: Pick<WebApp, "initData" | "version" | "platform" | "themeParams">): string {
+  const pairs: [string, string][] = [
+    ["tgWebAppData", app.initData],
+    ["tgWebAppVersion", app.version ?? "6.0"],
+    ["tgWebAppPlatform", app.platform ?? "unknown"],
+    ["tgWebAppThemeParams", JSON.stringify(app.themeParams ?? {})],
+  ];
+  return pairs.map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&");
+}
+
+/** The other installation's Mini App at `url`, opened with this launch's data. */
+export function otherMiniApp(url: string, app: Parameters<typeof launchHash>[0]): string {
+  return `${url.split("#")[0]}#${launchHash(app)}`;
 }
 
 /** A tap that the person should feel: a decision went through, or failed. */

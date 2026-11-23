@@ -16,6 +16,9 @@ const store = window.sessionStorage;
 const DEV_TOKEN: string | undefined = import.meta.env.VITE_FROOD_TOKEN;
 
 type Tokens = { access: string; refresh?: string; scope?: string };
+/** One bot for two installations (docs/34 W4): this one's label, the other's, its Mini App. */
+export type MiniLink = { here: string; there: string; there_url: string; here_first?: boolean };
+const LINK = "mini_link";
 type Metadata = { issuer: string; authorization_endpoint: string; token_endpoint: string };
 
 export class ApiError extends Error {
@@ -61,11 +64,29 @@ export async function telegramSignIn(): Promise<Tokens> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ init_data: initData }),
   });
-  const body = (await r.json().catch(() => ({}))) as { access_token?: string; scope?: string; type?: string; detail?: string };
+  const body = (await r.json().catch(() => ({}))) as {
+    access_token?: string;
+    scope?: string;
+    type?: string;
+    detail?: string;
+    link?: MiniLink;
+  };
   if (!r.ok || !body.access_token) throw new ApiError(r.status, body.type ?? "", body.detail ?? `HTTP ${r.status}`);
   const saved = { access: body.access_token, scope: body.scope };
   store.setItem(TOKENS, JSON.stringify(saved));
+  if (body.link) store.setItem(LINK, JSON.stringify(body.link));
+  else store.removeItem(LINK);
   return saved;
+}
+
+/** The other installation the bot is shared with, as the last Mini App sign-in said. */
+export function miniLink(): MiniLink | null {
+  try {
+    const link = JSON.parse(store.getItem(LINK) ?? "null") as MiniLink | null;
+    return link && link.there_url.startsWith("https://") ? link : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Leaves for the sign-in page; comes back to the console's root, then to `returnTo`. */
