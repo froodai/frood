@@ -31,6 +31,31 @@ modules:
 Then `frood apply`, and `frood link telegram --email you@example.com` gives the code to send
 to the bot.
 
+One bot can serve two installations, e.g. a personal and a work one ([docs/34 §4
+W4](../docs/34_work_installation.md)). The personal side polls and forwards the other side's
+updates; the other side takes them and does not poll. Both share a long random link token:
+
+```yaml
+# The personal installation's frood.yaml: it polls.
+modules:
+  telegram:
+    secrets: [TELEGRAM_BOT_TOKEN, TELEGRAM_LINK_TOKEN]
+    config: { language: ru, link: { name: Работа, url: https://work.example.com } }
+```
+
+```yaml
+# The work installation's frood.yaml: it takes forwarded updates.
+modules:
+  telegram:
+    secrets: [TELEGRAM_BOT_TOKEN, TELEGRAM_LINK_TOKEN]
+    config: { language: ru, link: { mode: forwarded, name: Личное, url: https://me.example.com } }
+```
+
+Each bot message then starts with its installation's label; a reply, a prefix («работа:»), the
+work side's words (sent as HMAC hashes only) or a question with two buttons decide where a
+message goes. Optional: `label`, `state_dir` (where learned words are kept), `link.words`,
+`link.channel`.
+
 ### OpenClaw
 
 ```yaml
