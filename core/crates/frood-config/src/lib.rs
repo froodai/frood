@@ -996,21 +996,32 @@ fn validate_trigger(job: &str, trigger: &Trigger, problems: &mut Vec<String>) {
 }
 
 fn is_loopback_http(url: &str) -> bool {
-    ["http://127.0.0.1", "http://localhost", "http://[::1]"]
-        .iter()
-        .any(|prefix| url.starts_with(prefix))
+    match http_host(url) {
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+        Some(url::Host::Domain(name)) => name == "localhost",
+        None => false,
+    }
+}
+
+/// The host a plain `http://` URL really goes to, as an HTTP client parses it: not fooled by
+/// `user:password@`, a backslash or a host that only starts like a loopback one.
+fn http_host(url: &str) -> Option<url::Host<String>> {
+    let parsed = url::Url::parse(url).ok()?;
+    if parsed.scheme() != "http" {
+        return None;
+    }
+    parsed.host().map(|host| host.to_owned())
 }
 
 /// Plain HTTP to a loopback address or to a service inside the deployment: a host name without
 /// dots, like `team-chat` in Compose, or a Kubernetes Service name (`gateway.my-namespace.svc`,
 /// `….svc.cluster.local`).
 fn is_internal_http(url: &str) -> bool {
-    let Some(rest) = url.strip_prefix("http://") else {
-        return false;
-    };
-    let host = rest.split(['/', ':', '?', '#']).next().unwrap_or_default();
-    let service = !host.is_empty()
-        && (!host.contains('.') || host.ends_with(".svc") || host.ends_with(".svc.cluster.local"));
+    // The parser lowercases names.
+    let service = matches!(http_host(url), Some(url::Host::Domain(name))
+        if !name.is_empty()
+            && (!name.contains('.') || name.ends_with(".svc") || name.ends_with(".svc.cluster.local")));
     is_loopback_http(url) || service
 }
 
@@ -1305,6 +1316,15 @@ jobs:
             ("http://llm-gateway:4000", true),
             ("http://llm-gateway.frood.svc:4000/anthropic", true),
             ("http://llm-gateway.frood.svc.cluster.local", true),
+            ("http://LLM-Gateway.Frood.SVC:4000", true),
+            ("http://[::1]:4000/anthropic", true),
+            // Hosts that only look internal: the request would leave in plain text.
+            ("http://evil.svc.example.com", false),
+            ("http://user:pw@llm-gateway.example.com/anthropic", false),
+            ("http://llm-gateway:4000@llm-gateway.example.com", false),
+            ("http://localhost@llm-gateway.example.com", false),
+            ("http://127.0.0.1.llm-gateway.example.com", false),
+            ("http://llm-gateway.example.com\\@gw.frood.svc", false),
         ] {
             let raw = raw.replace("https://llm-gateway.example.com/anthropic", url);
             match parse(&raw, &secrets()) {
