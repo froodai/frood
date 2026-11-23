@@ -31,7 +31,7 @@ modules:
 Then `frood apply`, and `frood link telegram --email you@example.com` gives the code to send
 to the bot.
 
-One bot can serve two installations, e.g. a personal and a work one ([docs/34 §4
+One bot can serve two installations, e.g. a personal and a work one ([docs/34 §5
 W4](../docs/34_work_installation.md)). The personal side polls and forwards the other side's
 updates; the other side takes them and does not poll. Both share a long random link token:
 
