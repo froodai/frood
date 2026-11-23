@@ -490,12 +490,26 @@ fn validate_work(config: &Config, problems: &mut Vec<String>) {
             Account::ApiKey {
                 provider,
                 secret,
+                api_key_helper,
                 base_url,
                 workspace,
                 ..
             } => {
-                if secret.trim().is_empty() {
-                    problems.push(format!("account {name}: secret is empty"));
+                let given = |v: &Option<String>| v.as_deref().is_some_and(|v| !v.trim().is_empty());
+                match (secret, api_key_helper) {
+                    (Some(_), Some(_)) => problems.push(format!(
+                        "account {name}: set either secret or api_key_helper, not both"
+                    )),
+                    (None, None) => problems.push(format!(
+                        "account {name}: set secret (the key) or api_key_helper (a command that prints it)"
+                    )),
+                    _ if !given(secret) && !given(api_key_helper) => {
+                        problems.push(format!(
+                            "account {name}: {} is empty",
+                            if secret.is_some() { "secret" } else { "api_key_helper" }
+                        ));
+                    }
+                    _ => {}
                 }
                 if let Some(workspace) = workspace
                     && (*provider != ModelProvider::Anthropic || !workspace.starts_with("wrkspc_"))
@@ -505,9 +519,11 @@ fn validate_work(config: &Config, problems: &mut Vec<String>) {
                     ));
                 }
                 if let Some(url) = base_url
-                    && !(url.starts_with("https://") || is_loopback_http(url))
+                    && !(is_url(url, "https://") || is_internal_http(url))
                 {
-                    problems.push(format!("account {name}: base_url must be an https:// URL"));
+                    problems.push(format!(
+                        "account {name}: base_url must be an https:// URL, or http:// to this machine or a service inside the deployment, got {url:?}"
+                    ));
                 }
             }
             Account::Subscription { owner, secret, .. } => {
@@ -608,6 +624,16 @@ fn validate_work(config: &Config, problems: &mut Vec<String>) {
             Some((account, Some(subscription @ Account::Subscription { .. }))) => {
                 validate_subscription_use(name, job, account, subscription, problems);
             }
+            // Codex has nothing like Claude Code's apiKeyHelper: it needs the key itself.
+            Some((
+                account,
+                Some(Account::ApiKey {
+                    api_key_helper: Some(_),
+                    ..
+                }),
+            )) if job.agent.as_deref() == Some("codex") => problems.push(format!(
+                "job {name}: account {account} gets its key from api_key_helper, which only claude-code agents can use; give codex an account with a secret"
+            )),
             _ => {}
         }
         if let Some(runtime) = &job.runtime
@@ -975,14 +1001,24 @@ fn is_loopback_http(url: &str) -> bool {
         .any(|prefix| url.starts_with(prefix))
 }
 
-/// Plain HTTP to a loopback address or to a service inside the deployment (a host name without
-/// dots, like `team-chat` in Compose).
+/// Plain HTTP to a loopback address or to a service inside the deployment: a host name without
+/// dots, like `team-chat` in Compose, or a Kubernetes Service name (`gateway.my-namespace.svc`,
+/// `….svc.cluster.local`).
 fn is_internal_http(url: &str) -> bool {
     let Some(rest) = url.strip_prefix("http://") else {
         return false;
     };
-    let host = rest.split(['/', ':']).next().unwrap_or_default();
-    is_loopback_http(url) || (!host.is_empty() && !host.contains('.'))
+    let host = rest.split(['/', ':', '?', '#']).next().unwrap_or_default();
+    let service = !host.is_empty()
+        && (!host.contains('.') || host.ends_with(".svc") || host.ends_with(".svc.cluster.local"));
+    is_loopback_http(url) || service
+}
+
+/// `scheme` followed by a host.
+fn is_url(url: &str, scheme: &str) -> bool {
+    url.strip_prefix(scheme)
+        .and_then(|rest| rest.split(['/', '?', '#']).next())
+        .is_some_and(|host| !host.is_empty() && !host.contains(char::is_whitespace))
 }
 
 fn is_valid_name(name: &str) -> bool {
@@ -1147,7 +1183,8 @@ search:
             config.accounts["anthropic"],
             Account::ApiKey {
                 provider: ModelProvider::Anthropic,
-                secret: "pw".into(),
+                secret: Some("pw".into()),
+                api_key_helper: None,
                 base_url: None,
                 workspace: Some("wrkspc_01test".into()),
                 budget: None,
@@ -1261,7 +1298,13 @@ jobs:
         for (url, ok) in [
             ("http://llm-gateway.example.com", false),
             ("ftp://llm-gateway.example.com", false),
-            ("http://127.0.0.1:4000", true),
+            ("https://", false),
+            ("llm-gateway.example.com", false),
+            ("http://127.0.0.1:4000/gw/anthropic", true),
+            // A gateway proxy next to Frood: a Compose service or a Kubernetes Service.
+            ("http://llm-gateway:4000", true),
+            ("http://llm-gateway.frood.svc:4000/anthropic", true),
+            ("http://llm-gateway.frood.svc.cluster.local", true),
         ] {
             let raw = raw.replace("https://llm-gateway.example.com/anthropic", url);
             match parse(&raw, &secrets()) {
@@ -1276,6 +1319,61 @@ jobs:
                     );
                 }
                 Err(other) => panic!("expected Invalid, got {other:?}"),
+            }
+        }
+
+        // The key from a command (a gateway's short-lived keys), instead of a secret.
+        let helper = raw.replace(
+            "secret: sk-work,",
+            "api_key_helper: 'gateway-cli print-key',",
+        );
+        match &parse(&helper, &secrets()).unwrap().config.accounts["work"] {
+            Account::ApiKey {
+                secret,
+                api_key_helper,
+                ..
+            } => {
+                assert_eq!(secret, &None);
+                assert_eq!(api_key_helper.as_deref(), Some("gateway-cli print-key"));
+            }
+            other => panic!("expected an api_key account, got {other:?}"),
+        }
+        for (bad, needle) in [
+            (
+                raw.replace(
+                    "secret: sk-work,",
+                    "secret: sk-work, api_key_helper: print-key,",
+                ),
+                "account work: set either secret or api_key_helper, not both",
+            ),
+            (
+                raw.replace("secret: sk-work,", ""),
+                "account work: set secret (the key) or api_key_helper",
+            ),
+            (
+                raw.replace("secret: sk-work,", "api_key_helper: ' ',"),
+                "account work: api_key_helper is empty",
+            ),
+            // Codex takes only a key; the helper is Claude Code's.
+            (
+                helper
+                    .replace(
+                        "work: { kind: api_key, provider: anthropic",
+                        "work: { kind: api_key, provider: openai",
+                    )
+                    .replace(
+                        "agent: claude-code\n    model: claude-sonnet-5-5\n    account: work",
+                        "agent: codex\n    model: gpt-6-luna\n    account: work",
+                    ),
+                "job sweep: account work gets its key from api_key_helper, which only claude-code agents can use",
+            ),
+        ] {
+            match parse(&bad, &secrets()) {
+                Err(ConfigError::Invalid(problems)) => assert!(
+                    problems.iter().any(|p| p.contains(needle)),
+                    "{needle}: {problems:?}"
+                ),
+                other => panic!("{needle}: expected Invalid, got {other:?}"),
             }
         }
         // A subscription has no gateway: it is used only inside the vendor's own agent.

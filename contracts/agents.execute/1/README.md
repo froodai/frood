@@ -62,7 +62,11 @@ sends `resume`.
     the agent's equivalent); `base_url`, when present, is another endpoint with the provider's
     API, such as a company gateway: the root, without `/v1`, as the core uses it for its own
     calls. The agent must send its model requests there (Claude Code: `ANTHROPIC_BASE_URL`;
-    Codex: `OPENAI_BASE_URL` with `/v1`);
+    Codex: `OPENAI_BASE_URL` with `/v1`). Instead of `api_key` there may be `api_key_helper`:
+    a shell command that prints the key, for a gateway's short-lived keys. The agent runs it
+    itself (Claude Code: the `apiKeyHelper` setting, re-run when the key expires or on 401), so
+    it must work inside the agent's image; a runtime whose agent cannot do this (Codex) refuses
+    the run;
   - `{ "kind": "subscription", "provider", "token" }` — a person's subscription, only for that
     person's runs (the core checks). Anthropic: the token from `claude setup-token`, used as
     `CLAUDE_CODE_OAUTH_TOKEN` of an unmodified Claude Code. OpenAI: the contents of

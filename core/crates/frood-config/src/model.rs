@@ -569,8 +569,16 @@ pub enum Account {
     /// A provider API key, paid by use. Belongs to the installation.
     ApiKey {
         provider: ModelProvider,
-        /// The key, e.g. `${secret:ANTHROPIC_API_KEY}`.
-        secret: String,
+        /// The key, e.g. `${secret:ANTHROPIC_API_KEY}`. Exactly one of `secret` and
+        /// `api_key_helper`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        secret: Option<String>,
+        /// A shell command that prints the key, for gateways that hand out short-lived keys
+        /// (like Claude Code's `apiKeyHelper`). Run again after five minutes and when the
+        /// provider answers 401. Agent jobs get it as Claude Code's `apiKeyHelper`, so it must
+        /// work inside the agent's image too.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        api_key_helper: Option<String>,
         /// Another endpoint with the same API (a proxy, a company gateway or a compatible
         /// service), the root without `/v1`. Agent jobs on this account go there too.
         #[serde(default, skip_serializing_if = "Option::is_none")]

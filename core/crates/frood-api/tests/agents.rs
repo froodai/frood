@@ -272,6 +272,7 @@ async fn agent_asks_waits_resumes_and_proposes() {
     assert_eq!(start["credentials"]["provider"], "anthropic");
     assert_eq!(start["credentials"]["kind"], "api_key");
     assert_eq!(start["credentials"]["api_key"], "sk-test");
+    assert!(start["credentials"].get("api_key_helper").is_none());
     assert_eq!(
         start["credentials"]["base_url"], "https://llm-gateway.example.com",
         "the agent goes through the account's gateway"

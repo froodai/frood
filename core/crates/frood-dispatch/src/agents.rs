@@ -153,9 +153,14 @@ impl Ctx {
             let mut key = json!({
                 "provider": provider,
                 "kind": "api_key",
-                "api_key": credential.key,
                 "workspace": credential.workspace,
             });
+            // The key itself, or the command that prints it, which the agent runs (Claude
+            // Code's apiKeyHelper): a gateway's short-lived keys are renewed inside the turn.
+            match credential.api_key_helper {
+                Some(command) => key["api_key_helper"] = json!(command),
+                None => key["api_key"] = json!(credential.key),
+            }
             // A company gateway or proxy: the agent calls the model there, as the core does.
             if let Some(url) = credential.base_url {
                 key["base_url"] = json!(url);

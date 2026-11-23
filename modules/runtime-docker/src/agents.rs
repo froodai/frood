@@ -9,7 +9,9 @@
 //!   time budget limits them.
 //!
 //! An API key with a `base_url` (a company gateway or a proxy) sends the agent there:
-//! `ANTHROPIC_BASE_URL` for Claude Code, `OPENAI_BASE_URL` (with `/v1`) for Codex.
+//! `ANTHROPIC_BASE_URL` for Claude Code, `OPENAI_BASE_URL` (with `/v1`) for Codex. A key from
+//! `api_key_helper` (a command that prints it, for a gateway's short-lived keys) becomes Claude
+//! Code's `apiKeyHelper` setting, run inside the agent's container; Codex has no such setting.
 
 use std::collections::BTreeMap;
 
@@ -36,6 +38,9 @@ pub struct Credentials {
     pub kind: String,
     #[serde(default)]
     pub api_key: Option<String>,
+    /// For an API key: instead of `api_key`, a command that prints the key.
+    #[serde(default)]
+    pub api_key_helper: Option<String>,
     #[serde(default)]
     pub workspace: Option<String>,
     /// For an API key: another endpoint with the provider's API, such as a company gateway.
@@ -120,10 +125,15 @@ fn claude_code(turn: &Turn<'_>) -> Result<Command, String> {
             "1".to_owned(),
         ),
     ];
+    let mut settings = None;
     match creds.kind.as_str() {
         "api_key" => {
-            let key = creds.api_key.clone().ok_or("credentials have no api_key")?;
-            env.push(("ANTHROPIC_API_KEY".into(), key));
+            match (&creds.api_key_helper, &creds.api_key) {
+                // Claude Code runs it, and again when the key expires or the gateway answers 401.
+                (Some(helper), _) => settings = Some(json!({ "apiKeyHelper": helper })),
+                (None, Some(key)) => env.push(("ANTHROPIC_API_KEY".into(), key.clone())),
+                (None, None) => return Err("credentials have no api_key".into()),
+            }
             if let Some(workspace) = &creds.workspace {
                 env.push((
                     "ANTHROPIC_CUSTOM_HEADERS".into(),
@@ -169,6 +179,9 @@ fn claude_code(turn: &Turn<'_>) -> Result<Command, String> {
         ]
         .map(str::to_owned),
     );
+    if let Some(settings) = settings {
+        args.extend(["--settings".into(), settings.to_string()]);
+    }
     args.push("--mcp-config".into());
     args.push(json!({ "mcpServers": servers }).to_string());
     match (turn.resume, turn.new_session) {
@@ -208,6 +221,12 @@ fn codex(turn: &Turn<'_>) -> Result<Command, String> {
     }
     let env = match creds.kind.as_str() {
         "api_key" => {
+            if creds.api_key_helper.is_some() {
+                return Err(
+                    "codex needs the key itself: an api_key_helper works only with claude-code"
+                        .into(),
+                );
+            }
             let mut env = vec![(
                 "CODEX_API_KEY".to_owned(),
                 creds.api_key.clone().ok_or("credentials have no api_key")?,
@@ -463,6 +482,7 @@ mod tests {
             provider: provider.into(),
             kind: kind.into(),
             api_key: Some("sk-test".into()),
+            api_key_helper: None,
             workspace: Some("wrkspc_01".into()),
             base_url: None,
             token: Some("oauth".into()),
@@ -590,6 +610,39 @@ mod tests {
         sub.base_url = Some("https://llm-gateway.example.com".into());
         let cmd = command(&turn("claude-code", &servers, &sub)).unwrap();
         assert!(!cmd.env.iter().any(|(k, _)| k == "ANTHROPIC_BASE_URL"));
+        assert!(!cmd.args.iter().any(|a| a == "--settings"));
+    }
+
+    #[test]
+    fn a_key_helper_becomes_claude_codes_api_key_helper() {
+        let servers = servers();
+        let mut key = creds("anthropic", "api_key");
+        key.api_key = None;
+        key.api_key_helper = Some("gateway-cli print-key --scope 'agents'".into());
+        key.base_url = Some("http://llm-gateway.frood.svc:4000/anthropic".into());
+        let cmd = command(&turn("claude-code", &servers, &key)).unwrap();
+        let at = cmd.args.iter().position(|a| a == "--settings").unwrap();
+        let settings: Value = serde_json::from_str(&cmd.args[at + 1]).unwrap();
+        assert_eq!(
+            settings,
+            json!({ "apiKeyHelper": "gateway-cli print-key --scope 'agents'" })
+        );
+        assert!(!cmd.env.iter().any(|(k, _)| k == "ANTHROPIC_API_KEY"));
+        assert!(cmd.env.contains(&(
+            "ANTHROPIC_BASE_URL".into(),
+            "http://llm-gateway.frood.svc:4000/anthropic".into()
+        )));
+        // The prompt still follows -p, and the allowed tools still end the line.
+        assert_eq!(cmd.args[0], "-p");
+        assert_eq!(
+            cmd.args.last().unwrap(),
+            "mcp__source-team-chat__search_messages"
+        );
+
+        let mut openai = creds("openai", "api_key");
+        openai.api_key_helper = Some("gateway-cli print-key".into());
+        let err = command(&turn("codex", &servers, &openai)).err().unwrap();
+        assert!(err.contains("only with claude-code"), "{err}");
     }
 
     #[test]

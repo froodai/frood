@@ -51,11 +51,13 @@
       "oneOf": [
         {
           "type": "object",
-          "required": ["provider", "kind", "api_key"],
+          "required": ["provider", "kind"],
+          "oneOf": [{ "required": ["api_key"] }, { "required": ["api_key_helper"] }],
           "properties": {
             "provider": { "enum": ["anthropic", "openai"] },
             "kind": { "const": "api_key" },
             "api_key": { "type": "string" },
+            "api_key_helper": { "type": "string", "description": "Instead of api_key: a shell command that prints the key, run by the agent (Claude Code's apiKeyHelper)" },
             "workspace": { "type": ["string", "null"] },
             "base_url": { "type": "string", "format": "uri", "description": "Another endpoint with the provider's API (the root, without /v1)" }
           }

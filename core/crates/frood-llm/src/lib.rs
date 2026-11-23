@@ -6,7 +6,8 @@
 //! their HTTP APIs directly.
 
 use std::collections::BTreeMap;
-use std::time::Duration;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use frood_config::{Account, ModelProvider};
 use serde::{Deserialize, Serialize};
@@ -14,6 +15,11 @@ use serde_json::{Value, json};
 
 const ANTHROPIC_URL: &str = "https://api.anthropic.com";
 const OPENAI_URL: &str = "https://api.openai.com";
+/// How long a key printed by `api_key_helper` is used before the command runs again (Claude
+/// Code's default for its apiKeyHelper); a 401 runs it again at once.
+const HELPER_TTL: Duration = Duration::from_secs(5 * 60);
+/// How long the helper may take.
+const HELPER_TIMEOUT: Duration = Duration::from_secs(30);
 /// Opts into server-side fallback when a safety classifier declines a request.
 const FALLBACK_BETA: &str = "server-side-fallback-2026-07-01";
 /// Models that take `fallbacks: "default"`.
@@ -40,6 +46,8 @@ pub enum LlmError {
     Network(String),
     #[error("unexpected answer from the provider: {0}")]
     Invalid(String),
+    #[error("api_key_helper: {0}")]
+    KeyHelper(String),
 }
 
 impl LlmError {
@@ -47,7 +55,8 @@ impl LlmError {
     pub fn is_transient(&self) -> bool {
         match self {
             Self::Http { status, .. } => *status == 408 || *status == 429 || *status >= 500,
-            Self::Network(_) => true,
+            // The helper's own login or network may be down for a while.
+            Self::Network(_) | Self::KeyHelper(_) => true,
             _ => false,
         }
     }
@@ -92,8 +101,11 @@ pub struct Credential {
     pub provider: ModelProvider,
     /// A subscription's token works only inside the vendor's own agent, for its owner.
     pub subscription: bool,
-    /// The API key, or the subscription's token.
+    /// The API key, or the subscription's token; empty when `api_key_helper` gives the key.
     pub key: String,
+    /// A command that prints the API key: the agent runs it itself (Claude Code's
+    /// `apiKeyHelper`).
+    pub api_key_helper: Option<String>,
     pub workspace: Option<String>,
     /// Another endpoint with the provider's API (a proxy or a company gateway), for an API key:
     /// the agent sends its requests there too.
@@ -106,10 +118,73 @@ pub struct Credential {
 #[derive(Clone)]
 struct Endpoint {
     provider: ModelProvider,
-    key: String,
+    key: Key,
     /// `anthropic-workspace-id` for organization-level Anthropic keys.
     workspace: Option<String>,
     base_url: String,
+}
+
+/// Where an endpoint's key comes from.
+#[derive(Clone)]
+enum Key {
+    Fixed(String),
+    /// A command's output, kept for `HELPER_TTL`.
+    Helper {
+        command: String,
+        cached: Arc<tokio::sync::Mutex<Option<(String, Instant)>>>,
+    },
+}
+
+impl Key {
+    /// The key to send; `fresh` runs the helper again even if its last key is recent.
+    async fn get(&self, fresh: bool) -> Result<String> {
+        let (command, cached) = match self {
+            Self::Fixed(key) => return Ok(key.clone()),
+            Self::Helper { command, cached } => (command, cached),
+        };
+        let mut cached = cached.lock().await;
+        if !fresh
+            && let Some((key, at)) = cached.as_ref()
+            && at.elapsed() < HELPER_TTL
+        {
+            return Ok(key.clone());
+        }
+        let key = run_helper(command).await?;
+        *cached = Some((key.clone(), Instant::now()));
+        Ok(key)
+    }
+
+    fn renewable(&self) -> bool {
+        matches!(self, Self::Helper { .. })
+    }
+}
+
+/// Runs `api_key_helper` with `sh -c`; its trimmed standard output is the key.
+async fn run_helper(command: &str) -> Result<String> {
+    let run = tokio::process::Command::new("sh")
+        .arg("-c")
+        .arg(command)
+        .stdin(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .output();
+    let output = tokio::time::timeout(HELPER_TIMEOUT, run)
+        .await
+        .map_err(|_| LlmError::KeyHelper(format!("took longer than {HELPER_TIMEOUT:?}")))?
+        .map_err(|e| LlmError::KeyHelper(format!("cannot run it: {e}")))?;
+    if !output.status.success() {
+        // Its error output, but never its standard output: that may hold a key.
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(LlmError::KeyHelper(format!(
+            "exited with {}: {}",
+            output.status,
+            stderr.trim().chars().take(300).collect::<String>()
+        )));
+    }
+    let key = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    if key.is_empty() {
+        return Err(LlmError::KeyHelper("printed no key".into()));
+    }
+    Ok(key)
 }
 
 /// Calls models on behalf of jobs, by account name.
@@ -135,6 +210,7 @@ impl Gateway {
                 Account::ApiKey {
                     provider,
                     secret,
+                    api_key_helper,
                     base_url,
                     workspace,
                     budget,
@@ -147,7 +223,13 @@ impl Gateway {
                         name.clone(),
                         Endpoint {
                             provider: *provider,
-                            key: secret.clone(),
+                            key: match api_key_helper {
+                                Some(command) => Key::Helper {
+                                    command: command.clone(),
+                                    cached: Arc::default(),
+                                },
+                                None => Key::Fixed(secret.clone().unwrap_or_default()),
+                            },
                             workspace: workspace.clone(),
                             base_url: base_url
                                 .as_deref()
@@ -159,7 +241,8 @@ impl Gateway {
                     Credential {
                         provider: *provider,
                         subscription: false,
-                        key: secret.clone(),
+                        key: secret.clone().unwrap_or_default(),
+                        api_key_helper: api_key_helper.clone(),
                         workspace: workspace.clone(),
                         base_url: base_url
                             .as_deref()
@@ -177,6 +260,7 @@ impl Gateway {
                     provider: *provider,
                     subscription: true,
                     key: secret.clone(),
+                    api_key_helper: None,
                     workspace: None,
                     base_url: None,
                     owner: Some(owner.clone()),
@@ -217,12 +301,28 @@ impl Gateway {
         }
     }
 
-    async fn post(&self, request: reqwest::RequestBuilder, body: &Value) -> Result<Value> {
-        let response = request
+    /// Sends `body` with the endpoint's key; a key from `api_key_helper` that the provider
+    /// rejects (401) is renewed once and the request sent again.
+    async fn post(
+        &self,
+        endpoint: &Endpoint,
+        request: impl Fn(&str) -> reqwest::RequestBuilder,
+        body: &Value,
+    ) -> Result<Value> {
+        let key = endpoint.key.get(false).await?;
+        let mut response = request(&key)
             .json(body)
             .send()
             .await
             .map_err(|e| LlmError::Network(e.to_string()))?;
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED && endpoint.key.renewable() {
+            let key = endpoint.key.get(true).await?;
+            response = request(&key)
+                .json(body)
+                .send()
+                .await
+                .map_err(|e| LlmError::Network(e.to_string()))?;
+        }
         let status = response.status();
         let text = response
             .text()
@@ -256,20 +356,27 @@ impl Gateway {
             "messages": [{ "role": "user", "content": request.user }],
             "output_config": output_config,
         });
-        let mut call = self
-            .http
-            .post(format!("{}/v1/messages", endpoint.base_url))
-            .header("x-api-key", &endpoint.key)
-            .header("anthropic-version", "2023-06-01");
-        if let Some(workspace) = &endpoint.workspace {
-            call = call.header("anthropic-workspace-id", workspace);
-        }
-        if FALLBACK_MODELS.contains(&model.as_str()) {
+        let fallbacks = FALLBACK_MODELS.contains(&model.as_str());
+        if fallbacks {
             body["fallbacks"] = json!("default");
-            call = call.header("anthropic-beta", FALLBACK_BETA);
         }
-        let response: AnthropicResponse = serde_json::from_value(self.post(call, &body).await?)
-            .map_err(|e| LlmError::Invalid(e.to_string()))?;
+        let call = |key: &str| {
+            let mut call = self
+                .http
+                .post(format!("{}/v1/messages", endpoint.base_url))
+                .header("x-api-key", key)
+                .header("anthropic-version", "2023-06-01");
+            if let Some(workspace) = &endpoint.workspace {
+                call = call.header("anthropic-workspace-id", workspace);
+            }
+            if fallbacks {
+                call = call.header("anthropic-beta", FALLBACK_BETA);
+            }
+            call
+        };
+        let response: AnthropicResponse =
+            serde_json::from_value(self.post(endpoint, call, &body).await?)
+                .map_err(|e| LlmError::Invalid(e.to_string()))?;
         match response.stop_reason.as_deref() {
             Some("refusal") => {
                 return Err(LlmError::Refused(
@@ -309,12 +416,14 @@ impl Gateway {
                 "strict": true,
             } },
         });
-        let call = self
-            .http
-            .post(format!("{}/v1/responses", endpoint.base_url))
-            .bearer_auth(&endpoint.key);
-        let response: OpenAiResponse = serde_json::from_value(self.post(call, &body).await?)
-            .map_err(|e| LlmError::Invalid(e.to_string()))?;
+        let call = |key: &str| {
+            self.http
+                .post(format!("{}/v1/responses", endpoint.base_url))
+                .bearer_auth(key)
+        };
+        let response: OpenAiResponse =
+            serde_json::from_value(self.post(endpoint, call, &body).await?)
+                .map_err(|e| LlmError::Invalid(e.to_string()))?;
         if response.status.as_deref() == Some("incomplete") {
             return Err(LlmError::Truncated);
         }
@@ -345,12 +454,14 @@ impl Gateway {
         }
         let model = model.to_owned();
         let body = json!({ "model": model, "input": inputs, "encoding_format": "float" });
-        let call = self
-            .http
-            .post(format!("{}/v1/embeddings", endpoint.base_url))
-            .bearer_auth(&endpoint.key);
-        let response: OpenAiEmbeddings = serde_json::from_value(self.post(call, &body).await?)
-            .map_err(|e| LlmError::Invalid(e.to_string()))?;
+        let call = |key: &str| {
+            self.http
+                .post(format!("{}/v1/embeddings", endpoint.base_url))
+                .bearer_auth(key)
+        };
+        let response: OpenAiEmbeddings =
+            serde_json::from_value(self.post(endpoint, call, &body).await?)
+                .map_err(|e| LlmError::Invalid(e.to_string()))?;
         let mut data = response.data;
         data.sort_by_key(|d| d.index);
         if data.len() != inputs.len() {
@@ -490,7 +601,8 @@ mod tests {
     fn gateway(provider: ModelProvider, url: &str) -> Gateway {
         let account = Account::ApiKey {
             provider,
-            secret: "test-key".into(),
+            secret: Some("test-key".into()),
+            api_key_helper: None,
             base_url: Some(url.to_owned()),
             workspace: None,
             budget: None,
@@ -548,7 +660,8 @@ mod tests {
         .await;
         let account = Account::ApiKey {
             provider: ModelProvider::Anthropic,
-            secret: "org-key".into(),
+            secret: Some("org-key".into()),
+            api_key_helper: None,
             base_url: Some(url),
             workspace: Some("wrkspc_01abc".into()),
             budget: None,
@@ -655,7 +768,8 @@ mod tests {
             "a".to_owned(),
             Account::ApiKey {
                 provider: ModelProvider::Anthropic,
-                secret: "k".into(),
+                secret: Some("k".into()),
+                api_key_helper: None,
                 base_url: None,
                 workspace: None,
                 budget: None,
@@ -667,6 +781,84 @@ mod tests {
         ));
     }
 
+    #[tokio::test]
+    async fn a_key_helper_is_run_again_when_its_key_is_rejected() {
+        // A gateway that takes only the second key the helper prints.
+        let seen: Arc<Mutex<Vec<String>>> = Arc::default();
+        let handler = |State(seen): State<Arc<Mutex<Vec<String>>>>, headers: HeaderMap| async move {
+            let key = headers["x-api-key"].to_str().unwrap().to_owned();
+            seen.lock().unwrap().push(key.clone());
+            if key != "key-2" {
+                return (
+                    axum::http::StatusCode::UNAUTHORIZED,
+                    Json(json!({ "error": "expired" })),
+                );
+            }
+            (
+                axum::http::StatusCode::OK,
+                Json(
+                    json!({ "model": "claude-haiku-5-5", "content": [{ "type": "text", "text": "{\"ok\": true}" }],
+                             "stop_reason": "end_turn", "usage": {} }),
+                ),
+            )
+        };
+        let app = Router::new()
+            .route("/gw/anthropic/v1/messages", post(handler))
+            .with_state(seen.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/gw/anthropic", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let counter = std::env::temp_dir().join(format!("frood-key-helper-{}", std::process::id()));
+        let _ = std::fs::remove_file(&counter);
+        let command = format!(
+            "n=$(cat '{0}' 2>/dev/null || echo 0); n=$((n+1)); echo $n > '{0}'; echo \"  key-$n \"",
+            counter.display()
+        );
+        let account = Account::ApiKey {
+            provider: ModelProvider::Anthropic,
+            secret: None,
+            api_key_helper: Some(command.clone()),
+            base_url: Some(url),
+            workspace: None,
+            budget: None,
+        };
+        let gateway = Gateway::new(&BTreeMap::from([("work".to_owned(), account)]));
+        let mut haiku = request();
+        haiku.model = "claude-haiku-5-5".into();
+        gateway.complete("work", &haiku).await.unwrap();
+        // The next call keeps the renewed key: the helper is not run for every request.
+        gateway.complete("work", &haiku).await.unwrap();
+        assert_eq!(*seen.lock().unwrap(), ["key-1", "key-2", "key-2"]);
+        assert_eq!(std::fs::read_to_string(&counter).unwrap().trim(), "2");
+        let _ = std::fs::remove_file(&counter);
+
+        // The agent gets the command, not a key.
+        let credential = gateway.credential("work").unwrap();
+        assert_eq!(credential.key, "");
+        assert_eq!(credential.api_key_helper.as_deref(), Some(command.as_str()));
+
+        // A helper that fails says so, without what it printed.
+        let broken = Gateway::new(&BTreeMap::from([(
+            "work".to_owned(),
+            Account::ApiKey {
+                provider: ModelProvider::Anthropic,
+                secret: None,
+                api_key_helper: Some("echo secret-ish; echo 'not logged in' >&2; exit 3".into()),
+                base_url: Some("http://127.0.0.1:9".into()),
+                workspace: None,
+                budget: None,
+            },
+        )]));
+        let err = broken.complete("work", &haiku).await.unwrap_err();
+        let text = err.to_string();
+        assert!(matches!(err, LlmError::KeyHelper(_)), "{text}");
+        assert!(
+            text.contains("not logged in") && !text.contains("secret-ish"),
+            "{text}"
+        );
+    }
+
     #[test]
     fn subscriptions_are_for_runtimes_only() {
         let gateway = Gateway::new(&BTreeMap::from([
@@ -674,7 +866,8 @@ mod tests {
                 "api".to_owned(),
                 Account::ApiKey {
                     provider: ModelProvider::Anthropic,
-                    secret: "k".into(),
+                    secret: Some("k".into()),
+                    api_key_helper: None,
                     base_url: Some("https://llm-gateway.example.com/anthropic/".into()),
                     workspace: None,
                     budget: None,
