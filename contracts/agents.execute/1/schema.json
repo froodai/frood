@@ -56,7 +56,8 @@
             "provider": { "enum": ["anthropic", "openai"] },
             "kind": { "const": "api_key" },
             "api_key": { "type": "string" },
-            "workspace": { "type": ["string", "null"] }
+            "workspace": { "type": ["string", "null"] },
+            "base_url": { "type": "string", "format": "uri", "description": "Another endpoint with the provider's API (the root, without /v1)" }
           }
         },
         {

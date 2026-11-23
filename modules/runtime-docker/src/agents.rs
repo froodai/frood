@@ -7,6 +7,9 @@
 //! - `codex`: Codex `exec --json`; the session is the thread id it prints first, continued with
 //!   `exec resume`. Codex reports tokens but not dollars, so its runs count as $0 and only the
 //!   time budget limits them.
+//!
+//! An API key with a `base_url` (a company gateway or a proxy) sends the agent there:
+//! `ANTHROPIC_BASE_URL` for Claude Code, `OPENAI_BASE_URL` (with `/v1`) for Codex.
 
 use std::collections::BTreeMap;
 
@@ -35,6 +38,10 @@ pub struct Credentials {
     pub api_key: Option<String>,
     #[serde(default)]
     pub workspace: Option<String>,
+    /// For an API key: another endpoint with the provider's API, such as a company gateway.
+    /// The root, without `/v1`.
+    #[serde(default)]
+    pub base_url: Option<String>,
     #[serde(default)]
     pub token: Option<String>,
 }
@@ -123,6 +130,12 @@ fn claude_code(turn: &Turn<'_>) -> Result<Command, String> {
                     format!("anthropic-workspace-id: {workspace}"),
                 ));
             }
+            if let Some(url) = &creds.base_url {
+                env.push((
+                    "ANTHROPIC_BASE_URL".into(),
+                    url.trim_end_matches('/').to_owned(),
+                ));
+            }
         }
         "subscription" => {
             let token = creds.token.clone().ok_or("credentials have no token")?;
@@ -194,10 +207,20 @@ fn codex(turn: &Turn<'_>) -> Result<Command, String> {
         ));
     }
     let env = match creds.kind.as_str() {
-        "api_key" => vec![(
-            "CODEX_API_KEY".to_owned(),
-            creds.api_key.clone().ok_or("credentials have no api_key")?,
-        )],
+        "api_key" => {
+            let mut env = vec![(
+                "CODEX_API_KEY".to_owned(),
+                creds.api_key.clone().ok_or("credentials have no api_key")?,
+            )];
+            // Codex's base URL ends in /v1; Frood's, as for direct calls, is the root.
+            if let Some(url) = &creds.base_url {
+                env.push((
+                    "OPENAI_BASE_URL".into(),
+                    format!("{}/v1", url.trim_end_matches('/')),
+                ));
+            }
+            env
+        }
         // The image's entrypoint writes it to ~/.codex/auth.json.
         "subscription" => vec![(
             "CODEX_AUTH_JSON".to_owned(),
@@ -441,6 +464,7 @@ mod tests {
             kind: kind.into(),
             api_key: Some("sk-test".into()),
             workspace: Some("wrkspc_01".into()),
+            base_url: None,
             token: Some("oauth".into()),
         }
     }
@@ -528,9 +552,44 @@ mod tests {
                 .contains(&("CLAUDE_CODE_OAUTH_TOKEN".into(), "oauth".into()))
         );
         assert!(!cmd.env.iter().any(|(k, _)| k == "ANTHROPIC_API_KEY"));
+        assert!(
+            !cmd.env.iter().any(|(k, _)| k == "ANTHROPIC_BASE_URL"),
+            "no gateway unless the account has one"
+        );
 
         let openai = creds("openai", "api_key");
         assert!(command(&turn("claude-code", &servers, &openai)).is_err());
+    }
+
+    #[test]
+    fn an_api_key_with_a_gateway_sends_the_agent_there() {
+        let servers = servers();
+        let mut key = creds("anthropic", "api_key");
+        key.base_url = Some("https://llm-gateway.example.com/anthropic/".into());
+        let cmd = command(&turn("claude-code", &servers, &key)).unwrap();
+        assert!(cmd.env.contains(&(
+            "ANTHROPIC_BASE_URL".into(),
+            "https://llm-gateway.example.com/anthropic".into()
+        )));
+        assert!(
+            cmd.env
+                .contains(&("ANTHROPIC_API_KEY".into(), "sk-test".into()))
+        );
+        assert!(!cmd.env.iter().any(|(k, _)| k == "CLAUDE_CODE_OAUTH_TOKEN"));
+
+        let mut openai = creds("openai", "api_key");
+        openai.base_url = Some("https://llm-gateway.example.com/openai".into());
+        let cmd = command(&turn("codex", &servers, &openai)).unwrap();
+        assert!(cmd.env.contains(&(
+            "OPENAI_BASE_URL".into(),
+            "https://llm-gateway.example.com/openai/v1".into()
+        )));
+
+        // A subscription never goes elsewhere: its token is only for the vendor's agent.
+        let mut sub = creds("anthropic", "subscription");
+        sub.base_url = Some("https://llm-gateway.example.com".into());
+        let cmd = command(&turn("claude-code", &servers, &sub)).unwrap();
+        assert!(!cmd.env.iter().any(|(k, _)| k == "ANTHROPIC_BASE_URL"));
     }
 
     #[test]

@@ -211,7 +211,7 @@ async fn agent_asks_waits_resumes_and_proposes() {
     let raw = format!(
         "version: 1\ninstallation: {{name: test}}\nstorage: {{uses: postgres, url: 'postgres://unused', objects: {{uses: database}}}}\n\
          deploy: {{server: host}}\n\
-         accounts:\n  claude: {{ kind: api_key, provider: anthropic, secret: sk-test }}\n\
+         accounts:\n  claude: {{ kind: api_key, provider: anthropic, secret: sk-test, base_url: 'https://llm-gateway.example.com/' }}\n\
          jobs:\n  extract: {{ enabled: false }}\n  sweep:\n    uses: agents.execute\n    runtime: runtime\n    agent: claude-code\n    \
          model: claude-haiku-5-5\n    account: claude\n    instructions: Sweep the team chat.\n    \
          permissions: [knowledge:read, knowledge:propose]\n    on_behalf_of: alice@example.com\n    \
@@ -270,7 +270,12 @@ async fn agent_asks_waits_resumes_and_proposes() {
     assert_eq!(start["model"], "claude-haiku-5-5");
     assert_eq!(start["instructions"], "Sweep the team chat.");
     assert_eq!(start["credentials"]["provider"], "anthropic");
+    assert_eq!(start["credentials"]["kind"], "api_key");
     assert_eq!(start["credentials"]["api_key"], "sk-test");
+    assert_eq!(
+        start["credentials"]["base_url"], "https://llm-gateway.example.com",
+        "the agent goes through the account's gateway"
+    );
     assert_eq!(start["budget"]["max_usd"], 0.5);
     assert!(
         start["prompt"].as_str().unwrap().contains("yesterday"),

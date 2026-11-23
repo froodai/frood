@@ -1238,6 +1238,55 @@ jobs:
     }
 
     #[test]
+    fn agent_jobs_may_pay_with_an_api_key_through_a_gateway() {
+        let raw = format!("{}{WORK}", template_for(ServerPlacement::Host))
+            .replace(
+                "  openai: { kind: api_key",
+                "  work: { kind: api_key, provider: anthropic, secret: sk-work, base_url: 'https://llm-gateway.example.com/anthropic' }\n  openai: { kind: api_key",
+            )
+            .replace(
+                "  embed: { enabled: false }\n",
+                "  embed: { enabled: false }\n  sweep:\n    uses: agents.execute\n    runtime: stt\n    agent: claude-code\n    \
+                 model: claude-sonnet-5-5\n    account: work\n    instructions: Sweep the tracker.\n",
+            );
+        let config = parse(&raw, &secrets()).unwrap().config;
+        match &config.accounts["work"] {
+            Account::ApiKey { base_url, .. } => assert_eq!(
+                base_url.as_deref(),
+                Some("https://llm-gateway.example.com/anthropic")
+            ),
+            other => panic!("expected an api_key account, got {other:?}"),
+        }
+
+        for (url, ok) in [
+            ("http://llm-gateway.example.com", false),
+            ("ftp://llm-gateway.example.com", false),
+            ("http://127.0.0.1:4000", true),
+        ] {
+            let raw = raw.replace("https://llm-gateway.example.com/anthropic", url);
+            match parse(&raw, &secrets()) {
+                Ok(_) => assert!(ok, "{url} passed"),
+                Err(ConfigError::Invalid(problems)) => {
+                    assert!(!ok, "{url}: {problems:?}");
+                    assert!(
+                        problems
+                            .iter()
+                            .any(|p| p.contains("account work: base_url must be an https:// URL")),
+                        "{problems:?}"
+                    );
+                }
+                Err(other) => panic!("expected Invalid, got {other:?}"),
+            }
+        }
+        // A subscription has no gateway: it is used only inside the vendor's own agent.
+        let subscription = raw.replace(
+            "work: { kind: api_key, provider: anthropic, secret: sk-work,",
+            "work: { kind: subscription, provider: anthropic, owner: alice@example.com, secret: oauth,",
+        );
+        assert!(parse(&subscription, &secrets()).is_err());
+    }
+
+    #[test]
     fn subscriptions_serve_only_their_owner_inside_the_vendor_agent() {
         let raw = format!("{}{WORK}", template_for(ServerPlacement::Host))
             .replace(

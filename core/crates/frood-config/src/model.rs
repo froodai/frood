@@ -571,7 +571,8 @@ pub enum Account {
         provider: ModelProvider,
         /// The key, e.g. `${secret:ANTHROPIC_API_KEY}`.
         secret: String,
-        /// Another endpoint with the same API (a proxy or a compatible service).
+        /// Another endpoint with the same API (a proxy, a company gateway or a compatible
+        /// service), the root without `/v1`. Agent jobs on this account go there too.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         base_url: Option<String>,
         /// Anthropic: the workspace (`wrkspc_…`) for a key made at organization level, which

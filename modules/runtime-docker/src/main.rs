@@ -567,7 +567,7 @@ mod tests {
             "op": op, "run_id": run, "job": "daily-sweep", "agent": "claude-code",
             "model": "claude-haiku-5-5", "instructions": "Sweep.",
             "mcp_servers": [{ "name": "frood", "path": "/mcp", "headers": { "Authorization": "Bearer frood_run_x" } }],
-            "credentials": { "provider": "anthropic", "kind": "api_key", "api_key": "sk-test" },
+            "credentials": { "provider": "anthropic", "kind": "api_key", "api_key": "sk-test", "base_url": "https://llm-gateway.example.com" },
             "budget": { "max_usd": 0.5 },
         })
     }
@@ -610,6 +610,10 @@ mod tests {
         let home = app.backend.volume_dir(&format!("frood-run-{run}"));
         let env = std::fs::read_to_string(home.join("last-env")).unwrap();
         assert!(env.contains("key=sk-test"), "{env}");
+        assert!(
+            env.contains("base=https://llm-gateway.example.com"),
+            "the account's gateway reaches the agent: {env}"
+        );
 
         // A message comes later: delivered with the next turn, in the same session.
         let (_, sent) = call(

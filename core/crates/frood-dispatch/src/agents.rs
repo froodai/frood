@@ -150,12 +150,17 @@ impl Ctx {
             frood_config::ModelProvider::Openai => "openai",
         };
         if !credential.subscription {
-            return Ok(json!({
+            let mut key = json!({
                 "provider": provider,
                 "kind": "api_key",
                 "api_key": credential.key,
                 "workspace": credential.workspace,
-            }));
+            });
+            // A company gateway or proxy: the agent calls the model there, as the core does.
+            if let Some(url) = credential.base_url {
+                key["base_url"] = json!(url);
+            }
+            return Ok(key);
         }
         // A subscription is its owner's, and only inside the vendor's own agent.
         let owner = credential.owner.unwrap_or_default();

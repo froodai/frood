@@ -95,6 +95,9 @@ pub struct Credential {
     /// The API key, or the subscription's token.
     pub key: String,
     pub workspace: Option<String>,
+    /// Another endpoint with the provider's API (a proxy or a company gateway), for an API key:
+    /// the agent sends its requests there too.
+    pub base_url: Option<String>,
     /// The subscriber, for a subscription.
     pub owner: Option<String>,
     pub monthly_usd: Option<f64>,
@@ -158,6 +161,9 @@ impl Gateway {
                         subscription: false,
                         key: secret.clone(),
                         workspace: workspace.clone(),
+                        base_url: base_url
+                            .as_deref()
+                            .map(|url| url.trim_end_matches('/').to_owned()),
                         owner: None,
                         monthly_usd: budget.as_ref().map(|b| b.monthly_usd),
                     }
@@ -172,6 +178,7 @@ impl Gateway {
                     subscription: true,
                     key: secret.clone(),
                     workspace: None,
+                    base_url: None,
                     owner: Some(owner.clone()),
                     monthly_usd: budget.as_ref().map(|b| b.monthly_usd),
                 },
@@ -668,7 +675,7 @@ mod tests {
                 Account::ApiKey {
                     provider: ModelProvider::Anthropic,
                     secret: "k".into(),
-                    base_url: None,
+                    base_url: Some("https://llm-gateway.example.com/anthropic/".into()),
                     workspace: None,
                     budget: None,
                 },
@@ -684,8 +691,16 @@ mod tests {
             ),
         ]));
         assert_eq!(gateway.api_accounts(), ["api"]);
+        let api = gateway.credential("api").unwrap();
+        assert!(!api.subscription);
+        assert_eq!(
+            api.base_url.as_deref(),
+            Some("https://llm-gateway.example.com/anthropic"),
+            "the agent goes to the same gateway as direct calls"
+        );
         let max = gateway.credential("max").unwrap();
         assert!(max.subscription);
+        assert_eq!(max.base_url, None);
         assert_eq!(max.owner.as_deref(), Some("alice@example.com"));
         assert_eq!(max.monthly_usd, Some(20.0));
     }
