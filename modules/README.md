@@ -11,6 +11,7 @@ module's service token in both directions. Apache-2.0.
 | [telegram](telegram) | Quick capture from a Telegram bot: text, voice, files; `/link <code>` links your account | `TELEGRAM_BOT_TOKEN` |
 | [notify-openclaw](notify-openclaw) | The Inbox and the digest in an OpenClaw conversation (WhatsApp, iMessage, Signal…): text with numbered choices, a reply with the number decides | an OpenClaw Gateway, `OPENCLAW_GATEWAY_TOKEN` |
 | [runtime-docker](runtime-docker) | `agents.execute@1`: runs Claude Code or Codex for agent jobs, one container per turn, a volume per run for its sessions | `host_docker: true` (the host's Docker, root on that machine) |
+| [runtime-k8s](runtime-k8s) | `agents.execute@1` on Kubernetes: the same agents, one Job per turn, a PersistentVolumeClaim per run for its sessions | a ServiceAccount with namespaced RBAC (the Helm chart in [deploy/helm](../deploy/helm) makes it) |
 | [backup-restic](backup-restic) | `backup.target@1`: the installation into restic repositories (a folder, S3, B2, SFTP, REST), and a restore check into a temporary database | the targets in `backup`; `volumes` for a folder target |
 
 In `frood.yaml`:
@@ -84,6 +85,30 @@ privileges, a read-only root, CPU and memory limits, and only the run's volume a
 agent gets the run's MCP servers (Frood with a run token, the run's source) and no built-in tools
 unless `builtin_tools` names some. `images/agent-fake` is a stand-in that prints Claude Code's
 output without calling a model, for checking a deployment for free.
+
+### Agents on Kubernetes
+
+Where there is no Docker, `runtime-k8s` runs the same agents with the same contract: each turn is
+a Job in the module's namespace (or `namespace`), whose pod runs as user 10001 with no privilege
+escalation, no capabilities, a read-only root and no API token. The command line and the
+credentials go into a Secret the Job owns, not into the Job; a run's sessions live in a
+PersistentVolumeClaim (`session_mb`, `storage_class`) that `stop` deletes. A turn ends at the
+run's `max_minutes` (plus a minute) even if `stop` never comes, and a finished Job the module did
+not remove is deleted after `keep_finished_minutes`. Agent pods reach Frood at `frood_url`, a
+Service's DNS name such as `http://frood.my-namespace.svc:8080`. The server does not start the
+module there: it runs as its own Deployment with its settings in `FROOD_MODULE_CONFIG`, and
+`frood.yaml` names its Service in `url`. The Helm chart ([deploy/helm](../deploy/helm/README.md))
+sets all of it up, with the module's ServiceAccount, Role and RoleBinding.
+
+```yaml
+# frood.yaml
+modules:
+  agents:
+    url: 'http://frood-agents.my-namespace.svc:8080'
+# FROOD_MODULE_CONFIG of the module's Deployment
+{ "agents": { "claude-code": { "image": "ghcr.io/froodai/agent-claude-code:<version>" } },
+  "frood_url": "http://frood.my-namespace.svc:8080", "cpus": 1, "memory_mb": 2048 }
+```
 
 
 ### Backups

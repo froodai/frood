@@ -41,6 +41,7 @@ jobs:
           - { name: telegram, context: modules/telegram }
           - { name: notify-openclaw, context: modules/notify-openclaw }
           - { name: runtime-docker, context: modules/runtime-docker }
+          - { name: runtime-k8s, context: modules/runtime-k8s }
           - { name: backup-restic, context: modules/backup-restic }
           - { name: agent-claude-code, context: modules/runtime-docker/images/agent-claude-code }
           - { name: agent-codex, context: modules/runtime-docker/images/agent-codex }

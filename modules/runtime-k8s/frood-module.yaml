@@ -1,0 +1,46 @@
+name: runtime-k8s
+version: 0.1.15
+description: Runs agents (Claude Code, Codex) for Frood jobs on Kubernetes, one Job per turn, and resumes their sessions after people answer.
+license: Apache-2.0
+provides:
+  - agents.execute@1
+frood_api: []
+config:
+  type: object
+  properties:
+    agents:
+      type: object
+      description: "Agents offered, with their images, e.g. { claude-code: { image: ghcr.io/froodai/agent-claude-code:0.1.15 } }"
+      additionalProperties:
+        type: object
+        properties:
+          image: { type: string }
+        required: [image]
+    namespace: { type: string, description: "Namespace of the agent Jobs; the module's own by default" }
+    frood_url: { type: string, description: "Where agent pods reach Frood, e.g. http://frood.my-namespace.svc:8080; FROOD_URL by default" }
+    cpus: { type: number, description: "CPU limit (and request) of an agent pod" }
+    memory_mb: { type: integer, description: "Memory limit (and request) of an agent pod" }
+    builtin_tools: { type: string, description: "Claude Code built-in tools agents may use, e.g. Read,Grep; none by default" }
+    session_mb: { type: integer, description: "Size of the volume (PVC) that keeps a run's sessions; 1024 by default" }
+    storage_class: { type: string, description: "StorageClass of those volumes; the cluster's default when absent" }
+    read_only_root: { type: boolean, description: "Agent containers get a read-only root filesystem; true by default (the official agent images allow it)" }
+    run_as_user: { type: integer, description: "UID (and GID) agent containers run as; 10001, the official images' user, by default" }
+    service_account: { type: string, description: "ServiceAccount of agent pods; none by default, and no API token is mounted either way" }
+    image_pull_secrets: { type: array, items: { type: string }, description: "Secrets for pulling agent images from a private registry" }
+    labels: { type: object, additionalProperties: { type: string }, description: "Extra labels on agent pods, e.g. for a NetworkPolicy" }
+    node_selector: { type: object, additionalProperties: { type: string } }
+    keep_finished_minutes: { type: integer, description: "A finished Job the module did not remove (it was down) is deleted after this long; 1440 by default" }
+  required: [agents]
+permissions:
+  # Namespace-scoped RBAC only: Jobs, their pods and logs, a PVC per run, and a Secret per turn
+  # that only Kubernetes reads back. No privileged pods, no host access, no Docker.
+  kubernetes:
+    - { resources: [jobs], verbs: [create, get, patch, delete] }
+    - { resources: [pods], verbs: [list] }
+    - { resources: [pods/log], verbs: [get] }
+    - { resources: [persistentvolumeclaims], verbs: [create, delete] }
+    - { resources: [secrets], verbs: [create] }
+  egress: [api.anthropic.com, api.openai.com]
+runtime:
+  form: container
+  health: /healthz
