@@ -251,7 +251,7 @@ dependencies = [
 
 [[package]]
 name = "frood-runtime-k8s"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "axum",
  "http-body-util",

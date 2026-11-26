@@ -1,5 +1,5 @@
 name: runtime-k8s
-version: 0.1.15
+version: 0.1.16
 description: Runs agents (Claude Code, Codex) for Frood jobs on Kubernetes, one Job per turn, and resumes their sessions after people answer.
 license: Apache-2.0
 provides:
@@ -10,7 +10,7 @@ config:
   properties:
     agents:
       type: object
-      description: "Agents offered, with their images, e.g. { claude-code: { image: ghcr.io/froodai/agent-claude-code:0.1.15 } }"
+      description: "Agents offered, with their images, e.g. { claude-code: { image: ghcr.io/froodai/agent-claude-code:0.1.16 } }"
       additionalProperties:
         type: object
         properties:

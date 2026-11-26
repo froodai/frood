@@ -180,7 +180,7 @@ dependencies = [
 
 [[package]]
 name = "frood-runtime-docker"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "axum",
  "bollard",
