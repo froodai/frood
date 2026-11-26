@@ -160,7 +160,8 @@ fn claude_code(turn: &Turn<'_>) -> Result<Command, String> {
             json!({ "type": "http", "url": server_url(server, turn.frood_url)?, "headers": server.headers }),
         );
     }
-    // The prompt comes right after -p, before the variadic --allowedTools at the end.
+    // The prompt comes right after -p, before the variadic --allowedTools at the end (when
+    // the run has MCP servers).
     let mut args: Vec<String> = vec!["-p".into(), turn.prompt.into()];
     args.extend(
         [
@@ -192,7 +193,12 @@ fn claude_code(turn: &Turn<'_>) -> Result<Command, String> {
     if let Some(budget) = turn.max_budget_usd {
         args.extend(["--max-budget-usd".into(), format!("{budget:.4}")]);
     }
-    args.push("--allowedTools".into());
+    // A run with no MCP servers (write-digest: its input is all it needs) allows nothing more:
+    // `--allowedTools` with no value is an error, and without it `dontAsk` refuses every tool
+    // that is not allowed, while `--tools` still decides the built-in ones.
+    if !turn.mcp_servers.is_empty() {
+        args.push("--allowedTools".into());
+    }
     for server in turn.mcp_servers {
         match &server.tools {
             Some(tools) => args.extend(
@@ -579,6 +585,26 @@ mod tests {
 
         let openai = creds("openai", "api_key");
         assert!(command(&turn("claude-code", &servers, &openai)).is_err());
+    }
+
+    #[test]
+    fn a_turn_without_tools_has_no_empty_allowed_tools() {
+        let sub = creds("anthropic", "subscription");
+        let cmd = command(&turn("claude-code", &[], &sub)).unwrap();
+        assert!(!cmd.args.iter().any(|a| a == "--allowedTools"));
+        let at = |flag: &str| {
+            let i = cmd.args.iter().position(|a| a == flag).unwrap();
+            cmd.args[i + 1].clone()
+        };
+        // Exactly as restricted as before: no built-in tools, no MCP servers, nothing asked.
+        assert_eq!(at("--tools"), "");
+        assert_eq!(at("--permission-mode"), "dontAsk");
+        assert!(cmd.args.contains(&"--strict-mcp-config".to_owned()));
+        let mcp: Value = serde_json::from_str(&at("--mcp-config")).unwrap();
+        assert_eq!(mcp, json!({ "mcpServers": {} }));
+        assert_eq!(&cmd.args[..2], ["-p", "Go"]);
+        // Every flag that takes a value has one.
+        assert_eq!(cmd.args.last().unwrap(), "0.5000");
     }
 
     #[test]
