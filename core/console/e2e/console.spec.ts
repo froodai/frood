@@ -53,7 +53,7 @@ test("an item reads as a title with its kind, and opens the original", async ({ 
   await row.click();
   const detail = page.getByRole("main").getByRole("complementary");
   await expect(detail.getByRole("heading", { level: 2 })).toHaveText("ATL-142: a finished project loads for 15 minutes");
-  await expect(detail.getByText(/the proposed fix is to attach with session\/resume/)).toBeVisible();
+  await expect(detail.getByText(/the proposed fix is to load it in pages/)).toBeVisible();
   await expect(detail.getByRole("link", { name: /ATL-142: Project page keeps loading/ })).toHaveAttribute("href", "https://tracker.example/issue/ATL-142");
 });
 
