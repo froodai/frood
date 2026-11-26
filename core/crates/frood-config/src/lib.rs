@@ -681,6 +681,25 @@ fn validate_work(config: &Config, problems: &mut Vec<String>) {
                 )),
             }
         }
+        // `${source}` is filled per run: a scheduled run gets it from `for_each: source`, a
+        // run started by hand from its input. A schedule without it fails on every tick.
+        let tools: Vec<&str> = match &job.tools {
+            Some(tools) => tools.iter().map(String::as_str).collect(),
+            None => standard_agent_tools(name).unwrap_or_default().to_vec(),
+        };
+        if job.enabled != Some(false)
+            && let Some(tool) = tools.iter().find(|t| t.contains("${source}"))
+        {
+            for trigger in job.on.iter().flatten() {
+                if let Some(schedule) = &trigger.schedule
+                    && trigger.for_each.as_deref() != Some("source")
+                {
+                    problems.push(format!(
+                        "job {name}: tool {tool} reads one source per run, so schedule {schedule:?} needs `for_each: source` (run once for each source); without it every scheduled run fails. A run started by hand names its source in the input, {{\"source\": …}}"
+                    ));
+                }
+            }
+        }
         if job
             .on
             .iter()
@@ -1006,6 +1025,22 @@ fn validate_trigger(job: &str, trigger: &Trigger, problems: &mut Vec<String>) {
             "job {job}: for_each can only be `source`, not {each:?}"
         ));
     }
+    if trigger.for_each.is_some() && trigger.schedule.is_none() {
+        problems.push(format!(
+            "job {job}: for_each works only with a schedule; a run started by an event gets its source from the event"
+        ));
+    }
+}
+
+/// The MCP servers a standard agent job uses when the config does not list its `tools`.
+pub fn standard_agent_tools(job: &str) -> Option<&'static [&'static str]> {
+    match job {
+        "daily-sweep" => Some(&["frood", "source:${source}"]),
+        "investigate" => Some(&["frood"]),
+        // The digest comes in the run's input; the writer needs no tools.
+        "write-digest" => Some(&[]),
+        _ => None,
+    }
 }
 
 fn is_loopback_http(url: &str) -> bool {
@@ -1294,6 +1329,65 @@ jobs:
                     );
                 }
             }
+            other => panic!("expected Invalid, got {other:?}"),
+        }
+    }
+
+    /// A sweep that reads `${source}` on a schedule without `for_each: source` fails on every
+    /// tick: plan says so, also when the tools are the standard job's own.
+    #[test]
+    fn a_scheduled_source_sweep_needs_for_each_source() {
+        let sweep = |on: &str, tools: &str| {
+            let agent = format!(
+                "
+sources:
+  team-chat: {{ uses: mcp, server: https://mcp.example.com/mcp }}
+jobs:
+  daily-sweep:
+    uses: agents.execute
+    on: {on}
+{tools}    runtime: stt
+    agent: claude-code
+    model: claude-haiku-5-5
+    account: anthropic
+    budget: {{ max_usd: 0.5 }}
+"
+            );
+            let raw = format!("{}{WORK}", template_for(ServerPlacement::Host))
+                .replace("\njobs:\n", &agent);
+            parse(&raw, &secrets())
+        };
+        let each = "[{ schedule: '0 11 * * 1-5', timezone: Europe/Belgrade, for_each: source }]";
+        let plain = "[{ schedule: '0 11 * * 1-5', timezone: Europe/Belgrade }]";
+        let listed = "    tools: [frood, 'source:${source}']\n";
+        let fixed = "    tools: [frood, 'source:team-chat']\n";
+
+        assert!(sweep(each, "").is_ok());
+        assert!(sweep(each, listed).is_ok());
+        // A fixed source needs nothing per run.
+        assert!(sweep(plain, fixed).is_ok());
+        // No triggers: started by hand, with the source in the input.
+        assert!(sweep("[]", "").is_ok());
+        for tools in ["", listed] {
+            match sweep(plain, tools) {
+                Err(ConfigError::Invalid(problems)) => {
+                    assert!(
+                        problems.iter().any(|p| p.contains("job daily-sweep")
+                            && p.contains("needs `for_each: source`")),
+                        "{problems:?}"
+                    )
+                }
+                other => panic!("expected Invalid, got {other:?}"),
+            }
+        }
+        // for_each on an event does nothing, so it is not taken for the fix.
+        match sweep("[{ event: source.captured, for_each: source }]", listed) {
+            Err(ConfigError::Invalid(problems)) => assert!(
+                problems
+                    .iter()
+                    .any(|p| p.contains("for_each works only with a schedule")),
+                "{problems:?}"
+            ),
             other => panic!("expected Invalid, got {other:?}"),
         }
     }

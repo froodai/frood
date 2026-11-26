@@ -50,15 +50,14 @@ pub struct AgentSettings {
 /// Instructions of the standard `daily-sweep`, used unless the config gives its own.
 const DAILY_SWEEP: &str = include_str!("../../prompts/daily-sweep.md");
 
-/// What a standard agent job brings unless the config says otherwise.
+/// What a standard agent job brings unless the config says otherwise; its tools are
+/// `frood_config::standard_agent_tools`, which config validation reads too.
 struct Builtin {
     instructions: &'static str,
-    tools: &'static [&'static str],
 }
 
 const DAILY_SWEEP_BUILTIN: Builtin = Builtin {
     instructions: DAILY_SWEEP,
-    tools: &["frood", "source:${source}"],
 };
 
 /// Instructions of the standard `investigate`: context gathered before a person is told (N6).
@@ -66,7 +65,6 @@ const INVESTIGATE: &str = include_str!("../../prompts/investigate.md");
 
 const INVESTIGATE_BUILTIN: Builtin = Builtin {
     instructions: INVESTIGATE,
-    tools: &["frood"],
 };
 
 /// Instructions of the standard `write-digest`: the morning digest in plain words (docs/31).
@@ -74,7 +72,6 @@ const WRITE_DIGEST: &str = include_str!("../../prompts/write-digest.md");
 
 const WRITE_DIGEST_BUILTIN: Builtin = Builtin {
     instructions: WRITE_DIGEST,
-    tools: &[],
 };
 
 fn builtin(job: &str) -> Option<&'static Builtin> {
@@ -310,7 +307,8 @@ fn agent_settings(
         instructions,
         tools: job.tools.clone().unwrap_or_else(|| {
             builtin
-                .map_or(&["frood"][..], |b| b.tools)
+                .and_then(|_| frood_config::standard_agent_tools(name))
+                .unwrap_or(&["frood"])
                 .iter()
                 .map(|t| (*t).to_owned())
                 .collect()
