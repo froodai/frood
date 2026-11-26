@@ -294,12 +294,20 @@ impl Dispatch {
                 json!({ "id": line.ids[0], "kind": line.kind, "why": why, "title": line.title, "label": line.label, "link": line.link })
             })
             .collect();
+        let sources = self.ctx.sources.now();
         for run in failed.iter().take(LIST) {
             let already = important
                 .iter()
                 .any(|i| i["kind"] == "alert" && i["title"] == run.job.as_str());
             if !already {
-                important.push(json!({ "id": run.id, "kind": "run", "why": "failed", "title": run.job, "label": null, "link": null, "error": run.error }));
+                // A run that read a source names it: a sign-in that ran out is that source's.
+                let source =
+                    crate::sources::run_source(run).filter(|s| sources.contains_key(s.as_str()));
+                let title = match &source {
+                    Some(source) => format!("{} · {source}", run.job),
+                    None => run.job.clone(),
+                };
+                important.push(json!({ "id": run.id, "kind": "run", "why": "failed", "title": title, "source": source, "label": null, "link": null, "error": run.error }));
             }
         }
         // Due today, tomorrow or past come first among the due dates and count as important.

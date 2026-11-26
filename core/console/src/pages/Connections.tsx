@@ -30,11 +30,29 @@ type Connection = {
   authoritative: boolean;
   has_token: boolean;
   signed_in: boolean;
+  needs_sign_in: boolean;
+  private: boolean;
 };
 type Tool = { name: string; description: string | null; read_only: boolean | null };
 
-/** Servers people connect most; any other MCP server works the same way. */
-type Entry = { id: string; name: string; server: string; placeholder?: string; help?: string; oauth?: boolean; scope?: Key };
+/**
+ * Servers people connect most; any other MCP server works the same way. `tools` are chosen
+ * first when the server has them, `match` finds the entry again for a source connected from it,
+ * and `private` starts the switch on: a search that answers with what the signed-in person
+ * may see is theirs alone.
+ */
+type Entry = {
+  id: string;
+  name: string;
+  server: string;
+  placeholder?: string;
+  help?: string;
+  oauth?: boolean;
+  scope?: Key;
+  tools?: string[];
+  match?: RegExp;
+  private?: boolean;
+};
 const CATALOG: Entry[] = [
   {
     id: "youtrack",
@@ -52,7 +70,25 @@ const CATALOG: Entry[] = [
   { id: "gitlab", name: "GitLab", server: "", placeholder: "https://gitlab.example.com/api/v4/mcp", oauth: true },
   { id: "slack", name: "Slack", server: "", placeholder: "https://…/mcp", oauth: true },
   { id: "drive", name: "Google Drive", server: "", placeholder: "https://…/mcp", oauth: true },
+  {
+    id: "glean",
+    name: "Glean",
+    server: "",
+    placeholder: "https://<instance>-be.glean.com/mcp/default",
+    help: "https://developers.glean.com/guides/mcp",
+    oauth: true,
+    scope: "connect.scope.glean",
+    // Search and reading documents; not the chat or agent tools, whose answers are no evidence.
+    tools: ["search", "read_document"],
+    match: /^https:\/\/[^/]+\.glean\.com\/mcp\//,
+    private: true,
+  },
 ];
+
+/** The catalog's entry a connected source came from, by its address. */
+function entryFor(server: string | null): Entry | undefined {
+  return server ? CATALOG.find((e) => e.match?.test(server)) : undefined;
+}
 
 type Open = null | { kind: "source"; name: string } | { kind: "module"; item: Health["modules"][number] } | { kind: "catalog" } | { kind: "new"; entry: Entry | null };
 
@@ -102,11 +138,15 @@ export function Connected() {
           return (
             <button key={s.name} type="button" className={card} onClick={() => setOpen({ kind: "source", name: s.name })}>
               <span className="flex items-center gap-2">
-                <Dot ok={read === null ? null : read < 2 * 86400} />
+                <Dot ok={s.needs_sign_in ? false : read === null ? null : read < 2 * 86400} />
                 <span className="flex-1 font-medium">{s.name}</span>
                 {s.from === "config" && <span className="rounded-md border px-1.5 text-[11px] text-muted-foreground">{t("connect.fromConfig")}</span>}
               </span>
-              <span className="text-sm text-muted-foreground">{read === null ? t("sources.never") : t("sources.read", { when: since(read) })}</span>
+              {s.needs_sign_in ? (
+                <span className="text-sm text-warning">{t("connect.signInAgain")}</span>
+              ) : (
+                <span className="text-sm text-muted-foreground">{read === null ? t("sources.never") : t("sources.read", { when: since(read) })}</span>
+              )}
             </button>
           );
         })}
@@ -225,11 +265,13 @@ function ConnectForm({
 }) {
   const { t } = useI18n();
   const client = useQueryClient();
+  const preset = entry ?? entryFor(existing?.server ?? null);
   const [name, setName] = useState(existing?.name ?? freeName(entry?.id ?? "mcp", taken));
   const [server, setServer] = useState(existing?.server ?? entry?.server ?? "");
   const [token, setToken] = useState("");
   const [scope, setScope] = useState(existing?.scope ?? (entry?.scope ? t(entry.scope) : t("connect.scope.default")));
   const [authoritative, setAuthoritative] = useState(existing?.authoritative ?? false);
+  const [kept, setKept] = useState(existing?.private ?? entry?.private ?? false);
   const [tools, setTools] = useState<Tool[] | null>(null);
   const [chosen, setChosen] = useState<Set<string>>(new Set(existing?.tools ?? []));
   const failed = (err: Error) => toast.error(t("inbox.failed", { error: err.message }));
@@ -246,9 +288,12 @@ function ConnectForm({
       }),
     onSuccess: (found) => {
       setTools(found.tools);
-      // Reading tools by default; all of them when the server says nothing about any.
+      // The catalog's tools when the server has them; else reading tools; all of them when the
+      // server says nothing about any.
       const said = found.tools.some((tool) => tool.read_only !== null);
-      if (!existing?.tools?.length) setChosen(new Set(found.tools.filter((tool) => (said ? tool.read_only : true)).map((tool) => tool.name)));
+      const suggested = found.tools.filter((tool) => preset?.tools?.includes(tool.name));
+      const defaults = suggested.length ? suggested : found.tools.filter((tool) => (said ? tool.read_only : true));
+      if (!existing?.tools?.length) setChosen(new Set(defaults.map((tool) => tool.name)));
       toast.success(t("connect.checked", { n: found.tools.length }));
     },
     onError: failed,
@@ -258,7 +303,7 @@ function ConnectForm({
     mutationFn: () =>
       api<{ authorize_url: string }>(`/v1/connections/${name}/sign-in`, {
         method: "POST",
-        json: { server: server.trim(), scope: scope.trim(), authoritative },
+        json: { server: server.trim(), scope: scope.trim(), authoritative, private: kept },
       }),
     onSuccess: ({ authorize_url }) => location.assign(authorize_url),
     onError: failed,
@@ -271,7 +316,7 @@ function ConnectForm({
     mutationFn: () =>
       api(`/v1/connections/${name}`, {
         method: "PUT",
-        json: { server: server.trim(), token: token.trim() || undefined, scope: scope.trim(), tools: [...chosen], authoritative },
+        json: { server: server.trim(), token: token.trim() || undefined, scope: scope.trim(), tools: [...chosen], authoritative, private: kept },
       }),
     onSuccess: () => {
       toast.success(t("connect.saved", { name }));
@@ -301,7 +346,8 @@ function ConnectForm({
       }}
     >
       <h2 className="text-lg font-semibold">{existing ? existing.name : (entry?.name ?? t("connect.any"))}</h2>
-      {existing?.signed_in && <p className="text-muted-foreground">{t("connect.signedIn")}</p>}
+      {existing?.signed_in && !existing.needs_sign_in && <p className="text-muted-foreground">{t("connect.signedIn")}</p>}
+      {existing?.needs_sign_in && <p className="rounded-md border border-warning/50 p-3 text-warning">{t("connect.signInLapsed")}</p>}
       {!vault && <p className="rounded-md border border-warning/50 p-3 text-warning">{t("connect.noVault")}</p>}
       {!existing && (
         <label className={field}>
@@ -316,9 +362,9 @@ function ConnectForm({
       <label className={field}>
         <span className="flex items-center justify-between gap-2">
           <span className={label}>{t("connect.token")}</span>
-          {entry?.help && (
-            <a href={entry.help} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs text-primary">
-              {t("connect.tokenWhere")} <ExternalLink className="size-3" />
+          {preset?.help && (
+            <a href={preset.help} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs text-primary">
+              {preset.oauth ? t("connect.howTo") : t("connect.tokenWhere")} <ExternalLink className="size-3" />
             </a>
           )}
         </span>
@@ -328,9 +374,9 @@ function ConnectForm({
         <Button type="button" variant="outline" disabled={!server.trim() || check.isPending} onClick={() => check.mutate()}>
           {check.isPending ? t("connect.checking") : t("connect.check")}
         </Button>
-        {!existing && (
-          <Button type="button" variant={entry?.oauth ? "default" : "outline"} disabled={!server.trim() || !name.trim() || signIn.isPending || !vault} onClick={() => signIn.mutate()}>
-            {t("connect.signIn")}
+        {(!existing || existing.signed_in) && (
+          <Button type="button" variant={entry?.oauth || existing?.needs_sign_in ? "default" : "outline"} disabled={!server.trim() || !name.trim() || signIn.isPending || !vault} onClick={() => signIn.mutate()}>
+            {existing ? t("connect.signInAgain") : t("connect.signIn")}
           </Button>
         )}
       </div>
@@ -376,6 +422,13 @@ function ConnectForm({
         <span className="flex flex-col gap-0.5">
           <span>{t("connect.authoritative")}</span>
           <span className="text-xs text-muted-foreground">{t("connect.authoritativeHint")}</span>
+        </span>
+      </label>
+      <label className="flex items-start gap-3">
+        <Switch checked={kept} onCheckedChange={setKept} className="mt-0.5" />
+        <span className="flex flex-col gap-0.5">
+          <span>{t("connect.private")}</span>
+          <span className="text-xs text-muted-foreground">{t("connect.privateHint")}</span>
         </span>
       </label>
       <div className="flex flex-wrap gap-2">

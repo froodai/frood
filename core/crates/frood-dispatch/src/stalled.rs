@@ -60,7 +60,7 @@ fn is_scheduled(job: &JobSpec) -> bool {
 }
 
 /// Whether the error reads like a source refusing access: an HTTP 401 or 403, an expired
-/// token, a refusal.
+/// token, a refusal, a sign-in that ran out.
 fn refused(error: &str) -> bool {
     let lower = error.to_lowercase();
     let status = |code: &str| {
@@ -83,6 +83,8 @@ fn refused(error: &str) -> bool {
             "token expired",
             "expired token",
             "authentication failed",
+            "invalid_grant",
+            "sign in again",
         ]
         .iter()
         .any(|needle| lower.contains(needle))
@@ -149,11 +151,9 @@ impl Dispatch {
         // A cancelled pass did not get through either.
         if let Some(failed) = latest.iter().find(|r| r.status != "succeeded") {
             let error = failed.error.as_deref().unwrap_or_default();
-            let named = failed
-                .subject
-                .as_deref()
-                .filter(|s| sources.contains_key(*s))
-                .map(str::to_owned)
+            let named = crate::sources::run_source(failed)
+                .or_else(|| failed.subject.clone())
+                .filter(|s| sources.contains_key(s.as_str()))
                 .or_else(|| {
                     let lower = error.to_lowercase();
                     sources
@@ -227,6 +227,9 @@ mod tests {
         assert!(refused("youtrack: HTTP 403 Forbidden"));
         assert!(refused("request failed with status 401"));
         assert!(refused("Invalid_Token: the token has expired"));
+        assert!(refused(
+            "source search: the sign-in ran out; sign in again in the console, on the Sources page"
+        ));
         assert!(!refused("timed out after 3000 ms"));
         assert!(!refused("exit code 14031"));
     }

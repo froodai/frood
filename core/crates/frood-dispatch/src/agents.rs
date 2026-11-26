@@ -42,6 +42,8 @@ struct SourceBrief<'a> {
     name: &'a str,
     scope: Option<&'a Value>,
     since: Option<chrono::DateTime<Utc>>,
+    /// Whose source it is: the one person of a private source, whose sign-in it reads with.
+    person: Option<String>,
 }
 
 /// The first message of a run: what it was started for.
@@ -61,6 +63,12 @@ fn first_prompt(spec: &JobSpec, run: &Run, source: Option<SourceBrief<'_>>) -> S
         ));
         if let Some(scope) = source.scope {
             prompt.push_str(&format!("\nWhat to read there: {scope}"));
+        }
+        if let Some(person) = &source.person {
+            prompt.push_str(&format!(
+                "\nThe source is private to {person}: it answers with what they may see, and \
+                 the sweep is about them, their work and where they are mentioned."
+            ));
         }
         match source.since {
             Some(since) => prompt.push_str(&format!(
@@ -116,10 +124,21 @@ impl Ctx {
                     spec.name
                 ))
             })?;
-            let source = self
-                .signed(source.clone())
-                .await
-                .map_err(|e| JobError::transient(format!("source {name}: {e}")))?;
+            // What a private source gives reaches its one person only (docs/34 §6).
+            if source.private {
+                self.private_owner()
+                    .await
+                    .map_err(|why| JobError::permanent(format!("source {name}: {why}")))?;
+            }
+            let source = self.signed(source.clone()).await.map_err(|e| match e {
+                // Retrying cannot help until the person signs in again.
+                crate::connections::SignedError::SignInAgain(why) => {
+                    JobError::permanent(format!("source {name}: {why}"))
+                }
+                crate::connections::SignedError::Other(why) => {
+                    JobError::transient(format!("source {name}: {why}"))
+                }
+            })?;
             servers.push(sources::mcp_server(name, &source));
         }
         Ok(Value::Array(servers))
@@ -238,10 +257,15 @@ pub(crate) async fn start_or_resume(
             None => None,
         };
         let known = ctx.sources.now();
+        let person = match source.as_deref().and_then(|name| known.get(name)) {
+            Some(s) if s.private => ctx.private_owner().await.ok(),
+            _ => None,
+        };
         let brief = source.as_deref().map(|name| SourceBrief {
             name,
             scope: known.get(name).and_then(|s| s.scope.as_ref()),
             since,
+            person,
         });
         body["op"] = json!("start");
         body["prompt"] = json!(first_prompt(spec, run, brief));

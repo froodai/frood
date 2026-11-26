@@ -176,6 +176,10 @@ pub struct Connection {
     pub has_token: bool,
     /// Connected by signing in (OAuth) rather than with a token.
     pub signed_in: bool,
+    /// The sign-in ran out and could not be refreshed: the person must sign in again.
+    pub needs_sign_in: bool,
+    /// Kept to the one person of the installation (`private`).
+    pub private: bool,
 }
 
 /// What a person sets for a source in the console.
@@ -197,6 +201,9 @@ pub struct NewConnection {
     pub tools: Option<Vec<String>>,
     #[serde(default)]
     pub authoritative: bool,
+    /// Kept to the one person of the installation (`private`).
+    #[serde(default)]
+    pub private: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -224,6 +231,8 @@ pub struct SignInSettings {
     pub scope: Option<String>,
     #[serde(default)]
     pub authoritative: bool,
+    #[serde(default)]
+    pub private: bool,
 }
 
 const SECRET_REF: &str = "${vault:";
@@ -316,6 +325,8 @@ impl Dispatch {
             authoritative: source.authoritative,
             has_token: !source.headers.is_empty(),
             signed_in: source.headers.values().any(|v| v.contains(OAUTH_REF)),
+            needs_sign_in: false,
+            private: source.private,
         };
         let mut out: Vec<Connection> = self
             .ctx
@@ -330,6 +341,9 @@ impl Dispatch {
                 .filter(|(name, _)| !self.ctx.config_sources.contains_key(*name))
                 .map(|(name, source)| view(name, source, "console")),
         );
+        for connection in out.iter_mut().filter(|c| c.signed_in) {
+            connection.needs_sign_in = self.ctx.needs_sign_in(&vault_name(&connection.name)).await;
+        }
         Ok(out)
     }
 
@@ -356,6 +370,9 @@ impl Dispatch {
             return Err(ConnectError::Invalid(format!(
                 "{server:?} is not an http or https address"
             )));
+        }
+        if input.private {
+            self.ctx.private_for(actor).await?;
         }
         let (_, mut overlay) = self.overlay().await?;
         let previous = overlay.sources.get(name).cloned();
@@ -408,6 +425,7 @@ impl Dispatch {
             retain: None,
             authoritative: input.authoritative,
             tools: input.tools.filter(|t| !t.is_empty()),
+            private: input.private,
         };
         overlay.sources.insert(name.to_owned(), source);
         let revision = record(&mut tx, actor, &overlay, &format!("connected {name}")).await?;
@@ -445,7 +463,7 @@ impl Dispatch {
     /// agents and checks connect with.
     pub async fn signed_source(&self, name: &str) -> Option<Result<Source, String>> {
         let source = self.ctx.sources.now().get(name).cloned()?;
-        Some(self.ctx.signed(source).await)
+        Some(self.ctx.signed(source).await.map_err(|e| e.to_string()))
     }
 
     /// Starts signing in to an MCP server (OAuth): registers Frood with its authorization
@@ -470,6 +488,9 @@ impl Dispatch {
         if !self.ctx.vault.is_open() {
             return Err(ConnectError::NoVault);
         }
+        if settings.private {
+            self.ctx.private_for(actor).await?;
+        }
         let server = settings.server.trim().to_owned();
         let discovered = crate::oauth::discover(&server)
             .await
@@ -489,7 +510,6 @@ impl Dispatch {
             &discovered,
             &client_id,
             client_secret,
-            &server,
             redirect_uri,
             &state,
         )
@@ -576,6 +596,7 @@ impl Dispatch {
             authoritative: settings.authoritative,
             // No tools until a person chooses them, unless they had chosen before.
             tools: Some(previous.and_then(|p| p.tools).unwrap_or_default()),
+            private: settings.private,
         };
         overlay.sources.insert(name.clone(), source);
         record(&mut tx, &actor, &overlay, &format!("signed in to {name}")).await?;
@@ -752,16 +773,37 @@ impl Dispatch {
     }
 }
 
+/// Why a source's sign-in gave no access token.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SignedError {
+    /// The server refused the refresh, or there was nothing to refresh with: only a new
+    /// sign-in in the console helps.
+    SignInAgain(String),
+    /// The sign-in could not be read or refreshed now; a later try may work.
+    Other(String),
+}
+
+impl std::fmt::Display for SignedError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SignInAgain(why) | Self::Other(why) => f.write_str(why),
+        }
+    }
+}
+
+/// What a run and the console say when a sign-in ran out.
+const SIGN_IN_AGAIN: &str = "sign in again in the console, on the Sources page";
+
 impl crate::Ctx {
     /// The source with each sign-in's access token in place: a token that runs out is
     /// refreshed first, and the new one sealed again.
-    pub(crate) async fn signed(&self, mut source: Source) -> Result<Source, String> {
+    pub(crate) async fn signed(&self, mut source: Source) -> Result<Source, SignedError> {
         for value in source.headers.values_mut() {
             while let Some(start) = value.find(OAUTH_REF) {
                 let end = start
-                    + value[start..]
-                        .find('}')
-                        .ok_or("a header has an unclosed ${oauth:")?;
+                    + value[start..].find('}').ok_or_else(|| {
+                        SignedError::Other("a header has an unclosed ${oauth:".to_owned())
+                    })?;
                 let name = value[start + OAUTH_REF.len()..end].to_owned();
                 let token = self.access_token(&name).await?;
                 value.replace_range(start..=end, &token);
@@ -770,30 +812,163 @@ impl crate::Ctx {
         Ok(source)
     }
 
-    async fn access_token(&self, name: &str) -> Result<String, String> {
+    fn open_grant(&self, name: &str, sealed: &[u8]) -> Result<crate::oauth::Grant, SignedError> {
+        let plain = self.vault.open(sealed).map_err(SignedError::Other)?;
+        serde_json::from_str(&plain).map_err(|_| {
+            SignedError::SignInAgain(format!("the sign-in {name} is unreadable; {SIGN_IN_AGAIN}"))
+        })
+    }
+
+    /// The sign-in's access token, refreshed when it runs out. One refresh at a time: a
+    /// server that rotates refresh tokens takes each one once, and a second refresh with the
+    /// same token would end the sign-in.
+    async fn access_token(&self, name: &str) -> Result<String, SignedError> {
+        let db = |e: sqlx::Error| SignedError::Other(e.to_string());
+        let lapsed = || SignedError::SignInAgain(format!("the sign-in ran out; {SIGN_IN_AGAIN}"));
         let sealed: Vec<u8> = sqlx::query_scalar("SELECT sealed FROM vault WHERE name = $1")
             .bind(name)
             .fetch_optional(&self.pool)
             .await
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| format!("no sign-in {name}"))?;
-        let grant: crate::oauth::Grant = serde_json::from_str(&self.vault.open(&sealed)?)
-            .map_err(|_| format!("the sign-in {name} is unreadable; sign in again"))?;
-        if !grant.stale(chrono::Utc::now()) {
+            .map_err(db)?
+            .ok_or_else(|| {
+                SignedError::SignInAgain(format!("no sign-in {name}; {SIGN_IN_AGAIN}"))
+            })?;
+        let grant = self.open_grant(name, &sealed)?;
+        let now = chrono::Utc::now();
+        if grant.lapsed_at.is_some() {
+            return Err(lapsed());
+        }
+        if !grant.stale(now) {
             return Ok(grant.access_token);
         }
-        let fresh = crate::oauth::refresh(&grant).await?;
+        let mut tx = self.pool.begin().await.map_err(db)?;
+        let sealed: Vec<u8> =
+            sqlx::query_scalar("SELECT sealed FROM vault WHERE name = $1 FOR UPDATE")
+                .bind(name)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(db)?
+                .ok_or_else(|| {
+                    SignedError::SignInAgain(format!("no sign-in {name}; {SIGN_IN_AGAIN}"))
+                })?;
+        let mut grant = self.open_grant(name, &sealed)?;
+        // Another use refreshed it while this one waited.
+        if grant.lapsed_at.is_some() {
+            return Err(lapsed());
+        }
+        if !grant.stale(now) {
+            return Ok(grant.access_token);
+        }
+        let (kept, outcome) = match crate::oauth::refresh(&grant).await {
+            Ok(fresh) => {
+                let token = fresh.access_token.clone();
+                (fresh, Ok(token))
+            }
+            Err(crate::oauth::RefreshError::Lapsed(why)) => {
+                tracing::warn!(sign_in = %name, error = %why, "a sign-in ran out: the person must sign in again");
+                grant.lapsed_at = Some(now);
+                (
+                    grant,
+                    Err(SignedError::SignInAgain(format!(
+                        "the sign-in ran out ({why}); {SIGN_IN_AGAIN}"
+                    ))),
+                )
+            }
+            Err(crate::oauth::RefreshError::Failed(why)) => {
+                return Err(SignedError::Other(why));
+            }
+        };
         let sealed = self
             .vault
-            .seal(&serde_json::to_string(&fresh).unwrap_or_default())
-            .map_err(|e| e.to_string())?;
+            .seal(&serde_json::to_string(&kept).unwrap_or_default())
+            .map_err(|e| SignedError::Other(e.to_string()))?;
         sqlx::query("UPDATE vault SET sealed = $2, updated_at = now() WHERE name = $1")
             .bind(name)
             .bind(&sealed)
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await
-            .map_err(|e| e.to_string())?;
-        Ok(fresh.access_token)
+            .map_err(db)?;
+        tx.commit().await.map_err(db)?;
+        outcome
+    }
+
+    /// The one person what comes from a private source may reach, after checking that nobody
+    /// else can read this installation: everyone who signs in sees all knowledge (D9″), so
+    /// only that person may sign in, and nobody else may still hold a token or a linked chat.
+    pub(crate) async fn private_owner(&self) -> Result<String, String> {
+        let settings = self.auth.settings();
+        let owner = match (settings.allow.as_slice(), settings.allow_domains.is_empty()) {
+            ([only], true) => only.trim().to_lowercase(),
+            _ => {
+                return Err(
+                    "it is private, but more than one person may sign in to this \
+                     installation, and everyone sees all knowledge; let only its owner in \
+                     (auth.allow: [their email], no allow_domains)"
+                        .to_owned(),
+                );
+            }
+        };
+        let others: Vec<String> = sqlx::query_scalar(
+            "SELECT u.email FROM users u WHERE u.email <> $1 AND ( \
+               EXISTS (SELECT 1 FROM tokens t WHERE t.user_id = u.id AND t.revoked_at IS NULL \
+                       AND (t.expires_at IS NULL OR t.expires_at > now())) \
+               OR EXISTS (SELECT 1 FROM channel_links c WHERE c.user_id = u.id)) \
+             ORDER BY u.email LIMIT 3",
+        )
+        .bind(&owner)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| e.to_string())?;
+        if !others.is_empty() {
+            return Err(format!(
+                "it is private to {owner}, but {} can still read this installation; revoke \
+                 their tokens and unlink their chats first",
+                others.join(", ")
+            ));
+        }
+        Ok(owner)
+    }
+
+    /// A person marks a source private: it must be theirs to keep, in an installation only
+    /// they read.
+    async fn private_for(&self, actor: &str) -> Result<String, ConnectError> {
+        let owner = self.private_owner().await.map_err(|why| {
+            ConnectError::Invalid(format!("this source cannot be private: {why}"))
+        })?;
+        let person = actor
+            .strip_prefix("user:")
+            .and_then(|rest| rest.split('/').next())
+            .and_then(|id| uuid::Uuid::parse_str(id).ok());
+        let email = match person {
+            Some(id) => self.auth.user_email(id).await.ok(),
+            None => None,
+        };
+        if email.as_deref() != Some(owner.as_str()) {
+            return Err(ConnectError::Invalid(format!(
+                "a private source is kept for {owner}; only they may connect it"
+            )));
+        }
+        Ok(owner)
+    }
+
+    /// Whether a sign-in needs the person again: it ran out with nothing to refresh it, or
+    /// the server refused the refresh.
+    pub(crate) async fn needs_sign_in(&self, name: &str) -> bool {
+        let sealed: Option<Vec<u8>> =
+            sqlx::query_scalar("SELECT sealed FROM vault WHERE name = $1")
+                .bind(name)
+                .fetch_optional(&self.pool)
+                .await
+                .ok()
+                .flatten();
+        match sealed {
+            None => true,
+            Some(sealed) => match self.open_grant(name, &sealed) {
+                Ok(grant) => grant.needs_sign_in(chrono::Utc::now()),
+                Err(SignedError::SignInAgain(_)) => true,
+                Err(SignedError::Other(_)) => false,
+            },
+        }
     }
 }
 

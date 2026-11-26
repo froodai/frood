@@ -168,6 +168,10 @@ enum Command {
     Export {
         /// The folder to create; it must not exist or be empty.
         dir: PathBuf,
+        /// Export also when a source is private: the folder then holds what came from it,
+        /// which is for its one person only.
+        #[arg(long)]
+        include_private: bool,
     },
     /// Config utilities.
     Config {
@@ -284,7 +288,10 @@ async fn main() -> ExitCode {
             follow,
             lines,
         } => lifecycle::logs(&paths, service.as_deref(), follow, lines).await,
-        Command::Export { dir } => lifecycle::export(&paths, &dir).await,
+        Command::Export {
+            dir,
+            include_private,
+        } => lifecycle::export(&paths, &dir, include_private).await,
         Command::Backup {
             command: BackupCommand::Key { out },
         } => recovery::key(out.as_deref()),

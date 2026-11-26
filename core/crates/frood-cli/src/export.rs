@@ -93,6 +93,38 @@ const TABLES: &[Table] = &[
     },
 ];
 
+/// Sources marked `private`: frood.yaml's and the console's.
+pub async fn private_sources(
+    pool: &PgPool,
+    config: &frood_config::Config,
+) -> anyhow::Result<Vec<String>> {
+    let mut names: Vec<String> = config
+        .sources
+        .iter()
+        .filter(|(_, s)| s.private)
+        .map(|(name, _)| name.clone())
+        .collect();
+    let overlay: Option<serde_json::Value> =
+        sqlx::query_scalar("SELECT data FROM config_overlay ORDER BY revision DESC LIMIT 1")
+            .fetch_optional(pool)
+            .await?;
+    if let Some(sources) = overlay
+        .as_ref()
+        .and_then(|o| o.get("sources"))
+        .and_then(|s| s.as_object())
+    {
+        for (name, source) in sources {
+            if source.get("private").and_then(serde_json::Value::as_bool) == Some(true)
+                && !names.contains(name)
+            {
+                names.push(name.clone());
+            }
+        }
+    }
+    names.sort();
+    Ok(names)
+}
+
 /// What an export holds, by file.
 pub struct Exported {
     pub counts: BTreeMap<&'static str, usize>,

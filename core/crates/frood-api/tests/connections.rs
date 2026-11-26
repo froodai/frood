@@ -316,12 +316,12 @@ async fn fake_oauth_mcp() -> String {
                     let challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(sha2::Sha256::digest(verifier.as_bytes()));
                     assert_eq!(Some(challenge), s.lock().unwrap().challenge.clone(), "PKCE");
                     assert_eq!(f["code"], "code-1");
-                    axum::Json(json!({ "access_token": "access-1", "refresh_token": "refresh-1", "expires_in": 1, "token_type": "Bearer" }))
+                    axum::Json(json!({ "access_token": "access-1", "refresh_token": "refresh-1", "expires_in": 1, "token_type": "Bearer" })).into_response()
                 }
-                _ => {
-                    assert_eq!(f["refresh_token"], "refresh-1");
-                    axum::Json(json!({ "access_token": "access-2", "expires_in": 3600, "token_type": "Bearer" }))
+                _ if f["refresh_token"] == "refresh-1" => {
+                    axum::Json(json!({ "access_token": "access-2", "expires_in": 3600, "token_type": "Bearer" })).into_response()
                 }
+                _ => (StatusCode::BAD_REQUEST, axum::Json(json!({ "error": "invalid_grant" }))).into_response(),
             }
         }))
         .with_state(shared);
@@ -433,6 +433,48 @@ async fn a_source_connects_by_signing_in() {
     .await;
     assert_eq!(status, StatusCode::OK, "{checked}");
     assert_eq!(checked["tools"][0]["name"], "search_pages");
+
+    assert_eq!(listed["sources"][0]["needs_sign_in"], false);
+
+    // A month later the server no longer takes the refresh token: the source says to sign in
+    // again, and a run is told so instead of retrying.
+    {
+        let identity: age::x25519::Identity = key.parse().unwrap();
+        let sealed: Vec<u8> =
+            frood_store::sqlx::query_scalar("SELECT sealed FROM vault WHERE name = 'source.notes'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let plain = String::from_utf8(age::decrypt(&identity, &sealed).unwrap()).unwrap();
+        let mut grant: Value = serde_json::from_str(&plain).unwrap();
+        grant["expires_at"] = json!("2026-01-01T00:00:00Z");
+        grant["refresh_token"] = json!("refresh-revoked");
+        let resealed = age::encrypt(&identity.to_public(), grant.to_string().as_bytes()).unwrap();
+        frood_store::sqlx::query("UPDATE vault SET sealed = $1 WHERE name = 'source.notes'")
+            .bind(&resealed)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    let lapsed = dispatch.signed_source("notes").await.unwrap().unwrap_err();
+    assert!(lapsed.contains("sign in again"), "{lapsed}");
+    let (_, listed) = call(&app, "GET", "/v1/connections", &admin, None).await;
+    assert_eq!(listed["sources"][0]["needs_sign_in"], true, "{listed}");
+
+    // Private only where one person reads the installation; this one lets in nobody by name.
+    let (status, refused) = call(
+        &app,
+        "PUT",
+        "/v1/connections/notes-private",
+        &admin,
+        Some(json!({ "server": server, "token": "t", "private": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert!(
+        refused.to_string().contains("cannot be private"),
+        "{refused}"
+    );
 
     // A return with a state nobody started.
     let request = Request::builder()

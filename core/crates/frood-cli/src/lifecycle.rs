@@ -356,11 +356,27 @@ fn tunnel_hint(loaded: &Loaded) -> Option<String> {
     })
 }
 
-pub async fn export(paths: &Paths, dir: &std::path::Path) -> anyhow::Result<()> {
+pub async fn export(
+    paths: &Paths,
+    dir: &std::path::Path,
+    include_private: bool,
+) -> anyhow::Result<()> {
     let loaded = paths.load()?;
     let pool = frood_store::connect(&loaded.config.storage.url, Duration::from_secs(5))
         .await
         .context("the database is not reachable; run `frood apply` first")?;
+    // What came from a private source is for its one person: an export is a folder that can
+    // be handed on, so it takes their word.
+    let private = crate::export::private_sources(&pool, &loaded.config).await?;
+    if !private.is_empty() && !include_private {
+        anyhow::bail!(
+            "private sources: {}. What came from them is in the knowledge and is for one person \
+             only; run `frood export --include-private {}` to export it for yourself, and keep \
+             the folder to yourself",
+            private.join(", "),
+            dir.display()
+        );
+    }
     let objects = frood_api::files_on_host(&loaded.config, &loaded.base_dir)
         .map_err(|e| anyhow::anyhow!("the files store: {e}"))?;
     let exported =

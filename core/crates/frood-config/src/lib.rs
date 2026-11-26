@@ -780,6 +780,13 @@ fn validate_work(config: &Config, problems: &mut Vec<String>) {
                 "source {name}: retain is excerpts or full, not {retain:?}"
             ));
         }
+        if source.private && sole_person(&config.auth).is_none() {
+            problems.push(format!(
+                "source {name} is private: what comes from it is for one person, and everyone who \
+                 signs in sees all knowledge; let only that person in (auth.allow: [their email], \
+                 no allow_domains)"
+            ));
+        }
     }
     validate_attention(config, problems);
     if let Some(embeddings) = &config.search.embeddings {
@@ -1060,6 +1067,15 @@ fn http_host(url: &str) -> Option<url::Host<String>> {
         return None;
     }
     parsed.host().map(|host| host.to_owned())
+}
+
+/// The one person an installation lets in, when it lets in only one: `auth.allow` names one
+/// email and no domain is allowed. A private source needs it.
+pub fn sole_person(auth: &Auth) -> Option<String> {
+    match (auth.allow.as_slice(), auth.allow_domains.is_empty()) {
+        ([only], true) => Some(only.trim().to_lowercase()),
+        _ => None,
+    }
 }
 
 /// Plain HTTP to a loopback address or to a service inside the deployment: a host name without
@@ -2006,5 +2022,37 @@ jobs:
         assert!(problems(&with("http://work.example.com")).contains("link.url"));
         assert!(!problems(&with("https://work.example.com")).contains("link.url"));
         assert!(!problems(&with("http://frood.work.svc:8080")).contains("link.url"));
+    }
+
+    #[test]
+    fn a_private_source_needs_an_installation_of_one_person() {
+        let problems = |raw: &str| match parse(raw, &secrets()) {
+            Err(ConfigError::Invalid(problems)) => problems.join("\n"),
+            Err(other) => panic!("expected problems, got {other:?}"),
+            Ok(_) => String::new(),
+        };
+        let with = |allow: &str| {
+            template_for(ServerPlacement::Host).replace(
+                "  allow: []                  # exact addresses, e.g. [you@example.com]\n",
+                &format!("{allow}\n"),
+            ) + "sources:\n  search:\n    uses: mcp\n    server: https://search.example.com/mcp/default\n    private: true\n"
+        };
+        let one = with("  allow: [me@example.com]");
+        assert!(!problems(&one).contains("private"), "{}", problems(&one));
+        assert!(
+            problems(&with("  allow: [me@example.com, you@example.com]"))
+                .contains("source search is private")
+        );
+        assert!(
+            problems(&with(
+                "  allow: [me@example.com]\n  allow_domains: [example.com]"
+            ))
+            .contains("source search is private")
+        );
+        let auth = Auth {
+            allow: vec![" Me@Example.com".to_owned()],
+            ..Auth::default()
+        };
+        assert_eq!(sole_person(&auth).as_deref(), Some("me@example.com"));
     }
 }

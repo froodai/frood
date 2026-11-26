@@ -866,6 +866,12 @@ pub struct Source {
     /// tools for a source the agent must not change.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<String>>,
+    /// What comes from here is for one person only: the person whose sign-in or token it
+    /// reads with, e.g. a search that answers with what that person may see. Every person of
+    /// an installation sees all of its knowledge, so a private source works only in an
+    /// installation of one person: `auth.allow` names only them, and `allow_domains` is empty.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub private: bool,
 }
 
 /// Inbox and notifications (docs/15, docs/22).
