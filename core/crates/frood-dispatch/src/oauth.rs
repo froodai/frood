@@ -134,9 +134,39 @@ pub struct Discovered {
     pub resource: String,
 }
 
-/// The same address, but for a trailing slash.
-fn same_address(a: &str, b: &str) -> bool {
-    a.trim_end_matches('/') == b.trim_end_matches('/')
+/// The same address: equal but for a trailing slash, the case of the scheme and host, and a
+/// port the scheme implies. Anything else differs, the path's case included.
+pub fn same_address(a: &str, b: &str) -> bool {
+    match (url::Url::parse(a.trim()), url::Url::parse(b.trim())) {
+        (Ok(a), Ok(b)) => {
+            a.scheme() == b.scheme()
+                && a.host_str() == b.host_str()
+                && a.port_or_known_default() == b.port_or_known_default()
+                && a.path().trim_end_matches('/') == b.path().trim_end_matches('/')
+                && a.query() == b.query()
+        }
+        _ => a.trim().trim_end_matches('/') == b.trim().trim_end_matches('/'),
+    }
+}
+
+/// Where an authorization server's metadata may be, in the order the MCP authorization spec
+/// tries them. An issuer with a path has its metadata under that path only: the host's root
+/// documents belong to the host or another issuer on it, not to this one (RFC 8414 §3).
+fn authorization_server_places(issuer: &url::Url) -> Vec<String> {
+    let origin = issuer.origin().ascii_serialization();
+    let path = issuer.path().trim_end_matches('/');
+    if path.is_empty() {
+        return vec![
+            format!("{origin}/.well-known/oauth-authorization-server"),
+            format!("{origin}/.well-known/openid-configuration"),
+        ];
+    }
+    vec![
+        format!("{origin}/.well-known/oauth-authorization-server{path}"),
+        format!("{origin}/.well-known/openid-configuration{path}"),
+        // OpenID Connect appends its well-known part to an issuer with a path.
+        format!("{origin}{path}/.well-known/openid-configuration"),
+    ]
 }
 
 pub async fn discover(server: &str) -> Result<Discovered, String> {
@@ -201,16 +231,7 @@ pub async fn discover(server: &str) -> Result<Discovered, String> {
     let issuer = issuer.unwrap_or_else(|| url.origin().ascii_serialization());
     let issuer_url =
         url::Url::parse(&issuer).map_err(|_| format!("{issuer:?} is not an address"))?;
-    let mut places = well_known(&issuer_url, "oauth-authorization-server");
-    places.extend(well_known(&issuer_url, "openid-configuration"));
-    // OpenID Connect also appends its well-known part to an issuer with a path.
-    if !issuer_url.path().trim_matches('/').is_empty() {
-        places.push(format!(
-            "{}/.well-known/openid-configuration",
-            issuer.trim_end_matches('/')
-        ));
-    }
-    for place in places {
+    for place in authorization_server_places(&issuer_url) {
         let Some(meta) = get_json(&client, &place).await else {
             continue;
         };
@@ -504,6 +525,59 @@ mod tests {
             parameter("Bearer realm=x, scope=read", "scope").as_deref(),
             Some("read")
         );
+    }
+
+    #[test]
+    fn an_issuer_with_a_path_is_not_read_from_the_root() {
+        let at = |issuer: &str| authorization_server_places(&url::Url::parse(issuer).unwrap());
+        assert_eq!(
+            at("https://h.example/oauth/"),
+            [
+                "https://h.example/.well-known/oauth-authorization-server/oauth",
+                "https://h.example/.well-known/openid-configuration/oauth",
+                "https://h.example/oauth/.well-known/openid-configuration",
+            ]
+        );
+        assert_eq!(
+            at("https://h.example"),
+            [
+                "https://h.example/.well-known/oauth-authorization-server",
+                "https://h.example/.well-known/openid-configuration",
+            ]
+        );
+    }
+
+    #[test]
+    fn addresses_compare_as_addresses() {
+        assert!(same_address(
+            "https://h.example/mcp/",
+            "https://h.example/mcp"
+        ));
+        assert!(same_address(
+            "https://H.Example/mcp",
+            "https://h.example/mcp"
+        ));
+        assert!(same_address(
+            "https://h.example:443/mcp",
+            "https://h.example/mcp"
+        ));
+        assert!(!same_address(
+            "https://h.example/MCP",
+            "https://h.example/mcp"
+        ));
+        assert!(!same_address("https://h.example/mcp", "https://h.example/"));
+        assert!(!same_address(
+            "https://h.example/mcp",
+            "http://h.example/mcp"
+        ));
+        assert!(!same_address(
+            "https://h.example/mcp",
+            "https://h.example.evil/mcp"
+        ));
+        assert!(!same_address(
+            "https://h.example:8443/mcp",
+            "https://h.example/mcp"
+        ));
     }
 
     #[test]
