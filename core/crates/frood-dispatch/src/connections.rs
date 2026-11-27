@@ -411,7 +411,24 @@ impl Dispatch {
                     format!("{scheme}{SECRET_REF}{}}}", vault_name(name)),
                 )])
             }
-            None => previous.map(|p| p.headers).unwrap_or_default(),
+            None => match previous {
+                // A sign-in is for its server: a new address needs a new sign-in, or the
+                // tokens would go to it.
+                Some(previous)
+                    if previous.headers.values().any(|v| v.contains(OAUTH_REF))
+                        && !previous
+                            .server
+                            .as_deref()
+                            .is_some_and(|old| crate::oauth::same_address(old, &server)) =>
+                {
+                    return Err(ConnectError::Invalid(format!(
+                        "{name} is signed in to {}; sign in again to connect it to {server}",
+                        previous.server.as_deref().unwrap_or("another server")
+                    )));
+                }
+                Some(previous) => previous.headers,
+                None => BTreeMap::new(),
+            },
         };
         let source = Source {
             uses: "mcp".to_owned(),
@@ -798,6 +815,7 @@ impl crate::Ctx {
     /// The source with each sign-in's access token in place: a token that runs out is
     /// refreshed first, and the new one sealed again.
     pub(crate) async fn signed(&self, mut source: Source) -> Result<Source, SignedError> {
+        let server = source.server.clone();
         for value in source.headers.values_mut() {
             while let Some(start) = value.find(OAUTH_REF) {
                 let end = start
@@ -805,7 +823,7 @@ impl crate::Ctx {
                         SignedError::Other("a header has an unclosed ${oauth:".to_owned())
                     })?;
                 let name = value[start + OAUTH_REF.len()..end].to_owned();
-                let token = self.access_token(&name).await?;
+                let token = self.access_token(&name, server.as_deref()).await?;
                 value.replace_range(start..=end, &token);
             }
         }
@@ -822,7 +840,7 @@ impl crate::Ctx {
     /// The sign-in's access token, refreshed when it runs out. One refresh at a time: a
     /// server that rotates refresh tokens takes each one once, and a second refresh with the
     /// same token would end the sign-in.
-    async fn access_token(&self, name: &str) -> Result<String, SignedError> {
+    async fn access_token(&self, name: &str, server: Option<&str>) -> Result<String, SignedError> {
         let db = |e: sqlx::Error| SignedError::Other(e.to_string());
         let lapsed = || SignedError::SignInAgain(format!("the sign-in ran out; {SIGN_IN_AGAIN}"));
         let sealed: Vec<u8> = sqlx::query_scalar("SELECT sealed FROM vault WHERE name = $1")
@@ -834,6 +852,16 @@ impl crate::Ctx {
                 SignedError::SignInAgain(format!("no sign-in {name}; {SIGN_IN_AGAIN}"))
             })?;
         let grant = self.open_grant(name, &sealed)?;
+        // A sign-in's tokens are for the server it signed in to (`resource`): never sent to
+        // another address the source was moved to.
+        if let Some(server) = server
+            && !crate::oauth::same_address(&grant.resource, server)
+        {
+            return Err(SignedError::SignInAgain(format!(
+                "the sign-in {name} is for {}, not {server}; {SIGN_IN_AGAIN}",
+                grant.resource
+            )));
+        }
         let now = chrono::Utc::now();
         if grant.lapsed_at.is_some() {
             return Err(lapsed());

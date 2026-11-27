@@ -119,11 +119,21 @@ async fn check(
             if let Some(name) = body.name.as_deref()
                 && let Some(source) = state.dispatch.signed_source(name).await
             {
-                headers = source
-                    .map_err(|e| {
-                        ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "check-failed", e)
-                    })?
-                    .headers;
+                let source = source.map_err(|e| {
+                    ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "check-failed", e)
+                })?;
+                // The saved token or sign-in goes only to the server it was saved for.
+                let saved_for = source.server.as_deref().unwrap_or_default();
+                if !frood_dispatch::oauth::same_address(saved_for, body.server.trim()) {
+                    return Err(ApiError::new(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        "check-failed",
+                        format!(
+                            "the saved token of {name} is for {saved_for}; enter a token to check another address"
+                        ),
+                    ));
+                }
+                headers = source.headers;
             }
         }
     }

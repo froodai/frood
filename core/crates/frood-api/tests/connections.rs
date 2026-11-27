@@ -434,6 +434,30 @@ async fn a_source_connects_by_signing_in() {
     assert_eq!(status, StatusCode::OK, "{checked}");
     assert_eq!(checked["tools"][0]["name"], "search_pages");
 
+    // The sign-in's token goes only to its own server: not to another address checked with the
+    // source's name, and not to one the source is moved to.
+    let elsewhere = "https://elsewhere.example/mcp";
+    let (status, refused) = call(
+        &app,
+        "POST",
+        "/v1/connections/check",
+        &admin,
+        Some(json!({ "server": elsewhere, "name": "notes" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert!(refused.to_string().contains("enter a token"), "{refused}");
+    let (status, refused) = call(
+        &app,
+        "PUT",
+        "/v1/connections/notes",
+        &admin,
+        Some(json!({ "server": elsewhere, "scope": "Pages changed today" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert!(refused.to_string().contains("sign in again"), "{refused}");
+
     assert_eq!(listed["sources"][0]["needs_sign_in"], false);
 
     // A month later the server no longer takes the refresh token: the source says to sign in
