@@ -65,20 +65,38 @@ pub async fn plan(paths: &Paths) -> anyhow::Result<()> {
         }
     }
     match frood_store::connect(&loaded.config.storage.url, Duration::from_secs(2)).await {
-        Ok(pool) => match frood_store::last_config_revision(&pool).await {
-            Ok(Some(last)) if last.sha256 == loaded.sha256 => {
-                println!(
-                    "config: unchanged since revision #{} ({})",
-                    last.id, last.applied_at
+        Ok(pool) => {
+            // frood.yaml's private sources are checked as it is read; the console's are
+            // only in the database.
+            if frood_config::sole_person(&loaded.config.auth).is_none()
+                && let Ok(private) = crate::export::private_sources(&pool, &loaded.config).await
+                && !private.is_empty()
+            {
+                anyhow::bail!(
+                    "private sources connected in the console: {}. What comes from them is for \
+                     one person, and everyone who signs in sees all knowledge; let only that \
+                     person in (auth.allow: [their email], no allow_domains), or make them not \
+                     private in the console first",
+                    private.join(", ")
                 );
             }
-            Ok(Some(last)) => println!(
-                "config: changed; apply records a new revision (last: #{})",
-                last.id
-            ),
-            Ok(None) => println!("config: never applied; apply records revision #1"),
-            Err(_) => println!("config: database is up but not migrated yet; apply migrates it"),
-        },
+            match frood_store::last_config_revision(&pool).await {
+                Ok(Some(last)) if last.sha256 == loaded.sha256 => {
+                    println!(
+                        "config: unchanged since revision #{} ({})",
+                        last.id, last.applied_at
+                    );
+                }
+                Ok(Some(last)) => println!(
+                    "config: changed; apply records a new revision (last: #{})",
+                    last.id
+                ),
+                Ok(None) => println!("config: never applied; apply records revision #1"),
+                Err(_) => {
+                    println!("config: database is up but not migrated yet; apply migrates it")
+                }
+            }
+        }
         Err(_) => println!("config: database not reachable; apply starts it"),
     }
     Ok(())
