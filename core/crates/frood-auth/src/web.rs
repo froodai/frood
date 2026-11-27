@@ -351,12 +351,18 @@ impl Auth {
         else {
             return Ok(None);
         };
-        Ok(sqlx::query_scalar(
-            "SELECT user_id FROM sessions WHERE id_hash = $1 AND expires_at > now()",
+        let row: Option<(Uuid, String)> = sqlx::query_as(
+            "SELECT s.user_id, u.email FROM sessions s JOIN users u ON u.id = s.user_id \
+             WHERE s.id_hash = $1 AND s.expires_at > now()",
         )
         .bind(hash(&secret))
         .fetch_optional(self.pool())
-        .await?)
+        .await?;
+        // A session outlives a change of auth.allow: a person no longer allowed signs in
+        // again, and is refused there.
+        Ok(row
+            .filter(|(_, email)| self.is_allowed(email))
+            .map(|(id, _)| id))
     }
 
     /// Browser POSTs must come from this installation's own pages.

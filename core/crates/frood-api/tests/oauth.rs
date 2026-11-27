@@ -250,9 +250,14 @@ async fn setup_with(name: &str, idp: &Idp, deploy: &str) -> Option<(Router, Auth
     let pool = frood_store::testing::fresh_database(&url, name)
         .await
         .expect("test database");
+    Some(app_on(pool, idp, deploy, "alice@example.com"))
+}
+
+/// The installation on `pool`, letting `allow` in.
+fn app_on(pool: frood_store::sqlx::PgPool, idp: &Idp, deploy: &str, allow: &str) -> (Router, Auth) {
     let raw = format!(
         "version: 1\ninstallation: {{name: test}}\nstorage: {{uses: postgres, url: 'postgres://unused', objects: {{uses: database}}}}\n\
-         {deploy}\nauth:\n  allow: [alice@example.com]\n  providers:\n    - {{kind: oidc, id: corp, \
+         {deploy}\nauth:\n  allow: [{allow}]\n  providers:\n    - {{kind: oidc, id: corp, \
          label: Corp SSO, issuer: '{}', client_id: frood-test, client_secret: s3cret}}\n",
         idp.base
     );
@@ -264,7 +269,7 @@ async fn setup_with(name: &str, idp: &Idp, deploy: &str) -> Option<(Router, Auth
     .config;
     let auth = Auth::new(pool.clone(), AuthSettings::from_config(&config));
     let app = router(frood_api::assemble(&config, std::path::Path::new("."), pool, |_| None).state);
-    Some((app, auth))
+    (app, auth)
 }
 
 /// Runs the browser part: authorize → provider → callback → consent. Returns the code.
@@ -628,6 +633,66 @@ async fn people_outside_the_allow_list_cannot_sign_in() {
     .await;
     assert_eq!(reply.status, StatusCode::FORBIDDEN, "{}", reply.text());
     assert!(reply.header(header::SET_COOKIE).is_empty());
+}
+
+/// A browser session outlives a change of `auth.allow`: a person let out since signs in again,
+/// and is refused there, instead of going straight to consent with their old session.
+#[tokio::test]
+async fn a_session_ends_when_its_person_is_no_longer_allowed() {
+    let idp = Idp::start("alice@example.com").await;
+    let Some(url) = frood_store::testing::database_url() else {
+        eprintln!("FROOD_TEST_DATABASE_URL is not set; skipping");
+        return;
+    };
+    let pool = frood_store::testing::fresh_database(&url, "oauth_session_allow")
+        .await
+        .expect("test database");
+    let (app, _) = app_on(
+        pool.clone(),
+        &idp,
+        "deploy: {server: host}",
+        "alice@example.com",
+    );
+    let registration = json!({ "redirect_uris": [REDIRECT] });
+    let reply = send(
+        &app,
+        Request::post("/oauth/register")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(registration.to_string()))
+            .unwrap(),
+    )
+    .await;
+    let client_id = reply.json()["client_id"].as_str().unwrap().to_owned();
+    let (_, challenge) = pkce();
+    let authorize = format!(
+        "/oauth/authorize?response_type=code&client_id={client_id}&redirect_uri={REDIRECT}&code_challenge={challenge}&code_challenge_method=S256&state=s"
+    );
+    let reply = get_with(&app, &authorize, None).await;
+    let reply = get_with(&app, &path_and_query(&reply.location()), None).await;
+    let reply = get_with(&app, &path_and_query(&reply.location()), None).await;
+    let upstream = reply.location();
+    *idp.nonce.lock().unwrap() = Some(query(&upstream, "nonce"));
+    *idp.challenge.lock().unwrap() = Some(query(&upstream, "code_challenge"));
+    let reply = get_with(
+        &app,
+        &format!(
+            "/oauth/callback/corp?code=idp-code&state={}",
+            query(&upstream, "state")
+        ),
+        None,
+    )
+    .await;
+    assert!(reply.status.is_redirection(), "{}", reply.text());
+    let cookie = reply.header(header::SET_COOKIE);
+    let cookie = cookie.split(';').next().unwrap().to_owned();
+    // While allowed, the session goes straight to consent.
+    let reply = get_with(&app, &authorize, Some(&cookie)).await;
+    assert_eq!(reply.location().path(), "/oauth/consent");
+
+    // The installation now lets in only someone else: the old session counts for nothing.
+    let (app, _) = app_on(pool, &idp, "deploy: {server: host}", "bob@example.com");
+    let reply = get_with(&app, &authorize, Some(&cookie)).await;
+    assert_eq!(reply.location().path(), "/oauth/login", "{}", reply.text());
 }
 
 /// The admin panel the core serves signs in as the built-in client `frood-admin`, which may come
